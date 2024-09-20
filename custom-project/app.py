@@ -174,9 +174,7 @@ st.title('Demo: Custom Project Generator')
 
 # Input box for pasting content.
 st.markdown('### Input')
-sampleInput = """I want a basic project that teaches me how to do unsupervised machine clustering in a healthcare scenario. 
-I want a realistic project, with a dataset that is a little messy that I'll need to clean up to show I have data 
-wrangling skills."
+sampleInput = """I want a basic project that teaches me how to do unsupervised machine clustering in a healthcare scenario. I want a realistic project, with a dataset that is a little messy that I'll need to clean up to show I have data wrangling skills."
 """
 content = st.text_area('Input prompt and click "Generate Project"',sampleInput, height=300)
 
