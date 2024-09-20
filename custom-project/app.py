@@ -188,7 +188,7 @@ if st.button('Generate Project'):
 		response = chatgpt(message=prompt(content))
 
 		# Pretty formatting of results for output.
-		json_formatted_str = json.dumps(data, indent=4)
+		json_formatted_str = json.dumps(response, indent=4)
 
 		# Render output that was given.
 		st.markdown('### Output')
