@@ -24,7 +24,9 @@ def prompt(content):
          the project to cover the skills and scenarios they care about. The project files must be real -- you 
          can't just return a string value called 'dataset.csv', or whatever. You need to either link out to a 
          dataset that can be used on the web, or you need to provide the code that can generate the code you need 
-         to start - as well as some starter code with relevant hints, if needed, for how the learner should proceed."""},
+         to start - as well as some starter code with relevant hints, if needed, for how the learner should proceed.
+	 Also, try to make it a realistic sounding scenario -- make up a realistic company name and scenario for why this
+ 	 task / project is needed. Make it feel like the real world."""},
         {'role': 'user', 
          'content': f"""Create a project based on this criterion: {content}"""}
             ]
@@ -194,7 +196,7 @@ if st.button('Generate Project'):
 		st.code(json_formatted_str,language="json")
 
 		st.markdown('### Starter Code')
-		st.markdown(response['Asset']['Documentation'])
+		st.markdown(response['Asset'][0]['Documentation'])
 		st.code(response['Asset'][0]['Starter Code'])
 		st.markdown('### Data')
 		st.code(response['Asset'][0]['Data'])
