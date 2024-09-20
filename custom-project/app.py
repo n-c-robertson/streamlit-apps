@@ -193,11 +193,13 @@ if st.button('Generate Project'):
 
 		# Render output that was given.
 		st.markdown('### Output')
+		st.markdown(f'''**{response['Project Title']}**''')
+		st.markdown(response['Project Description'])
 		st.code(json_formatted_str,language="json")
 
 		st.markdown('### Starter Code')
-		st.markdown(response['Asset'][0]['Documentation'])
-		st.code(response['Asset'][0]['Starter Code'])
+		st.markdown(response['Assets'][0]['Documentation'])
+		st.code(response['Assets'][0]['Starter Code'])
 		st.markdown('### Data')
-		st.code(response['Asset'][0]['Data'])
+		st.code(response['Assets'][0]['Data'])
 		
