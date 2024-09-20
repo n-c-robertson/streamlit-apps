@@ -174,8 +174,7 @@ st.title('Demo: Custom Project Generator')
 
 # Input box for pasting content.
 st.markdown('### Input')
-sampleInput = """I want a basic project that teaches me how to do unsupervised machine clustering in a healthcare scenario. I want a realistic project, with a dataset that is a little messy that I'll need to clean up to show I have data wrangling skills."
-"""
+sampleInput = """I want a basic project that teaches me how to do unsupervised machine clustering in a healthcare scenario. I want a realistic project, with a dataset that is a little messy that I'll need to clean up to show I have data wrangling skills."""
 content = st.text_area('Input prompt and click "Generate Project"',sampleInput, height=300)
 
 # Button to trigger job.
@@ -193,3 +192,10 @@ if st.button('Generate Project'):
 		# Render output that was given.
 		st.markdown('### Output')
 		st.code(json_formatted_str,language="json")
+
+		st.markdown('### Starter Code')
+		st.markdown(response['Asset']['Documentation'])
+		st.code(response['Asset']['Starter Code'])
+		st.markdown('### Data')
+		st.code(response['Asset']['Data'])
+		
