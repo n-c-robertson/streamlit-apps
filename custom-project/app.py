@@ -195,7 +195,7 @@ if st.button('Generate Project'):
 
 		st.markdown('### Starter Code')
 		st.markdown(response['Asset']['Documentation'])
-		st.code(response['Asset']['Starter Code'])
+		st.code(response['Asset'][0]['Starter Code'])
 		st.markdown('### Data')
-		st.code(response['Asset']['Data'])
+		st.code(response['Asset'][0]['Data'])
 		
