@@ -151,34 +151,15 @@ def prompt(message):
          'content': f"""{message}"""}
             ]
 
-def promptGenerateHTML(html, data):
-    return [
-        {'role': 'system', 
-         'content': f"""prompt: You are a robot that generates flawless html. You receive inputs of existing html, as well as new data, and
-         you adapt the html with the data provided."""},
-        {'role': 'user', 
-         'content': f"""update this html with the data provided. Return ONLY the HTML code. HTML: {html}; Data: {data}"""}
-            ]
-
 # Fetching OpenAI's response.
 def chatgpt(message,format_,model='gpt-4o-2024-08-06'):
 
-        if format_==None:
-            # Update this to make it work.
-            result = client.chat.completions.create(
-                          model=model,
-                          messages=message)
-
-            content = result.choices[0].message.content
-            return content
-
-        else:
-            result = client.beta.chat.completions.parse(
+        result = client.beta.chat.completions.parse(
                       model=model,
                       messages=message,
                       response_format=format_)
 
-            content = result.choices[0].message.parsed
+        content = result.choices[0].message.parsed
 
         return content
 
@@ -265,13 +246,15 @@ def learning_plan_generator():
     if st.button("Generate Plan"):
         if learningRequirements and jobProfile:
             st.success("Plan generating! This will take about 30 seconds to load.")
-            # In a real-world scenario, this is where you'd send the data to the backend
+
+            # Create plan.
             plan = generateLearningPlan(learningRequirements, jobProfile)
 
+            # Data dictionary for reference.
             with st.expander('Expand to see underlying data structure...'):
                 st.write(plan)
 
-
+            # Basic formatted Learning Plans.
             st.title(plan['title'])
 
             st.subheader("Short Description")
