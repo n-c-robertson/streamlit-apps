@@ -18,6 +18,10 @@ from pydantic import BaseModel, Field
 from enum import Enum
 from typing import List, Optional, Literal
 
+# For narrowing down the catalog based on the query.
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
 # For chatting with OpenAI.
 import openai
 client = openai.OpenAI(api_key=st.secrets["OpenAI_key"])
@@ -45,15 +49,37 @@ def fetch_catalog():
             'catalog_url': convert_slug_to_url(result['slug']),
             'duration': convert_duration(result['duration']),
             'difficulty': result['difficulty'],
-            'title': result['title']
+            'title': result['title'],
+            'summary': result['summary'],
+            'skill_names': result['skill_names']
         } for result in catalog_results
     ]
 
-    # Problem to solve: too much content for OpenAI context. Need to
-    # filter it down.
-    return programs[:500]
+    # Return programs.
+    return programs
 
 programs = fetch_catalog()
+
+
+# RAG to limit down the catalog size by query relevance.
+
+def retrieve_matching_courses(query, programs=programs, top_n=50):
+    # Create a list of all course skills
+    summaries = [course['title'] + ' ' + course['summary'] + ' ' + ' '.join(course['skill_names']) for course in programs]
+    course_titles = [course['title'] for course in programs]
+
+    # Use TF-IDF vectorizer to vectorize query and course summaries
+    vectorizer = TfidfVectorizer(stop_words='english')
+    vectors = vectorizer.fit_transform([query] + summaries)
+    
+    # Compute cosine similarity between the query and all course summaries
+    cosine_similarities = cosine_similarity(vectors[0:1], vectors[1:]).flatten()
+    
+    # Get top N matching courses
+    matching_indices = np.argsort(cosine_similarities)[::-1][:top_n]
+    
+    return [course_titles[i] for i in matching_indices]
+
 
 # Specify data model for Learning Plans. This will be used to guide
 # OpenAI's response.
@@ -183,14 +209,20 @@ def chatgpt(message,format_,model='gpt-4o-2024-08-06'):
 
 
 # Generate learning plan.
-def generateLearningPlan(message, jobProfile):
-    
-    message = f"""Build a Udacity learning plan that meets the following requirements: {message}. Build someone for the following job profile: {jobProfile}.
-    ONLY use offerings in the catalog dataset, where you'll find relevant metadata to the model you need to grab. Catalog: {programs[:500]}/"""
-    myPrompt = prompt(message)
-    response = chatgpt(myPrompt, format_=learningPlan)
+def generateLearningPlan(message, jobProfile,programs=programs):
 
-    print(response)
+    # pre-filtering of programs.
+    with st.status("Prefiltering Catalog..."):
+        filtered_titles = retrieve_matching_courses(query=message)
+        filtered_programs = [p for p in programs if p['title'] in filtered_titles]
+    
+
+    with st.status("Building Learning Plan..."):
+
+        message = f"""Build a Udacity learning plan that meets the following requirements: {message}. Build someone for the following job profile: {jobProfile}.
+        ONLY use offerings in the catalog dataset, where you'll find relevant metadata to the model you need to grab. Catalog: {filtered_programs}/"""
+        myPrompt = prompt(message)
+        response = chatgpt(myPrompt, format_=learningPlan)
 
    # Manually convert the response object to a dictionary
     def requirement_to_dict(requirement):
@@ -246,7 +278,7 @@ def generateLearningPlan(message, jobProfile):
         "completion_requirements": [requirement_to_dict(req) for req in response.completion_requirements]
     }
 
-    return response_dict
+    return response_dict, filtered_titles
 
 
 
@@ -273,54 +305,78 @@ def learning_plan_generator():
     # Button to submit form
     if st.button("Generate Plan"):
         if learningRequirements and jobProfile:
-            st.success("Plan generating! This will take about 30 seconds to load.")
+            st.info("Plan generating! This will take about 30 seconds to load.")
 
             # Create plan.
-            plan = generateLearningPlan(learningRequirements, jobProfile)
+            plan, considered_titles = generateLearningPlan(learningRequirements, jobProfile)
 
-            # Data dictionary for reference.
+            # Some diagnostics for monitoring.
+            st.title('Success: Learning Plan generated.')
+            st.write('Expand these sections to see underlying performance, or scroll down to review the Learning Plan.')
+
             with st.expander('Expand to see underlying data structure...'):
                 st.write(plan)
+
+            with st.expander('Expand to see titles considered...'):
+                st.write(considered_titles)
 
             # Basic formatted Learning Plans.
             st.title(plan['title'])
 
-            st.subheader("Short Description")
-            st.write(plan['short_description'])
+            # Description section
+            st.markdown("### Short Description")
+            st.info(plan['short_description'])
 
-            st.subheader("Long Description")
+            st.markdown("### Long Description")
             st.write(plan['long_description'])
 
-            st.subheader("Solution Coverage")
-            st.write(plan['solution_coverage'])
-            
-            st.subheader("Solution Gaps")
-            st.write(plan['solution_gap'])
+            # Optional Solution Coverage and Gaps
+            if plan['solution_coverage']:
+                st.markdown("### Solution Coverage")
+                st.write(plan['solution_coverage'])
 
-            st.subheader("Prequisites")
-            st.write(plan['prerequisites'])
-            
-            st.subheader("Learning Plan Steps")
+            if plan['solution_gap']:
+                st.markdown("### Solution Gaps")
+                st.write(plan['solution_gap'])
+
+            # Optional Prerequisites
+            if plan['prerequisites']:
+                st.markdown("### Prerequisites")
+                st.write(plan['prerequisites'])
+
+            # Divider before Learning Plan Steps
+            st.divider()
+
+            # Learning Plan Steps
+            st.markdown("## Learning Plan Steps")
 
             for step in plan['steps']:
-                with st.expander(step['label']):
-                    st.write(f"**Duration:** {step['duration']}")
-                    st.write(f"**Description:** {step['short_description']}")
-                    st.write(f"**Skills:** {step['skills']}")
-                    st.write(f"**Status:** {step['status']}")
-                    st.write(f"**Recommendation Reason:** {step['recommendation_reason']}")
+                with st.expander(f"**{step['label']}**", expanded=False):
+                    st.markdown(f"**Duration:** {step['duration']}")
+                    st.markdown(f"**Description:** {step['short_description']}")
+                    st.markdown(f"**Skills:** {step['skills'] if step['skills'] else 'N/A'}")
+                    st.markdown(f"**Status:** {step['status']}")
+                    st.markdown(f"**Recommendation Reason:** {step['recommendation_reason']}")
                     
-                    st.markdown(f"[View Program]({step['catalog_url']})")
+                    # Link to program
+                    st.markdown(f"[**View Program**]({step['catalog_url']})")
 
-                    st.write("**Starting Requirements:**")
-                    for req in step['starting_requirements']:
-                        st.write(f"- {req['description']}")
+                    # Starting and Completion Requirements
+                    if step['starting_requirements']:
+                        st.markdown("**Starting Requirements:**")
+                        for req in step['starting_requirements']:
+                            st.write(f"- {req['description']}")
+                    
+                    if step['completion_requirements']:
+                        st.markdown("**Completion Requirements:**")
+                        for req in step['completion_requirements']:
+                            st.write(f"- {req['description']}")
 
-                    st.write("**Completion Requirements:**")
-                    for req in step['completion_requirements']:
-                        st.write(f"- {req['description']}")
+            # Divider before Completion Requirements
+            st.divider()
 
-            st.subheader("Completion Requirements")
+            # Completion Requirements section
+            st.markdown("## Completion Requirements")
             for req in plan['completion_requirements']:
                 st.write(f"- {req['description']}")
 
