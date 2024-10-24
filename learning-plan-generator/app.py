@@ -99,6 +99,10 @@ class LearningPlanStep(BaseModel):
         ...,
         description="the skills associated with the offering based on the program's catalog data."
     )
+    recommendation_reason: str = Field(
+        ...,
+        description="The rationale for why this step helps solve the learning plan goal, and how these skills map to the goal."
+    )
     assessments: Optional[List['LearningPlanAssessment']] = None
     starting_requirements: List[Requirement]
     completion_requirements: List[Requirement]
@@ -136,6 +140,14 @@ class learningPlan(BaseModel):
     long_description: Optional[str] = Field(
         ...,
         description="A compelling description of what is covered in the learning plan, and how it meets the requirements of the original prompt."
+    )
+    solutionCoverage: str = Field(
+        ...,
+        description="A short analysis of how well this learning plan covers the learning goals that were given."
+    )
+    solutionGap: str = Field(
+        ...,
+        descriptoin="A short analysis of the potential gaps / things not covered by the learning plan that are need for the learning goals that were given."
     )
     steps: List[LearningPlanStep]
     completion_requirements: List[Requirement]
@@ -188,6 +200,7 @@ def generateLearningPlan(message, jobProfile):
             "short_description": step.short_description if hasattr(step, 'short_description') else None,
             "long_description": step.long_description if hasattr(step, 'long_description') else None,
             "skills": step.skills if hasattr(step, 'skills') else None,
+            "recommendation_reason": step.recommendation_reason if hasattr(step, 'recommendation_reason') else None,
             "status": step.status.value,
             "starting_requirements": [requirement_to_dict(req) for req in step.starting_requirements],
             "completion_requirements": [requirement_to_dict(req) for req in step.completion_requirements],
@@ -220,6 +233,8 @@ def generateLearningPlan(message, jobProfile):
         "image_url": response.image_url,
         "short_description": response.short_description,
         "long_description": response.long_description,
+        "solution_coverage": response.solution_coverage,
+        "solution_gap": response.solution_gap,
         "steps": [step_to_dict(step) for step in response.steps],
         "completion_requirements": [requirement_to_dict(req) for req in response.completion_requirements]
     }
@@ -269,6 +284,12 @@ def learning_plan_generator():
             st.subheader("Long Description")
             st.write(plan['long_description'])
 
+            st.subheader("Solution Coverage")
+            st.write(plan['solution_coverage')
+            
+            st.subheader("Solution Gaps")
+            st.write(plan['solution_gap'])
+            
             st.subheader("Learning Plan Steps")
 
             for step in plan['steps']:
@@ -277,6 +298,7 @@ def learning_plan_generator():
                     st.write(f"**Description:** {step['short_description']}")
                     st.write(f"**Skills:** {step['skills']}")
                     st.write(f"**Status:** {step['status']}")
+                    st.write(f"**Recommendation Reason"** {step['recommendation_reason']})
                     
                     st.markdown(f"[View Program]({step['catalog_url']})")
 
