@@ -285,7 +285,7 @@ def learning_plan_generator():
             st.write(plan['long_description'])
 
             st.subheader("Solution Coverage")
-            st.write(plan['solution_coverage')
+            st.write(plan['solution_coverage'])
             
             st.subheader("Solution Gaps")
             st.write(plan['solution_gap'])
