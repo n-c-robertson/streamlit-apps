@@ -101,7 +101,7 @@ class LearningPlanStep(BaseModel):
     )
     recommendation_reason: str = Field(
         ...,
-        description="The rationale for why this step helps solve the learning plan goal, and how these skills map to the goal."
+        description="The rationale for why this step helps solve the learning plan goal, and how these skills map to the goal. This is a client facing summary that will be reviewed by a financial decision maker. Write in clear straight forward language about how this offering will help the customer succeed in their learning goal."
     )
     assessments: Optional[List['LearningPlanAssessment']] = None
     starting_requirements: List[Requirement]
