@@ -233,8 +233,8 @@ def generateLearningPlan(message, jobProfile):
         "image_url": response.image_url,
         "short_description": response.short_description,
         "long_description": response.long_description,
-        "solution_coverage": response.solution_coverage,
-        "solution_gap": response.solution_gap,
+        "solution_coverage": response.solutionCoverage,
+        "solution_gap": response.solutionGap,
         "steps": [step_to_dict(step) for step in response.steps],
         "completion_requirements": [requirement_to_dict(req) for req in response.completion_requirements]
     }
