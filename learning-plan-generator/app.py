@@ -298,7 +298,7 @@ def learning_plan_generator():
                     st.write(f"**Description:** {step['short_description']}")
                     st.write(f"**Skills:** {step['skills']}")
                     st.write(f"**Status:** {step['status']}")
-                    st.write(f"**Recommendation Reason"** {step['recommendation_reason']})
+                    st.write(f"**Recommendation Reason** {step['recommendation_reason']}")
                     
                     st.markdown(f"[View Program]({step['catalog_url']})")
 
