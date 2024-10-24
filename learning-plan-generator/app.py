@@ -251,7 +251,7 @@ def learning_plan_generator():
     learningRequirements = st.text_area(
         "Learning Requirements", 
          placeholder="Enter your learning requirements...",
-         value=f"""Generate a learning plan for ai. I want to take people who know nothing about ai and give them some basic fluency. By the end of the plan, they should have a decent conceptual understanding of ai, as well as some basic scripting skills with ai libraries.""",
+         value=f"""Generate a learning plan for ai. I want to take people who know nothing about ai and give them some basic fluency. By the end of the plan, they should have a decent conceptual understanding of ai, as well as some basic scripting skills with ai libraries. This should take roughly six months to complete.""",
          height=100
     )
     
