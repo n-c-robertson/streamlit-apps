@@ -143,11 +143,11 @@ class learningPlan(BaseModel):
     )
     solutionCoverage: str = Field(
         ...,
-        description="A short analysis of how well this learning plan covers the learning goals that were given."
+        description="A thorough analysis of how well this learning plan covers the learning goals that were given, formatted in markdown."
     )
     solutionGap: str = Field(
         ...,
-        descriptoin="A short analysis of the potential gaps / things not covered by the learning plan that are need for the learning goals that were given."
+        descriptoin="A thorough analysis of the potential gaps / things not covered by the learning plan that are need for the learning goals that were given, formatted in markdown. Suggest potential additional recommendations from the Udacity catalog that could help fill these gaps."
     )
     steps: List[LearningPlanStep]
     completion_requirements: List[Requirement]
