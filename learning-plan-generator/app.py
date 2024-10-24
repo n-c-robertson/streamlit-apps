@@ -200,7 +200,7 @@ def generateLearningPlan(message, jobProfile):
             "short_description": step.short_description if hasattr(step, 'short_description') else None,
             "long_description": step.long_description if hasattr(step, 'long_description') else None,
             "skills": step.skills if hasattr(step, 'skills') else None,
-            "recommendation_reason": step.recommendation_reason if hasattr(step, 'recommendation_reason') else None,
+            "recommendation_reason": ' '.join(step.recommendation_reason) if hasattr(step, 'recommendation_reason') else '',
             "status": step.status.value,
             "starting_requirements": [requirement_to_dict(req) for req in step.starting_requirements],
             "completion_requirements": [requirement_to_dict(req) for req in step.completion_requirements],
