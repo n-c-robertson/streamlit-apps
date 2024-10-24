@@ -2,6 +2,11 @@
 import streamlit as st
 import streamlit.components.v1 as components
 
+# File processing.
+import PyPDF2
+from docx import Document
+import io
+
 # Data processing.
 import pandas as pd
 import numpy as np
@@ -26,9 +31,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 import openai
 client = openai.OpenAI(api_key=st.secrets["OpenAI_key"])
 
-
 # One time function to load catalog data. Caches after first run.
-
 @st.cache_data
 def fetch_catalog():
 
@@ -79,6 +82,51 @@ def retrieve_matching_courses(query, programs=programs, top_n=50):
     matching_indices = np.argsort(cosine_similarities)[::-1][:top_n]
     
     return [course_titles[i] for i in matching_indices]
+
+
+# File processing.
+# Helper function to process uploaded file
+def process_file(uploaded_file):
+    file_type = uploaded_file.name.split('.')[-1]
+    
+    if file_type == 'pdf':
+        return extract_text_from_pdf(uploaded_file), "Extracted Text from PDF:"
+    elif file_type == 'docx':
+        return extract_text_from_docx(uploaded_file), "Extracted Text from DOCX:"
+    elif file_type == 'txt':
+        return extract_text_from_txt(uploaded_file), "Extracted Text from TXT:"
+    elif file_type == 'csv':
+        return extract_data_from_csv(uploaded_file), "Extracted Data from CSV:"
+    elif file_type == 'xlsx':
+        return extract_data_from_excel(uploaded_file), "Extracted Data from Excel:"
+    else:
+        return None
+
+# Helper function to extract text from PDF
+def extract_text_from_pdf(pdf_file):
+    pdf_reader = PyPDF2.PdfReader(pdf_file)
+    text = ""
+    for page_num in range(len(pdf_reader.pages)):
+        text += pdf_reader.pages[page_num].extract_text()
+    return text
+
+# Helper function to extract text from DOCX
+def extract_text_from_docx(docx_file):
+    doc = Document(docx_file)
+    text = "\n".join([para.text for para in doc.paragraphs])
+    return text
+
+# Helper function to extract text from TXT
+def extract_text_from_txt(txt_file):
+    return txt_file.read().decode("utf-8")
+
+# Helper function to extract data from CSV
+def extract_data_from_csv(csv_file):
+    return pd.read_csv(csv_file)
+
+# Helper function to extract data from Excel
+def extract_data_from_excel(excel_file):
+    return pd.read_excel(excel_file)
 
 
 # Specify data model for Learning Plans. This will be used to guide
@@ -209,7 +257,7 @@ def chatgpt(message,format_,model='gpt-4o-2024-08-06'):
 
 
 # Generate learning plan.
-def generateLearningPlan(message, jobProfile,programs=programs):
+def generateLearningPlan(message, jobProfile, uploadedFile, programs=programs):
 
     # pre-filtering of programs.
     with st.status("Prefiltering Catalog..."):
@@ -220,7 +268,7 @@ def generateLearningPlan(message, jobProfile,programs=programs):
     with st.status("Building Learning Plan..."):
 
         message = f"""Build a Udacity learning plan that meets the following requirements: {message}. Build someone for the following job profile: {jobProfile}.
-        ONLY use offerings in the catalog dataset, where you'll find relevant metadata to the model you need to grab. Catalog: {filtered_programs}/"""
+        ONLY use offerings in the catalog dataset, where you'll find relevant metadata to the model you need to grab. Catalog: {filtered_programs}. Here is some additional information that might help: {uploadedFile}"""
         myPrompt = prompt(message)
         response = chatgpt(myPrompt, format_=learningPlan)
 
@@ -301,14 +349,19 @@ def learning_plan_generator():
         value=f"""I'm training to train data analysts. They will be responsible for BI / data analysis functions in the company. But, we are also trying to make them more AI / ML focused, and push for more predictive and gen AI capabilities in the company. """,
         height=100
     )
+
+    fileUpload = st.file_uploader("Feel free to upload supporting assets", type=["pdf", "docx", "txt", "csv", "xlsx"])
     
     # Button to submit form
     if st.button("Generate Plan"):
         if learningRequirements and jobProfile:
             st.info("Plan generating! This will take about 30 seconds to load.")
 
+            if fileUpload is not None:
+                file = process_file(fileUpload)
+
             # Create plan.
-            plan, considered_titles = generateLearningPlan(learningRequirements, jobProfile)
+            plan, considered_titles = generateLearningPlan(learningRequirements, jobProfile, file)
 
             # Some diagnostics for monitoring.
             st.title('Success: Learning Plan generated.')
@@ -317,7 +370,7 @@ def learning_plan_generator():
             with st.expander('Expand to see underlying data structure...'):
                 st.write(plan)
 
-            with st.expander('Expand to see titles considered...'):
+            with st.expander('Searching these courses for a Learning Plan...'):
                 st.write(considered_titles)
 
             # Basic formatted Learning Plans.
@@ -332,16 +385,16 @@ def learning_plan_generator():
 
             # Optional Solution Coverage and Gaps
             if plan['solution_coverage']:
-                st.markdown("### Solution Coverage")
+                #st.markdown("### Solution Coverage")
                 st.write(plan['solution_coverage'])
 
             if plan['solution_gap']:
-                st.markdown("### Solution Gaps")
+                #st.markdown("### Solution Gaps")
                 st.write(plan['solution_gap'])
 
             # Optional Prerequisites
             if plan['prerequisites']:
-                st.markdown("### Prerequisites")
+                #st.markdown("### Prerequisites")
                 st.write(plan['prerequisites'])
 
             # Divider before Learning Plan Steps
