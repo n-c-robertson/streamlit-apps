@@ -158,7 +158,8 @@ def prompt(message):
     return [
         {'role': 'system', 
          'content': f"""prompt: You are a solutions architect at Udacity. You create learning plans based on enterprise customer's learning
-         and development needs."""},
+         and development needs. You need to be persuasive and informative on why this learning plan is a great match for the learner or customer's needs.
+         Back up your justification for different parts of the plan persuasively."""},
         {'role': 'user', 
          'content': f"""{message}"""}
             ]
@@ -298,7 +299,7 @@ def learning_plan_generator():
                     st.write(f"**Description:** {step['short_description']}")
                     st.write(f"**Skills:** {step['skills']}")
                     st.write(f"**Status:** {step['status']}")
-                    st.write(f"**Recommendation Reason** {step['recommendation_reason']}")
+                    st.write(f"**Recommendation Reason:** {step['recommendation_reason']}")
                     
                     st.markdown(f"[View Program]({step['catalog_url']})")
 
