@@ -143,12 +143,15 @@ class learningPlan(BaseModel):
     )
     solutionCoverage: str = Field(
         ...,
-        description="A thorough analysis of how well this learning plan covers the learning goals that were given, formatted in markdown."
+        description="A thorough analysis of how well this learning plan covers the learning goals that were given, MUST be formatted in markdown."
     )
     solutionGap: str = Field(
         ...,
-        description="A thorough analysis of the potential gaps / things not covered by the learning plan that are need for the learning goals that were given, formatted in markdown. Suggest potential additional recommendations from the Udacity catalog that could help fill these gaps. Also, suggest potential pre-req courses from Udacity that could help bridge gaps if someone is not ready to start this Learning Plan yet."
+        description="A thorough analysis of the potential gaps / things not covered by the learning plan that are need for the learning goals that were given, MUST be formatted in markdown. Suggest potential additional recommendations from the Udacity catalog that could help fill these gaps."
     )
+    prerequisites: str = Field(
+        ...,
+        description="A thorough analysis of the potential pre-requisites that a learner might need to succeed in this plan, MUST be formatted in markdown. Suggest potential additional recommendations from the Udacity catalog that could help satisfy these pre-requisites."
     steps: List[LearningPlanStep]
     completion_requirements: List[Requirement]
 
@@ -236,6 +239,7 @@ def generateLearningPlan(message, jobProfile):
         "long_description": response.long_description,
         "solution_coverage": response.solutionCoverage,
         "solution_gap": response.solutionGap,
+        "prerequisites": response.prerequisites,
         "steps": [step_to_dict(step) for step in response.steps],
         "completion_requirements": [requirement_to_dict(req) for req in response.completion_requirements]
     }
@@ -290,6 +294,9 @@ def learning_plan_generator():
             
             st.subheader("Solution Gaps")
             st.write(plan['solution_gap'])
+
+            st.subheader("Prequisites")
+            st.write(plan['prerequisites'])
             
             st.subheader("Learning Plan Steps")
 
