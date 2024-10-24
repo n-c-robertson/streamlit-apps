@@ -152,6 +152,7 @@ class learningPlan(BaseModel):
     prerequisites: str = Field(
         ...,
         description="A thorough analysis of the potential pre-requisites that a learner might need to succeed in this plan, MUST be formatted in markdown. Suggest potential additional recommendations from the Udacity catalog that could help satisfy these pre-requisites."
+    )
     steps: List[LearningPlanStep]
     completion_requirements: List[Requirement]
 
