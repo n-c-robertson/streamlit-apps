@@ -213,15 +213,15 @@ class learningPlan(BaseModel):
     )
     solutionCoverage: str = Field(
         ...,
-        description="A thorough analysis of how well this learning plan covers the learning goals that were given, MUST be formatted in markdown."
+        description="A thorough analysis of how well this learning plan covers the learning goals that were given, MUST be formatted in markdown (don't to include the title of the section)."
     )
     solutionGap: str = Field(
         ...,
-        description="A thorough analysis of the potential gaps / things not covered by the learning plan that are need for the learning goals that were given, MUST be formatted in markdown. Suggest potential additional recommendations from the Udacity catalog that could help fill these gaps."
+        description="A thorough analysis of the potential gaps / things not covered by the learning plan that are need for the learning goals that were given, MUST be formatted in markdown (don't to include the title of the section). Suggest potential additional recommendations from the Udacity catalog that could help fill these gaps."
     )
     prerequisites: str = Field(
         ...,
-        description="A thorough analysis of the potential pre-requisites that a learner might need to succeed in this plan, MUST be formatted in markdown. Suggest potential additional recommendations from the Udacity catalog that could help satisfy these pre-requisites."
+        description="A thorough analysis of the potential pre-requisites that a learner might need to succeed in this plan, MUST be formatted in markdown (don't to include the title of the section). Suggest potential additional recommendations from the Udacity catalog that could help satisfy these pre-requisites."
     )
     steps: List[LearningPlanStep]
     completion_requirements: List[Requirement]
@@ -381,16 +381,16 @@ def learning_plan_generator():
 
             # Optional Solution Coverage and Gaps
             if plan['solution_coverage']:
-                #st.markdown("### Solution Coverage")
+                st.markdown("### Solution Coverage")
                 st.write(plan['solution_coverage'])
 
             if plan['solution_gap']:
-                #st.markdown("### Solution Gaps")
+                st.markdown("### Solution Gaps")
                 st.write(plan['solution_gap'])
 
             # Optional Prerequisites
             if plan['prerequisites']:
-                #st.markdown("### Prerequisites")
+                st.markdown("### Prerequisites")
                 st.write(plan['prerequisites'])
 
             # Divider before Learning Plan Steps
