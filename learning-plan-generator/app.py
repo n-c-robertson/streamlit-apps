@@ -61,7 +61,7 @@ def fetch_catalog():
     # Return programs.
     return programs
 
-# RAG to limit down the catalog size by query relevance.
+# Limit the catalog size to 50 most potentially relevant courses.
 
 def retrieve_matching_courses(query, programs, top_n=50):
     # Create a list of all course skills
