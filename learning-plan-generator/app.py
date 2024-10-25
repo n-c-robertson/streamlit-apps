@@ -394,7 +394,7 @@ def learning_plan_generator():
             # Optional Prerequisites
             if plan['prerequisites']:
                 with st.expander(f"Prerequisites", expanded=True):
-                st.write(plan['prerequisites'])
+                    st.write(plan['prerequisites'])
 
             # Divider before Learning Plan Steps
             st.divider()
