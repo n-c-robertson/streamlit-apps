@@ -251,7 +251,7 @@ def chatgpt(message,format_,model='gpt-4o-2024-08-06'):
         return content
 
 # Generate learning plan.
-def generateLearningPlan(message, jobProfile, uploadedFile, programs=programs):
+def generateLearningPlan(message, jobProfile, uploadedFile):
 
     # Fetch programs.
     programs = fetch_catalog()
