@@ -63,7 +63,7 @@ def fetch_catalog():
 
 # RAG to limit down the catalog size by query relevance.
 
-def retrieve_matching_courses(query, programs=programs, top_n=50):
+def retrieve_matching_courses(query, programs, top_n=50):
     # Create a list of all course skills
     summaries = [course['title'] + ' ' + course['summary'] + ' ' + ' '.join(course['skill_names']) for course in programs]
     course_titles = [course['title'] for course in programs]
@@ -258,7 +258,7 @@ def generateLearningPlan(message, jobProfile, uploadedFile, programs=programs):
 
     # pre-filtering of programs.
     with st.status("Prefiltering Catalog..."):
-        filtered_titles = retrieve_matching_courses(query=message)
+        filtered_titles = retrieve_matching_courses(query=message, programs=programs)
         filtered_programs = [p for p in programs if p['title'] in filtered_titles]
     
     with st.status("Building Learning Plan..."):
