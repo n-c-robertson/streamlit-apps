@@ -376,11 +376,11 @@ def learning_plan_generator():
             st.title(plan['title'])
 
             # Description section
-            st.markdown("### Short Description")
-            st.info(plan['short_description'])
+            with st.expander(f"Short Description", expanded=True):
+                st.write(plan['short_description'])
 
-            st.markdown("### Long Description")
-            st.info(plan['long_description'])
+            with st.expander(f"Long Description", expanded=True):
+                st.write(plan['long_description'])
 
             # Optional Solution Coverage and Gaps
             if plan['solution_coverage']:
