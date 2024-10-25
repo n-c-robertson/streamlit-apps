@@ -61,9 +61,6 @@ def fetch_catalog():
     # Return programs.
     return programs
 
-programs = fetch_catalog()
-
-
 # RAG to limit down the catalog size by query relevance.
 
 def retrieve_matching_courses(query, programs=programs, top_n=50):
@@ -127,7 +124,6 @@ def extract_data_from_csv(csv_file):
 # Helper function to extract data from Excel
 def extract_data_from_excel(excel_file):
     return pd.read_excel(excel_file)
-
 
 # Specify data model for Learning Plans. This will be used to guide
 # OpenAI's response.
@@ -230,7 +226,6 @@ class learningPlan(BaseModel):
     steps: List[LearningPlanStep]
     completion_requirements: List[Requirement]
 
-
 # Formatting prompt into a structure that OpenAI accepts.
 def prompt(message):
     return [
@@ -255,16 +250,17 @@ def chatgpt(message,format_,model='gpt-4o-2024-08-06'):
 
         return content
 
-
 # Generate learning plan.
 def generateLearningPlan(message, jobProfile, uploadedFile, programs=programs):
+
+    # Fetch programs.
+    programs = fetch_catalog()
 
     # pre-filtering of programs.
     with st.status("Prefiltering Catalog..."):
         filtered_titles = retrieve_matching_courses(query=message)
         filtered_programs = [p for p in programs if p['title'] in filtered_titles]
     
-
     with st.status("Building Learning Plan..."):
 
         message = f"""Build a Udacity learning plan that meets the following requirements: {message}. Build someone for the following job profile: {jobProfile}.
@@ -328,8 +324,6 @@ def generateLearningPlan(message, jobProfile, uploadedFile, programs=programs):
 
     return response_dict, filtered_titles
 
-
-
 def learning_plan_generator():
     st.title("Learning Plan Generator")
     st.write("Enter your learning requirements and job description to generate a personalized learning plan.")
@@ -359,6 +353,8 @@ def learning_plan_generator():
 
             if fileUpload is not None:
                 file = process_file(fileUpload)
+            else:
+                file = 'No Support Assets Provided.'
 
             # Create plan.
             plan, considered_titles = generateLearningPlan(learningRequirements, jobProfile, file)
