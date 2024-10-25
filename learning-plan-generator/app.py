@@ -368,7 +368,10 @@ def learning_plan_generator():
 
             with st.expander('Searching these courses for a Learning Plan...'):
                 st.write(considered_titles)
-
+                
+            # Divider before Learning Plan Section
+            st.divider()
+            
             # Basic formatted Learning Plans.
             st.title(plan['title'])
 
@@ -377,20 +380,20 @@ def learning_plan_generator():
             st.info(plan['short_description'])
 
             st.markdown("### Long Description")
-            st.write(plan['long_description'])
+            st.info(plan['long_description'])
 
             # Optional Solution Coverage and Gaps
             if plan['solution_coverage']:
-                st.markdown("### Solution Coverage")
-                st.write(plan['solution_coverage'])
+                with st.expander(f"Solution Coverage", expanded=True):
+                    st.write(plan['solution_coverage'])
 
             if plan['solution_gap']:
-                st.markdown("### Solution Gaps")
-                st.write(plan['solution_gap'])
+                with st.expander(f"Solution Gaps", expanded=True):
+                    st.write(plan['solution_gap'])
 
             # Optional Prerequisites
             if plan['prerequisites']:
-                st.markdown("### Prerequisites")
+                with st.expander(f"Prerequisites", expanded=True):
                 st.write(plan['prerequisites'])
 
             # Divider before Learning Plan Steps
