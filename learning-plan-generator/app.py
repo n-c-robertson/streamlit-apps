@@ -395,30 +395,29 @@ def generateLearningPlan(message, jobProfile, uploadedFile):
 
 
 def horizontalCard():
-    return f"""
-    <div class="container mt-5">
-        <div class="card mb-3">
-            <div class="row g-0">
-                <div class="col-3">
-                    <img src="https://video.udacity-data.com/topher/2024/October/6709867b_cd1930/cd1930.jpg" class="card-img-left rounded-start" alt="Vintage car">
-                </div>
-                <div class="col-9">
-                    <div class="card-body">
-                        <h5 class="card-title">Card title</h5>
-                        <p class="card-text">This is a wider card with supporting text below as a natural lead-in to additional content. This content is a little bit longer.</p>
-                        <div class="mb-3">
-                            <span class="chip chip-blue">Chip 1</span>
-                            <span class="chip chip-green">Chip 2</span>
-                            <span class="chip chip-yellow">Chip 3</span>
+    components.html("""
+        <div class="container mt-5">
+            <div class="card mb-3">
+                <div class="row g-0">
+                    <div class="col-3">
+                        <img src="https://video.udacity-data.com/topher/2024/October/6709867b_cd1930/cd1930.jpg" class="img-fluid rounded-start" alt="Vintage car">
+                    </div>
+                    <div class="col-9">
+                        <div class="card-body">
+                            <h5 class="card-title">Card title</h5>
+                            <p class="card-text">This is a wider card with supporting text below as a natural lead-in to additional content. This content is a little bit longer.</p>
+                            <div class="mb-3">
+                                <span class="chip chip-blue">Chip 1</span>
+                                <span class="chip chip-green">Chip 2</span>
+                                <span class="chip chip-yellow">Chip 3</span>
+                            </div>
+                            <p class="card-text"><small class="text-body-secondary">Last updated 3 mins ago</small></p>
                         </div>
-                        <p class="card-text"><small class="text-body-secondary">Last updated 3 mins ago</small></p>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>"""
+        """
 
 def learning_plan_generator():
     st.title("Learning Plan Generator")
