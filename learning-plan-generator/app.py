@@ -482,7 +482,7 @@ def learning_plan_generator():
                             st.write(f"- {req['description']}")
 
 
-            st.markdown(horizontalCard, unsafe_allow_html=True)
+            st.markdown(horizontalCard(), unsafe_allow_html=True)
             
             # Divider before Completion Requirements
             st.divider()
