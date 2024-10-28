@@ -422,7 +422,7 @@ def horizontalCard(step):
             <div class="card">
                 <div class="row g-0">
                     <div class="col-3">
-                        <img src="{step['image_url']}" class="img-fluid" alt="Learning Step Image">
+                        <img src="{step['image_url']}" class="card-img-left" alt="Learning Step Image">
                     </div>
                     <div class="col-9">
                         <div class="card-body">
