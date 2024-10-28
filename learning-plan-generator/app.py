@@ -407,6 +407,11 @@ def generateLearningPlan(message, jobProfile, uploadedFile):
 
 def horizontalCard(step):
     """Generates an HTML card for a learning step."""
+    skills_chips = ''
+    if step['skills']:
+        skills_list = step['skills'].split(', ')  # Assuming skills are a comma-separated string
+        skills_chips = ' '.join(f'<span class="chip">{skill}</span>' for skill in skills_list)
+
     return f"""
         <div class="container mt-5">
             <div class="card-container row g-0">
@@ -418,7 +423,7 @@ def horizontalCard(step):
                         <h5 class="card-title">{step['label']}</h5>
                         <p class="card-text"><b>Duration:</b> {step['duration']}<br>
                                            <b>Description:</b> {step['short_description']}<br>
-                                           <b>Skills:</b> {step['skills'] if step['skills'] else 'N/A'}<br>
+                                           <b>Skills:</b> {skills_chips if skills_chips else 'N/A'}<br>
                         <a href=\"{step['catalog_url']}\" target="_blank" class="btn btn-primary">View Program</a>
                     </div>
                 </div>
