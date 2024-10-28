@@ -65,7 +65,7 @@ st.markdown("""
             rgba(255, 255, 255, 0.4) 50%,
             rgba(255, 255, 255, 0) 100%
         );
-        animation: shimmer 3s 1;
+        animation: shimmer 3s 1 ease-in-out 3s;
         pointer-events: none;
     }
 
