@@ -40,7 +40,7 @@ st.markdown("""
         border-radius: 8px;
         overflow: hidden;
         box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-        background: #fff;
+        background: rgb(255,255,255,0);
         position: relative;
         transition: transform 0.3s ease, box-shadow 0.3s ease; /* Smooth transition */
     }
