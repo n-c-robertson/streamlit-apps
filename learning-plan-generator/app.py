@@ -397,7 +397,7 @@ def generateLearningPlan(message, jobProfile, uploadedFile):
 def horizontalCard():
     st.markdown(f"""
         <div class="container mt-5">
-            <div class="card mb-3">
+            <div class="card-img-left">
                 <div class="row g-0">
                     <div class="col-3">
                         <img src="https://video.udacity-data.com/topher/2024/October/6709867b_cd1930/cd1930.jpg" class="img-fluid rounded-start" alt="Vintage car">
