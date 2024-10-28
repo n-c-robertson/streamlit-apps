@@ -395,7 +395,7 @@ def generateLearningPlan(message, jobProfile, uploadedFile):
 
 
 def horizontalCard():
-    st.markdown(f"""
+    return f"""
         <div class="container mt-5">
             <div class="card-img-left">
                 <div class="row g-0">
@@ -417,7 +417,7 @@ def horizontalCard():
                 </div>
             </div>
         </div>
-        """,unsafe_allow_html=True)
+        """
 
 def learning_plan_generator():
     st.title("Learning Plan Generator")
