@@ -419,21 +419,23 @@ def horizontalCard(step):
 
     return f"""
         <div class="container mt-5">
-            <div class="card row g-0">
-                <div class="col-3">
-                    <img src="{step['image_url']}" class="card-img-left" alt="Learning Step Image">
-                </div>
-                <div class="col-9">
-                    <div class="card-body">
-                        <h5 class="card-title">{step['label']}</h5>
-                        <p class="card-text"><b>Description:</b> {step['short_description']}</p>
-                        <p><b>Skills:</b> {skills_chips if skills_chips else 'N/A'}</p>
-                        <a href="{step['catalog_url']}" target="_blank" class="btn btn-primary">View Program</a>
+            <div class="card">
+                <div class="row g-0">
+                    <div class="col-3">
+                        <img src="{step['image_url']}" class="img-fluid" alt="Learning Step Image">
+                    </div>
+                    <div class="col-9">
+                        <div class="card-body">
+                            <h5 class="card-title">{step['label']}</h5>
+                            <p class="card-text"><b>Description:</b> {step['short_description']}</p>
+                            <p><b>Skills:</b> {skills_chips if skills_chips else 'N/A'}</p>
+                            <a href="{step['catalog_url']}" target="_blank" class="btn btn-primary">View Program</a>
+                        </div>
                     </div>
                 </div>
-                <div class="card-footer text-muted w-100 d-flex justify-content-between align-items-center">
+                <div class="card-footer text-muted">
                     <small>Duration: {step['duration']}</small>
-                    <small>Difficulty: {step['difficulty']}</small>
+                    <span class="float-end"><small>Difficulty: {step['difficulty']}</small></span>
                 </div>
             </div>
         </div>
