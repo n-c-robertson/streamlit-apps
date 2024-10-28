@@ -416,16 +416,16 @@ def horizontalCard(step):
                 <div class="col-9">
                     <div class="card-body">
                         <h5 class="card-title">{step['label']}</h5>
-                        <p class="card-text">**Duration:** {step['duration']}<br>
-                                           **Description:** {step['short_description']}<br>
-                                           **Skills:** {step['skills'] if step['skills'] else 'N/A'}<br>
-                                           **Status:** {step['status']}<br>
-                                           **Recommendation Reason:** {step['recommendation_reason']}</p>
-                        <a href="{step['catalog_url']}" target="_blank" class="btn btn-primary">View Program</a>
+                        <p class="card-text"><b>Duration:</b> {step['duration']}<br>
+                                           <b>Description:</b> {step['short_description']}<br>
+                                           <b>Skills:</b> {step['skills'] if step['skills'] else 'N/A'}<br>
+                                           <b>Status:</b> {step['status']}<br>
+                                           <b>Recommendation Reason:** {step['recommendation_reason']}</p>
+                        <a href=\"{step['catalog_url']}\" target="_blank" class="btn btn-primary">View Program</a>
                         <div class="mt-3">
                             <strong>Starting Requirements:</strong>
                             <ul>
-                                {''.join(f'<li>{req["description"]}</li>' for req in step['starting_requirements'])}
+                                {''.join(f'<li>{req['description']}</li>' for req in step['starting_requirements'])}
                             </ul>
                             <strong>Completion Requirements:</strong>
                             <ul>
@@ -542,8 +542,6 @@ def learning_plan_generator():
                     #    for req in step['completion_requirements']:
                     #        st.write(f"- {req['description']}")
                     
-
-            st.markdown(horizontalCard(), unsafe_allow_html=True)
             
             # Divider before Completion Requirements
             st.divider()
