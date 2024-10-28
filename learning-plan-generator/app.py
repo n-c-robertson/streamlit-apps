@@ -232,6 +232,10 @@ class LearningPlanStep(BaseModel):
         ...,
         description=f"""the skills associated with the offering based on the program's catalog data."""
     )
+    difficulty: str = Field(
+        ...,
+        description=f"""the difficulty associated with the offering based on the program's catalog data."""
+    )
     recommendation_reason: str = Field(
         ...,
         description=f"""The rationale for why this step helps solve the learning plan goal, and how these skills map 
@@ -356,6 +360,7 @@ def generateLearningPlan(message, jobProfile, uploadedFile):
             "step_type": step.step_type.value,
             "label": step.label,
             "duration": step.duration if hasattr(step, 'duration') else None,
+            "difficulty" step.difficulty if hasattr(step, 'difficulty') else None,
             "catalog_url": step.catalog_url if hasattr(step, 'catalog_url') else None,
             "image_url": step.image_url if hasattr(step, 'image_url') else None,
             "short_description": step.short_description if hasattr(step, 'short_description') else None,
@@ -407,29 +412,26 @@ def generateLearningPlan(message, jobProfile, uploadedFile):
 
 def horizontalCard(step):
     """Generates an HTML card for a learning step."""
-    skills_list = ''
+    skills_chips = ''
     if step['skills']:
         skills_list = step['skills'].split(', ')  # Assuming skills are a comma-separated string
-        skills_list = ''.join(f'<li class="list-group-item">{skill}</li>' for skill in skills_list)
+        skills_chips = ' '.join(f'<span class="chip">{skill}</span>' for skill in skills_list)
 
     return f"""
         <div class="container mt-5">
             <div class="card-container row g-0">
                 <div class="col-3">
-                    <img src="{step['image_url']}" class="card-img-left" alt="Learning Step Image">
+                    <img src=\"{step['image_url']}\" class="card-img-left" alt="Learning Step Image">
                 </div>
                 <div class="col-9">
                     <div class="card-body">
                         <h5 class="card-title">{step['label']}</h5>
                         <p class="card-text"><b>Duration:</b> {step['duration']}<br>
                                            <b>Description:</b> {step['short_description']}<br>
-                        </p>
-                        <a href="{step['catalog_url']}" target="_blank" class="btn btn-primary">View Program</a>
+                                           <b>Difficulty:</b> {step['difficulty']}<nr>
+                                           {skills_chips if skills_chips else 'N/A'}<br>
+                        <a href=\"{step['catalog_url']}\" target="_blank" class="btn btn-primary">View Program</a>
                     </div>
-                    <ul class="list-group mt-2">
-                        <li class="list-group-item"><b>Skills:</b></li>
-                        {skills_list if skills_list else '<li class="list-group-item">N/A</li>'}
-                    </ul>
                 </div>
             </div>
         </div>
