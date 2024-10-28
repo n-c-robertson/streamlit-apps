@@ -52,7 +52,7 @@ st.markdown("""
     }
 
     /* Shimmer effect on hover */
-    .card-container:hover::before {
+    .card-container::before {
         content: "";
         position: absolute;
         top: 0;
@@ -65,17 +65,20 @@ st.markdown("""
             rgba(255, 255, 255, 0.4) 50%,
             rgba(255, 255, 255, 0) 100%
         );
-        animation: shimmer 3s 1 ease-in-out 3s;
         pointer-events: none;
+        opacity: 0; /* Hide by default */
+        transform: translateX(0); /* Default position */
     }
-
-    @keyframes shimmer {
-        0% {
-            transform: translateX(-100%);
-        }
-        100% {
-            transform: translateX(100%);
-        }
+    
+    .card-container:hover::before {
+        opacity: 1; /* Show on hover */
+        animation: shiver 0.1s infinite;
+    }
+    
+    @keyframes shiver {
+        0% { transform: translateX(-1px); }
+        50% { transform: translateX(1px); }
+        100% { transform: translateX(-1px); }
     }
 
 </style>
