@@ -417,7 +417,7 @@ def horizontalCard():
                 </div>
             </div>
         </div>
-        """
+        """)
 
 def learning_plan_generator():
     st.title("Learning Plan Generator")
