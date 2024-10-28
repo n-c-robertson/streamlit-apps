@@ -419,8 +419,6 @@ def horizontalCard(step):
                         <p class="card-text"><b>Duration:</b> {step['duration']}<br>
                                            <b>Description:</b> {step['short_description']}<br>
                                            <b>Skills:</b> {step['skills'] if step['skills'] else 'N/A'}<br>
-                                           <b>Status:</b> {step['status']}<br>
-                                           <b>Recommendation Reason:** {step['recommendation_reason']}</p>
                         <a href=\"{step['catalog_url']}\" target="_blank" class="btn btn-primary">View Program</a>
                     </div>
                 </div>
@@ -511,28 +509,7 @@ def learning_plan_generator():
 
             for step in plan['steps']:
                 st.markdown(horizontalCard(step), unsafe_allow_html=True)
-                #with st.expander(f"**{step['label']}**", expanded=False):
-                    #st.markdown(f"**Duration:** {step['duration']}")
-                    #st.markdown(f"**Description:** {step['short_description']}")
-                    #st.markdown(f"**Skills:** {step['skills'] if step['skills'] else 'N/A'}")
-                    #st.markdown(f"**Status:** {step['status']}")
-                    #st.markdown(f"**Recommendation Reason:** {step['recommendation_reason']}")
-                    
-                    # Link to program
-                    #st.markdown(f"[**View Program**]({step['catalog_url']})")
-
-                    # Starting and Completion Requirements
-                    #if step['starting_requirements']:
-                    #    st.markdown("**Starting Requirements:**")
-                    #    for req in step['starting_requirements']:
-                    #        st.write(f"- {req['description']}")
-                    
-                    #if step['completion_requirements']:
-                    #    st.markdown("**Completion Requirements:**")
-                    #    for req in step['completion_requirements']:
-                    #        st.write(f"- {req['description']}")
-                    
-            
+                                
             # Divider before Completion Requirements
             st.divider()
 
