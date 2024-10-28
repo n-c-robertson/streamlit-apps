@@ -405,24 +405,33 @@ def generateLearningPlan(message, jobProfile, uploadedFile):
     return response_dict, filtered_titles
 
 
-def horizontalCard():
+def horizontalCard(step):
+    """Generates an HTML card for a learning step."""
     return f"""
         <div class="container mt-5">
-            <div class="card-container row g-0"">
+            <div class="card-container row g-0">
                 <div class="col-3">
-                    <img src="https://video.udacity-data.com/topher/2024/October/6709867b_cd1930/cd1930.jpg" class="card-img-left" alt="Vintage car">
+                    <img src="https://video.udacity-data.com/topher/2024/October/6709867b_cd1930/cd1930.jpg" class="card-img-left" alt="Learning Step Image">
                 </div>
                 <div class="col-9">
                     <div class="card-body">
-                        <h5 class="card-title">Card title</h5>
-                        <p class="card-text">This is a wider card with supporting text below as a natural lead-in to additional content. This content is a little bit longer.</p>
-                        <div class="mb-3">
-                            <span class="chip">Chip 1</span>
-                            <span class="chip">Chip 2</span>
-                            <span class="chip">Chip 3</span>
+                        <h5 class="card-title">{step['label']}</h5>
+                        <p class="card-text">**Duration:** {step['duration']}<br>
+                                           **Description:** {step['short_description']}<br>
+                                           **Skills:** {step['skills'] if step['skills'] else 'N/A'}<br>
+                                           **Status:** {step['status']}<br>
+                                           **Recommendation Reason:** {step['recommendation_reason']}</p>
+                        <a href="{step['catalog_url']}" target="_blank" class="btn btn-primary">View Program</a>
+                        <div class="mt-3">
+                            <strong>Starting Requirements:</strong>
+                            <ul>
+                                {''.join(f'<li>{req["description"]}</li>' for req in step['starting_requirements'])}
+                            </ul>
+                            <strong>Completion Requirements:</strong>
+                            <ul>
+                                {''.join(f'<li>{req["description"]}</li>' for req in step['completion_requirements'])}
+                            </ul>
                         </div>
-                        <p class="card-text"><small class="text-body-primary">Last updated 3 mins ago</small></p>
-                        <a href="https://www.google.com" target="_blank" class="program-link">Program Page</a>
                     </div>
                 </div>
             </div>
@@ -511,27 +520,28 @@ def learning_plan_generator():
             st.markdown("## Learning Plan Steps")
 
             for step in plan['steps']:
-                with st.expander(f"**{step['label']}**", expanded=False):
-                    st.markdown(f"**Duration:** {step['duration']}")
-                    st.markdown(f"**Description:** {step['short_description']}")
-                    st.markdown(f"**Skills:** {step['skills'] if step['skills'] else 'N/A'}")
-                    st.markdown(f"**Status:** {step['status']}")
-                    st.markdown(f"**Recommendation Reason:** {step['recommendation_reason']}")
+                st.markdown(horizontalCard(step), unsafe_allow_html=True)
+                #with st.expander(f"**{step['label']}**", expanded=False):
+                    #st.markdown(f"**Duration:** {step['duration']}")
+                    #st.markdown(f"**Description:** {step['short_description']}")
+                    #st.markdown(f"**Skills:** {step['skills'] if step['skills'] else 'N/A'}")
+                    #st.markdown(f"**Status:** {step['status']}")
+                    #st.markdown(f"**Recommendation Reason:** {step['recommendation_reason']}")
                     
                     # Link to program
-                    st.markdown(f"[**View Program**]({step['catalog_url']})")
+                    #st.markdown(f"[**View Program**]({step['catalog_url']})")
 
                     # Starting and Completion Requirements
-                    if step['starting_requirements']:
-                        st.markdown("**Starting Requirements:**")
-                        for req in step['starting_requirements']:
-                            st.write(f"- {req['description']}")
+                    #if step['starting_requirements']:
+                    #    st.markdown("**Starting Requirements:**")
+                    #    for req in step['starting_requirements']:
+                    #        st.write(f"- {req['description']}")
                     
-                    if step['completion_requirements']:
-                        st.markdown("**Completion Requirements:**")
-                        for req in step['completion_requirements']:
-                            st.write(f"- {req['description']}")
-
+                    #if step['completion_requirements']:
+                    #    st.markdown("**Completion Requirements:**")
+                    #    for req in step['completion_requirements']:
+                    #        st.write(f"- {req['description']}")
+                    
 
             st.markdown(horizontalCard(), unsafe_allow_html=True)
             
