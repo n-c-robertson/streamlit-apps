@@ -419,24 +419,21 @@ def horizontalCard(step):
 
     return f"""
         <div class="container mt-5">
-            <div class="card-container row g-0">
+            <div class="card row g-0">
                 <div class="col-3">
                     <img src="{step['image_url']}" class="card-img-left" alt="Learning Step Image">
                 </div>
                 <div class="col-9">
                     <div class="card-body">
                         <h5 class="card-title">{step['label']}</h5>
-                        <p class="card-text"><b>Description:</b> {step['short_description']}<br></p>
+                        <p class="card-text"><b>Description:</b> {step['short_description']}</p>
+                        <p><b>Skills:</b> {skills_chips if skills_chips else 'N/A'}</p>
                         <a href="{step['catalog_url']}" target="_blank" class="btn btn-primary">View Program</a>
                     </div>
-                    <ul class="list-group mt-2">
-                        <li class="list-group-item"><b>Skills:</b></li>
-                        {skills_chips if skills_chips else 'N/A'}<br>
-                        {skills_list if skills_list else '<li class="list-group-item">N/A</li>'}
-                    </ul>
-                    <div class="card-footer">
-                        <small class="text-muted">Duration: {step['duration']} | Difficulty: {step['difficulty']}</small>
-                    </div>
+                </div>
+                <div class="card-footer text-muted w-100 d-flex justify-content-between align-items-center">
+                    <small>Duration: {step['duration']}</small>
+                    <small>Difficulty: {step['difficulty']}</small>
                 </div>
             </div>
         </div>
