@@ -145,33 +145,40 @@ class StepStatus(Enum):
 class Requirement(BaseModel):
     description: str
 
+# Curation Reason Model
+class curationReasoning(BaseModel):
+    steps: list[Step]
+    final_answer: str
+
 # LearningPlanStep Base Model
 class LearningPlanStep(BaseModel):
     step_type: StepType
     label: str
     duration: str = Field(
         ...,
-        description="the string value for the amount of time based on the children's program catalog data."
+        description=f"""the string value for the amount of time based on the children's program catalog data."""
     )
     catalog_url: str = Field(
         ...,
-        description="the url to the public offering based on the program's catalog data."
+        description=f"""the url to the public offering based on the program's catalog data."""
     )
     short_description: str = Field(
         ...,
-        description="the offering's short description based on the program's catalog data."
+        description=f"""the offering's short description based on the program's catalog data."""
     )
     long_description: str = Field(
         ...,
-        description="the offering's long description based on the program's catalog data."
+        description=f"""the offering's long description based on the program's catalog data."""
     )
     skills: str = Field(
         ...,
-        description="the skills associated with the offering based on the program's catalog data."
+        description=f"""the skills associated with the offering based on the program's catalog data."""
     )
     recommendation_reason: str = Field(
         ...,
-        description="The rationale for why this step helps solve the learning plan goal, and how these skills map to the goal. This is a client facing summary that will be reviewed by a financial decision maker. Write in clear straight forward language about how this offering will help the customer succeed in their learning goal."
+        description=f"""The rationale for why this step helps solve the learning plan goal, and how these skills map 
+        to the goal. This is a client facing summary that will be reviewed by a financial decision maker. Write in clear 
+        straight forward language about how this offering will help the customer succeed in their learning goal."""
     )
     assessments: Optional[List['LearningPlanAssessment']] = None
     starting_requirements: List[Requirement]
@@ -205,35 +212,46 @@ class learningPlan(BaseModel):
     image_url: Optional[str] = None
     short_description: Optional[str] = Field(
         ...,
-        description="A short description of what is compelling about the learning plan."
+        description=f"""A short description of what is compelling about the learning plan."""
     )
     long_description: Optional[str] = Field(
         ...,
-        description="A compelling description of what is covered in the learning plan, and how it meets the requirements of the original prompt."
+        description=f"""A compelling description of what is covered in the learning plan, and how it meets 
+        the requirements of the original prompt."""
     )
     solutionCoverage: str = Field(
         ...,
-        description="A thorough analysis of how well this learning plan covers the learning goals that were given, MUST be formatted in markdown (don't to include the title of the section)."
+        description=f"""A thorough analysis of how well this learning plan covers the learning goals that 
+        were given, MUST be formatted in markdown."""
     )
     solutionGap: str = Field(
         ...,
-        description="A thorough analysis of the potential gaps / things not covered by the learning plan that are need for the learning goals that were given, MUST be formatted in markdown (don't to include the title of the section). Suggest potential additional recommendations from the Udacity catalog that could help fill these gaps."
+        description=f"""A thorough analysis of the potential gaps / things not covered by the learning plan that are 
+        need for the learning goals that were given, MUST be formatted in markdown. Suggest potential additional recommendations 
+        from the Udacity catalog that could help fill these gaps. You MUST get this from the catalog, and you MUST provide 
+        a URL from the catalog data."""
     )
     prerequisites: str = Field(
         ...,
-        description="A thorough analysis of the potential pre-requisites that a learner might need to succeed in this plan, MUST be formatted in markdown (don't to include the title of the section). Suggest potential additional recommendations from the Udacity catalog that could help satisfy these pre-requisites."
+        description=f"""A thorough analysis of the potential pre-requisites that a learner might need to succeed in this 
+        plan, MUST be formatted in markdown (don't to include the title of the section). Suggest potential additional 
+        recommendations from the Udacity catalog that could help satisfy these pre-requisites. You MUST get this from 
+        the catalog, and you MUST provide a URL from the catalog data."""
     )
     steps: List[LearningPlanStep]
     completion_requirements: List[Requirement]
+    curationReasoning: curationReasoning
 
 # Formatting prompt into a structure that OpenAI accepts.
 def prompt(message):
     return [
         {'role': 'system', 
-         'content': f"""prompt: You are a solutions architect at Udacity. You create learning plans based on enterprise customer's learning
-         and development needs. You need to be persuasive and informative on why this learning plan is a great match for the learner or customer's needs.
-         Back up your justification for different parts of the plan persuasively. You MUST respect constraints given to you, such as how long
-         they want the learning plan to be or what type of skills matter to them."""},
+         'content': f"""prompt: You are a solutions architect at Udacity. You create learning plans based on enterprise 
+         customer's learning and development needs. You need to be persuasive and informative on why this learning plan 
+         is a great match for the learner or customer's needs. Back up your justification for different parts of the plan 
+         persuasively. You MUST respect constraints given to you, such as how long they want the learning plan to be or what 
+         type of skills matter to them. Make sure your learning plan has a reasonable sequence, where one course prepares you 
+         for the next."""},
         {'role': 'user', 
          'content': f"""{message}"""}
             ]
@@ -263,8 +281,10 @@ def generateLearningPlan(message, jobProfile, uploadedFile):
     
     with st.status("Building Learning Plan..."):
 
-        message = f"""Build a Udacity learning plan that meets the following requirements: {message}. Build someone for the following job profile: {jobProfile}.
-        ONLY use offerings in the catalog dataset, where you'll find relevant metadata to the model you need to grab. Catalog: {filtered_programs}. Here is some additional information that might help: {uploadedFile}"""
+        message = f"""Build a Udacity learning plan that meets the following requirements: {message}. Build someone for the 
+        following job profile: {jobProfile}. ONLY use offerings in the catalog dataset, where you'll find relevant metadata 
+        to the model you need to grab. Catalog: {filtered_programs}. Here is some additional information that might help: {uploadedFile}.
+        REASON through this step by step."""
         myPrompt = prompt(message)
         response = chatgpt(myPrompt, format_=learningPlan)
 
@@ -319,7 +339,8 @@ def generateLearningPlan(message, jobProfile, uploadedFile):
         "solution_gap": response.solutionGap,
         "prerequisites": response.prerequisites,
         "steps": [step_to_dict(step) for step in response.steps],
-        "completion_requirements": [requirement_to_dict(req) for req in response.completion_requirements]
+        "completion_requirements": [requirement_to_dict(req) for req in response.completion_requirements],
+        "curation_reason": response.curationReason
     }
 
     return response_dict, filtered_titles
@@ -368,6 +389,8 @@ def learning_plan_generator():
 
             with st.expander('Searching these courses for a Learning Plan...'):
                 st.write(considered_titles)
+
+            with st.expander('AI step-by-step logic for how it reached this curation.')
                 
             # Divider before Learning Plan Section
             st.divider()
