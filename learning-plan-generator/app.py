@@ -7,12 +7,6 @@ st.markdown("""
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.min.js" integrity="sha384-0pUGZvbkm6XF6gxjEnlmuGrJXVbNuzT9qBBavbLwCsOGabYfZo0T0to5eqruptLy" crossorigin="anonymous"></script>
 <style>
-    .card-container {
-        border: 1px solid #ccc;
-        border-radius: 8px;
-        overflow: hidden;
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-    }
     .card-img-left {
         width: 100%;
         height: 100%;
@@ -41,48 +35,20 @@ st.markdown("""
         color: #004085;
         background-color: #cce5ff;
     }
-
     .card-container {
         border: 1px solid #ccc;
         border-radius: 8px;
         overflow: hidden;
         box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-        background: rgba(255,255,255,0);
+        background: #fff;
         position: relative;
+        transition: transform 0.3s ease, box-shadow 0.3s ease; /* Smooth transition */
     }
-
-    /* Shimmer effect on hover */
-    .card-container::before {
-        content: "";
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: linear-gradient(
-            90deg,
-            rgba(255, 255, 255, 0) 0%,
-            rgba(255, 255, 255, 0.4) 50%,
-            rgba(255, 255, 255, 0) 100%
-        );
-        pointer-events: none;
-        opacity: 0; /* Hide by default */
-        transform: translateX(0); /* Default position */
+    .card-container:hover {
+        transform: scale(1.01); /* Slightly increases the size of the card */
+        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4); /* Increases shadow on hover */
     }
-    
-    .card-container:hover::before {
-        opacity: 1; /* Show on hover */
-        animation: shiver 0.1s infinite;
-    }
-    
-    @keyframes shiver {
-        0% { transform: translateX(-1px); }
-        50% { transform: translateX(1px); }
-        100% { transform: translateX(-1px); }
-    }
-
 </style>
-
 """, unsafe_allow_html=True)
 
 # File processing.
