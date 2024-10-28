@@ -344,7 +344,7 @@ def generateLearningPlan(message, jobProfile, uploadedFile):
         "prerequisites": response.prerequisites,
         "steps": [step_to_dict(step) for step in response.steps],
         "completion_requirements": [requirement_to_dict(req) for req in response.completion_requirements],
-        "curation_reason": response.curationReason
+        "curation_reasoning": response.curationReasoning
     }
 
     return response_dict, filtered_titles
@@ -395,7 +395,7 @@ def learning_plan_generator():
                 st.write(considered_titles)
 
             with st.expander('AI step-by-step logic for how it reached this curation.'):
-                st.write(plan['curation_reason'])
+                st.write(plan['curation_reasoning'])
                 
             # Divider before Learning Plan Section
             st.divider()
