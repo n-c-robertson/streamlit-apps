@@ -411,7 +411,7 @@ def horizontalCard(step):
         <div class="container mt-5">
             <div class="card-container row g-0">
                 <div class="col-3">
-                    <img src="https://video.udacity-data.com/topher/2024/October/6709867b_cd1930/cd1930.jpg" class="card-img-left" alt="Learning Step Image">
+                    <img src=\"{step['image_url']}\" class="card-img-left" alt="Learning Step Image">
                 </div>
                 <div class="col-9">
                     <div class="card-body">
@@ -422,16 +422,6 @@ def horizontalCard(step):
                                            <b>Status:</b> {step['status']}<br>
                                            <b>Recommendation Reason:** {step['recommendation_reason']}</p>
                         <a href=\"{step['catalog_url']}\" target="_blank" class="btn btn-primary">View Program</a>
-                        <div class="mt-3">
-                            <strong>Starting Requirements:</strong>
-                            <ul>
-                                {''.join(f'<li>{req['description']}</li>' for req in step['starting_requirements'])}
-                            </ul>
-                            <strong>Completion Requirements:</strong>
-                            <ul>
-                                {''.join(f'<li>{req["description"]}</li>' for req in step['completion_requirements'])}
-                            </ul>
-                        </div>
                     </div>
                 </div>
             </div>
