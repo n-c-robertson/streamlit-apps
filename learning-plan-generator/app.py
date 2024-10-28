@@ -407,29 +407,34 @@ def generateLearningPlan(message, jobProfile, uploadedFile):
 
 def horizontalCard(step):
     """Generates an HTML card for a learning step."""
-    skills_chips = ''
+    skills_list = ''
     if step['skills']:
         skills_list = step['skills'].split(', ')  # Assuming skills are a comma-separated string
-        skills_chips = ' '.join(f'<span class="chip">{skill}</span>' for skill in skills_list)
+        skills_list = ''.join(f'<li class="list-group-item">{skill}</li>' for skill in skills_list)
 
     return f"""
         <div class="container mt-5">
             <div class="card-container row g-0">
                 <div class="col-3">
-                    <img src=\"{step['image_url']}\" class="card-img-left" alt="Learning Step Image">
+                    <img src="{step['image_url']}" class="card-img-left" alt="Learning Step Image">
                 </div>
                 <div class="col-9">
                     <div class="card-body">
                         <h5 class="card-title">{step['label']}</h5>
                         <p class="card-text"><b>Duration:</b> {step['duration']}<br>
                                            <b>Description:</b> {step['short_description']}<br>
-                                           <b>Skills:</b> {skills_chips if skills_chips else 'N/A'}<br>
-                        <a href=\"{step['catalog_url']}\" target="_blank" class="btn btn-primary">View Program</a>
+                        </p>
+                        <a href="{step['catalog_url']}" target="_blank" class="btn btn-primary">View Program</a>
                     </div>
+                    <ul class="list-group mt-2">
+                        <li class="list-group-item"><b>Skills:</b></li>
+                        {skills_list if skills_list else '<li class="list-group-item">N/A</li>'}
+                    </ul>
                 </div>
             </div>
         </div>
     """
+
 
 def learning_plan_generator():
     st.title("Learning Plan Generator")
