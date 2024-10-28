@@ -2,6 +2,11 @@
 import streamlit as st
 import streamlit.components.v1 as components
 
+# Streamlit hack for getting bootstrap styling.
+st.markdown("""
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-1BmE4kWBq78iYhFldvKuhfTAU6auU8tT94WrHftjDbrCEXSU1oBoqyl2QvZ6jIW3" crossorigin="anonymous">
+""", unsafe_allow_html=True)
+
 # File processing.
 import PyPDF2
 from docx import Document
@@ -54,7 +59,8 @@ def fetch_catalog():
             'difficulty': result['difficulty'],
             'title': result['title'],
             'summary': result['summary'],
-            'skill_names': result['skill_names']
+            'skill_names': result['skill_names'],
+            'image_url': result['image_url']
         } for result in catalog_results
     ]
 
@@ -158,9 +164,13 @@ class curationReasoning(BaseModel):
 class LearningPlanStep(BaseModel):
     step_type: StepType
     label: str
+    image_url: str = Field(
+        ...,
+        description=f"""the URL to the image for the offering based on the catalog's data."""
+    )
     duration: str = Field(
         ...,
-        description=f"""the string value for the amount of time based on the children's program catalog data."""
+        description=f"""the string value for the amount of time based on the program catalog data."""
     )
     catalog_url: str = Field(
         ...,
