@@ -7,37 +7,79 @@ st.markdown("""
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.min.js" integrity="sha384-0pUGZvbkm6XF6gxjEnlmuGrJXVbNuzT9qBBavbLwCsOGabYfZo0T0to5eqruptLy" crossorigin="anonymous"></script>
 <style>
-        .card-img-left {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
+    .card-container {
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+    .card-img-left {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-top-left-radius: 8px;
+        border-bottom-left-radius: 8px;
+    }
+    .card-body {
+        padding: 1.25rem; /* Increased padding for better spacing */
+    }
+    .card-title {
+        font-weight: bold; /* Bold title */
+    }
+    .chip {
+        display: inline-block;
+        padding: 0.25em 0.6em;
+        font-size: 0.75em;
+        font-weight: 700;
+        line-height: 1;
+        text-align: center;
+        white-space: nowrap;
+        vertical-align: baseline;
+        border-radius: 0.25rem;
+        margin-right: 0.5rem;
+        margin-bottom: 0.5rem;
+        color: #004085;
+        background-color: #cce5ff;
+    }
+
+    .card-container {
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        background: #fff;
+        position: relative;
+    }
+
+    /* Shimmer effect on hover */
+    .card-container:hover::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(
+            90deg,
+            rgba(255, 255, 255, 0) 0%,
+            rgba(255, 255, 255, 0.4) 50%,
+            rgba(255, 255, 255, 0) 100%
+        );
+        animation: shimmer 3s 1;
+        pointer-events: none;
+    }
+
+    @keyframes shimmer {
+        0% {
+            transform: translateX(-100%);
         }
-        .chip {
-            display: inline-block;
-            padding: 0.25em 0.6em;
-            font-size: 0.75em;
-            font-weight: 700;
-            line-height: 1;
-            text-align: center;
-            white-space: nowrap;
-            vertical-align: baseline;
-            border-radius: 0.25rem;
-            margin-right: 0.5rem;
-            margin-bottom: 0.5rem;
+        100% {
+            transform: translateX(100%);
         }
-        .chip-blue {
-            color: #004085;
-            background-color: #cce5ff;
-        }
-        .chip-green {
-            color: #155724;
-            background-color: #d4edda;
-        }
-        .chip-yellow {
-            color: #856404;
-            background-color: #fff3cd;
-        }
-    </style>
+    }
+
+</style>
+
 """, unsafe_allow_html=True)
 
 # File processing.
@@ -397,27 +439,26 @@ def generateLearningPlan(message, jobProfile, uploadedFile):
 def horizontalCard():
     return f"""
         <div class="container mt-5">
-            <div class="card-img-left">
-                <div class="row g-0">
-                    <div class="col-3">
-                        <img src="https://video.udacity-data.com/topher/2024/October/6709867b_cd1930/cd1930.jpg" class="img-fluid rounded-start" alt="Vintage car">
-                    </div>
-                    <div class="col-9">
-                        <div class="card-body">
-                            <h5 class="card-title">Card title</h5>
-                            <p class="card-text">This is a wider card with supporting text below as a natural lead-in to additional content. This content is a little bit longer.</p>
-                            <div class="mb-3">
-                                <span class="chip chip-blue">Chip 1</span>
-                                <span class="chip chip-green">Chip 2</span>
-                                <span class="chip chip-yellow">Chip 3</span>
-                            </div>
-                            <p class="card-text"><small class="text-body-secondary">Last updated 3 mins ago</small></p>
+            <div class="card-container row g-0"">
+                <div class="col-3">
+                    <img src="https://video.udacity-data.com/topher/2024/October/6709867b_cd1930/cd1930.jpg" class="card-img-left" alt="Vintage car">
+                </div>
+                <div class="col-9">
+                    <div class="card-body">
+                        <h5 class="card-title">Card title</h5>
+                        <p class="card-text">This is a wider card with supporting text below as a natural lead-in to additional content. This content is a little bit longer.</p>
+                        <div class="mb-3">
+                            <span class="chip">Chip 1</span>
+                            <span class="chip">Chip 2</span>
+                            <span class="chip">Chip 3</span>
                         </div>
+                        <p class="card-text"><small class="text-body-primary">Last updated 3 mins ago</small></p>
+                        <a href="https://www.google.com" target="_blank" class="program-link">Program Page</a>
                     </div>
                 </div>
             </div>
         </div>
-        """
+    """
 
 def learning_plan_generator():
     st.title("Learning Plan Generator")
