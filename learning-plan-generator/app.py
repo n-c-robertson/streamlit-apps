@@ -390,7 +390,8 @@ def learning_plan_generator():
             with st.expander('Searching these courses for a Learning Plan...'):
                 st.write(considered_titles)
 
-            with st.expander('AI step-by-step logic for how it reached this curation.')
+            with st.expander('AI step-by-step logic for how it reached this curation.'):
+                st.write(plan['curation_reason'])
                 
             # Divider before Learning Plan Section
             st.divider()
