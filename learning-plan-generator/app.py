@@ -145,9 +145,13 @@ class StepStatus(Enum):
 class Requirement(BaseModel):
     description: str
 
+class curationStep(BaseModel):
+    explanation: str
+    output: str
+
 # Curation Reason Model
 class curationReasoning(BaseModel):
-    steps: list[Step]
+    steps: list[curationStep]
     final_answer: str
 
 # LearningPlanStep Base Model
