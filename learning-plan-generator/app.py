@@ -395,7 +395,7 @@ def generateLearningPlan(message, jobProfile, uploadedFile):
 
 
 def horizontalCard():
-    components.html("""
+    components.html(f"""
         <div class="container mt-5">
             <div class="card mb-3">
                 <div class="row g-0">
