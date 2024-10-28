@@ -11,8 +11,8 @@ st.markdown("""
         width: 100%;
         height: 100%;
         object-fit: cover;
-        border-top-left-radius: 8px;
-        border-bottom-left-radius: 8px;
+        border-top-left-radius: 0px;
+        border-bottom-left-radius: 0px;
     }
     .card-body {
         padding: 1.25rem; /* Increased padding for better spacing */
