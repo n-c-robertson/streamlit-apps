@@ -360,7 +360,7 @@ def generateLearningPlan(message, jobProfile, uploadedFile):
             "step_type": step.step_type.value,
             "label": step.label,
             "duration": step.duration if hasattr(step, 'duration') else None,
-            "difficulty" step.difficulty if hasattr(step, 'difficulty') else None,
+            "difficulty": step.difficulty if hasattr(step, 'difficulty') else None,
             "catalog_url": step.catalog_url if hasattr(step, 'catalog_url') else None,
             "image_url": step.image_url if hasattr(step, 'image_url') else None,
             "short_description": step.short_description if hasattr(step, 'short_description') else None,
