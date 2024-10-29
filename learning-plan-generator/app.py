@@ -508,7 +508,6 @@ def learning_plan_generator():
 
         
         st.title("Learning Plan Generator")        
-        st.write("Enter your learning requirements and job description to generate a personalized learning plan.")
         generatePlan = st.button("Generate Plan")
         
         # Input for learning requirements
