@@ -50,6 +50,12 @@ background = """
             border: none
         }
 
+        /* Click (active) effect */
+        .stButton > button:active {
+            background-color: #000D85; /* Even darker shade for click */
+            color: white;
+        }
+
         .stExpander {
             background-color: #fff; /* Change to your desired expander background color */
             border-radius: 5px; /* Rounded corners */
@@ -69,21 +75,21 @@ background = """
         }
 
         .card-button {
-                background-color: #2015FF; /* Custom background color */
-                color: white; /* Custom text color */
-                padding: 10px 20px; /* Padding for the button */
-                text-align: center; /* Center text */
-                text-decoration: none; /* Remove underline */
-                display: inline-block; /* Make it behave like a button */
-                border: none; /* No border */
-                border-radius: 5px; /* Rounded corners */
-                transition: background-color 0.3s, color 0.3s; /* Smooth transition */
-            }
+            background-color: #2015FF; /* Custom background color */
+            color: white; /* Custom text color */
+            padding: 10px 20px; /* Padding for the button */
+            text-align: center; /* Center text */
+            text-decoration: none; /* Remove underline */
+            display: inline-block; /* Make it behave like a button */
+            border: none; /* No border */
+            border-radius: 5px; /* Rounded corners */
+            transition: background-color 0.3s, color 0.3s; /* Smooth transition */
+        }
         
-            .card-button:hover {
-                background-color: #000D85; /* Background color on hover */
-                color: #white; /* Text color on hover */
-            }
+        .card-button:hover {
+            background-color: #000D85; /* Background color on hover */
+            color: white; /* Text color on hover (corrected) */
+        }
 
 </style>
 
@@ -588,7 +594,7 @@ def learning_plan_generator():
             plan, considered_titles = generateLearningPlan(learningRequirements, jobProfile, unifiedFile)
             
             # Basic formatted Learning Plans.
-            st.markdown(f"#**<{plan['title']}**")
+            st.markdown(f"# **<{plan['title']}**")
 
             for step in plan['steps']:
                 st.markdown(horizontalCard(step), unsafe_allow_html=True)
