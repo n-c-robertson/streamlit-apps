@@ -222,7 +222,7 @@ class LearningPlanStep(BaseModel):
     )
     short_description: str = Field(
         ...,
-        description=f"""the offering's short description based on the program's catalog data."""
+        description=f"""the offering's short description based on the program's catalog data. 150 char MAX."""
     )
     long_description: str = Field(
         ...,
@@ -413,10 +413,36 @@ def generateLearningPlan(message, jobProfile, uploadedFile):
 def horizontalCard(step):
     """Generates an HTML card for a learning step."""
     skills_chips = ''
+    modal_id = f"modal-{step['label']}"
+    
     if step['skills']:
         skills_list = step['skills'].split(', ')  # Assuming skills are a comma-separated string
-        skills_chips = ' '.join(f'<span class="chip">{skill}</span>' for skill in skills_list)
-
+        # Show first 3 skills and count the remaining ones
+        displayed_skills = skills_list[:3]
+        remaining_skills_count = len(skills_list) - 3
+        skills_chips = ' '.join(f'<span class="chip">{skill}</span>' for skill in displayed_skills)
+        
+        # Add "+[remaining count]" button if there are more than 3 skills
+        if remaining_skills_count > 0:
+            skills_chips += f' <button class="btn btn-link" data-bs-toggle="modal" data-bs-target="#{modal_id}">+{remaining_skills_count}</button>'
+    
+    # Modal HTML for showing all skills
+    modal_html = f"""
+    <div class="modal fade" id="{modal_id}" tabindex="-1" aria-labelledby="{modal_id}-label" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="{modal_id}-label">All Skills</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    {' '.join(f'<span class="chip">{skill}</span>' for skill in skills_list)}
+                </div>
+            </div>
+        </div>
+    </div>
+    """
+    
     return f"""
         <div class="container mt-5">
             <div class="card">
@@ -438,6 +464,7 @@ def horizontalCard(step):
                     <span class="float-end"><small>Difficulty: {step['difficulty']}</small></span>
                 </div>
             </div>
+            {modal_html}
         </div>
     """
 
@@ -532,11 +559,6 @@ def learning_plan_generator():
                                 
             # Divider before Completion Requirements
             st.divider()
-
-            # Completion Requirements section
-            st.markdown("## Completion Requirements")
-            for req in plan['completion_requirements']:
-                st.write(f"- {req['description']}")
 
             # Some diagnostics for monitoring.
             st.subheader('Diagnostics')
