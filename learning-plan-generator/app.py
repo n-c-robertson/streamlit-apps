@@ -455,7 +455,7 @@ def learning_plan_generator():
             "Learning Requirements", 
              placeholder="Enter your learning requirements...",
              value=f"""Generate a learning plan for ai. I want to take people who know nothing about ai and give them some basic fluency. By the end of the plan, they should have a decent conceptual understanding of ai, as well as some basic scripting skills with ai libraries. This should take roughly six months to complete.""",
-             height=100
+             height=150
         )
         
         # Input for job description
@@ -463,41 +463,39 @@ def learning_plan_generator():
             "Job Description", 
             placeholder="Enter the job description...", 
             value=f"""I'm training to train data analysts. They will be responsible for BI / data analysis functions in the company. But, we are also trying to make them more AI / ML focused, and push for more predictive and gen AI capabilities in the company. """,
-            height=100
+            height=150
         )
     
-        fileUpload = st.file_uploader("Feel free to upload supporting assets", type=["pdf", "docx", "txt", "csv", "xlsx"])
+        fileUpload = st.file_uploader("Feel free to upload supporting assets", type=["pdf", "docx", "txt", "csv", "xlsx"], accept_multiple_files=True)
     
         generatePlan = st.button("Generate Plan")
     
-    # Button to submit form
+    # If the plan was clicked.
     if generatePlan:
+
+        # If both requirements and job profile data was provided.
         if learningRequirements and jobProfile:
             st.info("Plan generating! This will take about 30 seconds to load.")
 
+            # If there is a file / list of files, process them.
             if fileUpload is not None:
-                file = process_file(fileUpload)
+
+                # Empty var for file concatenation.
+                unifiedFile = ''
+
+                # Process each file according to its type.
+                for f in fileUpload:
+                    file = process_file(f)
+
+                    # Add it to the unified file.
+                    unifiedFile += file
+
+            # Otherwise, specifiy no file given.
             else:
-                file = 'No Support Assets Provided.'
+                unifiedFile = 'No Support Assets Provided.'
 
             # Create plan.
-            plan, considered_titles = generateLearningPlan(learningRequirements, jobProfile, file)
-
-            # Some diagnostics for monitoring.
-            st.title('Success: Learning Plan generated.')
-            st.write('Expand these sections to see underlying performance, or scroll down to review the Learning Plan.')
-
-            with st.expander('Expand to see underlying data structure...'):
-                st.write(plan)
-
-            with st.expander('Searching these courses for a Learning Plan...'):
-                st.write(considered_titles)
-
-            with st.expander('AI step-by-step logic for how it reached this curation.'):
-                st.write(plan['curation_reasoning'])
-                
-            # Divider before Learning Plan Section
-            st.divider()
+            plan, considered_titles = generateLearningPlan(learningRequirements, jobProfile, unifiedFile)
             
             # Basic formatted Learning Plans.
             st.title(plan['title'])
@@ -540,6 +538,19 @@ def learning_plan_generator():
             for req in plan['completion_requirements']:
                 st.write(f"- {req['description']}")
 
+            # Some diagnostics for monitoring.
+            st.subheader('Diagnostics')
+
+            with st.expander('Expand to see underlying data structure...'):
+                st.write(plan)
+
+            with st.expander('Searching these courses for a Learning Plan...'):
+                st.write(considered_titles)
+
+            with st.expander('AI step-by-step logic for how it reached this curation.'):
+                st.write(plan['curation_reasoning'])
+
+        # Throw eror if both not called.
         else:
             st.error("Please fill in both fields before submitting.")
 
