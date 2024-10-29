@@ -414,18 +414,19 @@ def generateLearningPlan(message, jobProfile, uploadedFile):
     programs = fetch_catalog()
 
     # pre-filtering of programs.
-    with st.status("Prefiltering Catalog..."):
-        filtered_titles = retrieve_matching_courses(query=message, programs=programs)
-        filtered_programs = [p for p in programs if p['title'] in filtered_titles]
-    
-    with st.status("Building Learning Plan..."):
-
-        message = f"""Build a Udacity learning plan that meets the following requirements: {message}. Build someone for the 
-        following job profile: {jobProfile}. ONLY use offerings in the catalog dataset, where you'll find relevant metadata 
-        to the model you need to grab. Catalog: {filtered_programs}. Here is some additional information that might help: {uploadedFile}.
-        REASON through this step by step."""
-        myPrompt = prompt(message)
-        response = chatgpt(myPrompt, format_=learningPlan)
+    with st.empty():
+            with st.status("Prefiltering Catalog..."):
+                filtered_titles = retrieve_matching_courses(query=message, programs=programs)
+                filtered_programs = [p for p in programs if p['title'] in filtered_titles]
+            
+            with st.status("Building Learning Plan..."):
+        
+                message = f"""Build a Udacity learning plan that meets the following requirements: {message}. Build someone for the 
+                following job profile: {jobProfile}. ONLY use offerings in the catalog dataset, where you'll find relevant metadata 
+                to the model you need to grab. Catalog: {filtered_programs}. Here is some additional information that might help: {uploadedFile}.
+                REASON through this step by step."""
+                myPrompt = prompt(message)
+                response = chatgpt(myPrompt, format_=learningPlan)
 
    # Manually convert the response object to a dictionary
     def requirement_to_dict(requirement):
@@ -551,7 +552,9 @@ def learning_plan_generator():
 
         # If both requirements and job profile data was provided.
         if learningRequirements and jobProfile:
-            st.info("Plan generating! This will take about 30 seconds to load.")
+
+        
+            st.header("Plan generating! This will take about 30 seconds to load.")
 
             # If there is a file / list of files, process them.
             if fileUpload is not None:
