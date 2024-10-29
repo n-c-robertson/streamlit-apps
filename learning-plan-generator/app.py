@@ -71,7 +71,9 @@ background = """
         /* Hover effect for header */
         .stExpander .stExpanderHeader:hover {
             background-color: #fff; /* Change to your desired hover color */
+            color: #000
         }
+
 </style>
 
 <div class="main">
