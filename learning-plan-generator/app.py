@@ -76,7 +76,7 @@ background = """
 
         .card-button {
             background-color: #2015FF; /* Custom background color */
-            color: white; /* Custom text color */
+            color: white !important; /* Custom text color */
             padding: 10px 20px; /* Padding for the button */
             text-align: center; /* Center text */
             text-decoration: none; /* Remove underline */
@@ -88,7 +88,7 @@ background = """
         
         .card-button:hover {
             background-color: #000D85; /* Background color on hover */
-            color: white; /* Text color on hover (corrected) */
+            color: white !important; /* Text color on hover (corrected) */
         }
 
 </style>
