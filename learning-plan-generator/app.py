@@ -45,7 +45,9 @@ background = """
         }
         
         .stButton > button:hover {
-            background-color: #2015FF; /* Change to your desired hover color */
+            background-color: #000D85; /* Change to your desired hover color */
+            color: white;
+            border: none
         }
 
 </style>
