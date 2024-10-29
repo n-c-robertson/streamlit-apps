@@ -20,6 +20,17 @@ background = """
     right: 0px; /* Adjust right position as needed */
     width: 50px; /* Set logo width */
 }
+
+/* Set all Streamlit components to have white backgrounds */
+[data-testid="stMarkdownContainer"],
+[data-testid="stTextArea"],
+[data-testid="stButton"],
+[data-testid="stSidebar"] {
+    background-color: white;
+    border-radius: 5px; /* Optional: Add border radius for rounded corners */
+    padding: 10px; /* Optional: Add padding for better spacing */
+}
+
 </style>
 
 <div class="main">
@@ -580,8 +591,8 @@ def learning_plan_generator():
             st.error("Please fill in both fields before submitting.")
             
     elif not generatePlan:
-        st.header("Generate a learning plan")
-        st.text("Use the sidebar to give us context on the learning plan you are trying to build. Click Generate Plan when you are ready!")
+        st.header("**Generate Your First Learning Plan!")
+        st.markdown("Use the sidebar to give us context on the learning plan you are trying to build. Click Generate Plan when you are ready!")
         with st.expander("Detailed Instructions"):
             st.markdown(f"""
             Write helpful instrucitons here.
