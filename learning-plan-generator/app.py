@@ -586,6 +586,7 @@ def learning_plan_generator():
             st.markdown(f"""
             Write helpful instrucitons here.
             """
+            )
         
 # Call the function to render the form
 learning_plan_generator()
