@@ -62,16 +62,10 @@ background = """
         /* Style for expander title */
         .stExpander .stExpanderHeader {
             background-color: #fff; /* Header background color */
-            color: white; /* Header text color */
+            color: #000; /* Header text color */
             padding: 10px; /* Padding for header */
             cursor: pointer; /* Pointer cursor on hover */
             transition: background-color 0.3s; /* Smooth transition for header */
-        }
-
-        /* Hover effect for header */
-        .stExpander .stExpanderHeader:hover {
-            background-color: #fff; /* Change to your desired hover color */
-            color: #000
         }
 
 </style>
