@@ -541,9 +541,6 @@ def horizontalCard(step):
 def learning_plan_generator():
 
     with st.sidebar:
-
-        
-        st.title("Learning Plan Generator")        
         generatePlan = st.button("Generate Plan")
         
         # Input for learning requirements
