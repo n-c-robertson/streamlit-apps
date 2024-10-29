@@ -630,7 +630,10 @@ def learning_plan_generator():
         st.markdown("Use the sidebar to give us context on the learning plan you are trying to build. Click Generate Plan when you are ready!")
         with st.expander("Detailed Instructions"):
             st.markdown(f"""
-            Write helpful instrucitons here.
+            * Write a short and clear description of the goals of the learning plan.
+            * Write a short and clear description of the job profile this learning plan serves.
+            * Optional: Upload supporting context files from the client.
+            * Click "Generate Learning Plan".
             """
             )
         
