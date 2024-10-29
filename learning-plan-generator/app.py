@@ -422,14 +422,14 @@ def horizontalCard(step):
             <div class="card">
                 <div class="row g-0">
                     <div class="col-3">
-                        <img src="{step['image_url']}" class="card-img-left" alt="Learning Step Image">
+                        <img src=\"{step['image_url']}\" class="card-img-left" alt="Learning Step Image">
                     </div>
                     <div class="col-9">
                         <div class="card-body">
                             <h5 class="card-title">{step['label']}</h5>
                             <p class="card-text"><b>Description:</b> {step['short_description']}</p>
                             <p><b>Skills:</b> {skills_chips if skills_chips else 'N/A'}</p>
-                            <a href="{step['catalog_url']}" target="_blank" class="btn btn-primary">View Program</a>
+                            <a href=\"{step['catalog_url']}\" target="_blank" class="btn btn-primary">View Program</a>
                         </div>
                     </div>
                 </div>
@@ -444,6 +444,9 @@ def horizontalCard(step):
 
 def learning_plan_generator():
     st.title("Learning Plan Generator")
+
+    with st.sidebar:
+    
     st.write("Enter your learning requirements and job description to generate a personalized learning plan.")
     
     # Input for learning requirements
@@ -463,9 +466,11 @@ def learning_plan_generator():
     )
 
     fileUpload = st.file_uploader("Feel free to upload supporting assets", type=["pdf", "docx", "txt", "csv", "xlsx"])
+
+    generatePlan = st.button("Generate Plan")
     
     # Button to submit form
-    if st.button("Generate Plan"):
+    if generatePlan:
         if learningRequirements and jobProfile:
             st.info("Plan generating! This will take about 30 seconds to load.")
 
