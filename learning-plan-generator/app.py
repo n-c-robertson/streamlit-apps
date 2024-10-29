@@ -444,10 +444,10 @@ def generateLearningPlan(message, jobProfile, uploadedFile):
             
             with st.status("Building Learning Plan (takes 1 minute)..."):
         
-                message = f"""Build a Udacity learning plan that meets the following requirements: {message}. Build someone for the 
+                message = f"""Build a Udacity learning plan that meets the following requirements: {message}. Build something for the 
                 following job profile: {jobProfile}. ONLY use offerings in the catalog dataset, where you'll find relevant metadata 
                 to the model you need to grab. Catalog: {filtered_programs}. Here is some additional information that might help: {uploadedFile}.
-                REASON through this step by step."""
+                REASON through this step by step. You MUST fetch all relevant data from the catalog data (example: image_url - don't skip this!)"""
                 myPrompt = prompt(message)
                 response = chatgpt(myPrompt, format_=learningPlan)
 
