@@ -2,14 +2,19 @@
 import streamlit as st
 import streamlit.components.v1 as components
 
-page_bg_img = '''
-body {
-background-image: url("https://images.unsplash.com/photo-1542281286-9e0a16bb7366");
-background-size: cover;
+# Set the background image
+background_image = """
+<style>
+[data-testid="stAppViewContainer"] > .main {
+    background-image: url("https://images.unsplash.com/photo-1542281286-9e0a16bb7366");
+    background-size: 100vw 100vh;  # This sets the size to cover 100% of the viewport width and height
+    background-position: center;  
+    background-repeat: no-repeat;
 }
-'''
+</style>
+"""
 
-st.markdown(page_bg_img, unsafe_allow_html=True)
+st.markdown(background_image, unsafe_allow_html=True)
 
 # Streamlit hack for getting bootstrap styling.
 st.markdown("""
