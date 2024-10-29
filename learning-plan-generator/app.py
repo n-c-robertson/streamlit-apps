@@ -29,7 +29,7 @@ background = """
         }
         
         [data-testid="stSidebar"] {
-            background-color: #DFDFDF;
+            background-color: #F6F6F6;
             border-radius: 5px; /* Optional: Add border radius for rounded corners */
             padding: 10px; /* Optional: Add padding for better spacing */
         }
