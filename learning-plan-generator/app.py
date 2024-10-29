@@ -52,7 +52,6 @@ background = """
 
         .stExpander {
             background-color: #fff; /* Change to your desired expander background color */
-            border: 1px solid #ccc; /* Border color */
             border-radius: 5px; /* Rounded corners */
         }
         
@@ -65,7 +64,6 @@ background = """
             background-color: #fff; /* Header background color */
             color: white; /* Header text color */
             padding: 10px; /* Padding for header */
-            border-radius: 5px; /* Rounded corners for header */
             cursor: pointer; /* Pointer cursor on hover */
             transition: background-color 0.3s; /* Smooth transition for header */
         }
