@@ -22,7 +22,6 @@ background = """
 }
 
 /* Set all Streamlit components to have white backgrounds */
-[data-testid="stMarkdownContainer"],
 [data-testid="stTextArea"],
 [data-testid="stButton"],
 [data-testid="stSidebar"] {
