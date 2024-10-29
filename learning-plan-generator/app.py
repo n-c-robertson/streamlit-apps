@@ -463,7 +463,7 @@ def generateLearningPlan(message, jobProfile, uploadedFile):
             "duration": step.duration if hasattr(step, 'duration') else None,
             "difficulty": step.difficulty if hasattr(step, 'difficulty') else None,
             "catalog_url": step.catalog_url if hasattr(step, 'catalog_url') else None,
-            "image_url": step.image_url if hasattr(step, 'image_url') else None,
+            "image_url": step.image_url if hasattr(step, 'image_url') elif [program['image_url'] for program in programs if program['title'] == step.label][0] else None,
             "short_description": step.short_description if hasattr(step, 'short_description') else None,
             "long_description": step.long_description if hasattr(step, 'long_description') else None,
             "skills": step.skills if hasattr(step, 'skills') else None,
