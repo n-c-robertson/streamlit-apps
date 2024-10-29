@@ -446,28 +446,29 @@ def learning_plan_generator():
     st.title("Learning Plan Generator")
 
     with st.sidebar:
-    
-    st.write("Enter your learning requirements and job description to generate a personalized learning plan.")
-    
-    # Input for learning requirements
-    learningRequirements = st.text_area(
-        "Learning Requirements", 
-         placeholder="Enter your learning requirements...",
-         value=f"""Generate a learning plan for ai. I want to take people who know nothing about ai and give them some basic fluency. By the end of the plan, they should have a decent conceptual understanding of ai, as well as some basic scripting skills with ai libraries. This should take roughly six months to complete.""",
-         height=100
-    )
-    
-    # Input for job description
-    jobProfile = st.text_area(
-        "Job Description", 
-        placeholder="Enter the job description...", 
-        value=f"""I'm training to train data analysts. They will be responsible for BI / data analysis functions in the company. But, we are also trying to make them more AI / ML focused, and push for more predictive and gen AI capabilities in the company. """,
-        height=100
-    )
 
-    fileUpload = st.file_uploader("Feel free to upload supporting assets", type=["pdf", "docx", "txt", "csv", "xlsx"])
-
-    generatePlan = st.button("Generate Plan")
+        # Description
+        st.write("Enter your learning requirements and job description to generate a personalized learning plan.")
+        
+        # Input for learning requirements
+        learningRequirements = st.text_area(
+            "Learning Requirements", 
+             placeholder="Enter your learning requirements...",
+             value=f"""Generate a learning plan for ai. I want to take people who know nothing about ai and give them some basic fluency. By the end of the plan, they should have a decent conceptual understanding of ai, as well as some basic scripting skills with ai libraries. This should take roughly six months to complete.""",
+             height=100
+        )
+        
+        # Input for job description
+        jobProfile = st.text_area(
+            "Job Description", 
+            placeholder="Enter the job description...", 
+            value=f"""I'm training to train data analysts. They will be responsible for BI / data analysis functions in the company. But, we are also trying to make them more AI / ML focused, and push for more predictive and gen AI capabilities in the company. """,
+            height=100
+        )
+    
+        fileUpload = st.file_uploader("Feel free to upload supporting assets", type=["pdf", "docx", "txt", "csv", "xlsx"])
+    
+        generatePlan = st.button("Generate Plan")
     
     # Button to submit form
     if generatePlan:
