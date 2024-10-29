@@ -28,14 +28,8 @@ background = """
     padding: 10px; /* Optional: Add padding for better spacing */
 }
 
-[data-testid="stButton"] {
-    background-color: blue;
-    border-radius: 5px; /* Optional: Add border radius for rounded corners */
-    padding: 10px; /* Optional: Add padding for better spacing */
-}
-
 [data-testid="stSidebar"] {
-    background-color: grey;
+    background-color: #DFDFDF;
     border-radius: 5px; /* Optional: Add border radius for rounded corners */
     padding: 10px; /* Optional: Add padding for better spacing */
 }
