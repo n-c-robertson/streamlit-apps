@@ -68,6 +68,23 @@ background = """
             transition: background-color 0.3s; /* Smooth transition for header */
         }
 
+        .card-button {
+                background-color: #2015FF; /* Custom background color */
+                color: white; /* Custom text color */
+                padding: 10px 20px; /* Padding for the button */
+                text-align: center; /* Center text */
+                text-decoration: none; /* Remove underline */
+                display: inline-block; /* Make it behave like a button */
+                border: none; /* No border */
+                border-radius: 5px; /* Rounded corners */
+                transition: background-color 0.3s, color 0.3s; /* Smooth transition */
+            }
+        
+            .card-button:hover {
+                background-color: #000D85; /* Background color on hover */
+                color: #white; /* Text color on hover */
+            }
+
 </style>
 
 <div class="main">
@@ -553,9 +570,6 @@ def learning_plan_generator():
         # If both requirements and job profile data was provided.
         if learningRequirements and jobProfile:
 
-        
-            st.header("Plan generating! This will take about 30 seconds to load.")
-
             # If there is a file / list of files, process them.
             if fileUpload is not None:
 
@@ -636,7 +650,7 @@ def learning_plan_generator():
             * Write a short and clear description of the goals of the learning plan.
             * Write a short and clear description of the job profile this learning plan serves.
             * Optional: Upload supporting context files from the client.
-            * Click "Generate Learning Plan".
+            * Click "Generate Plan".
             """
             )
         
