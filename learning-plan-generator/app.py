@@ -524,7 +524,7 @@ def horizontalCard(step):
                             <h5 class="card-title">{step['label']}</h5>
                             <p class="card-text"><b>Description:</b> {step['short_description']}</p>
                             <p><b>Skills:</b> {skills_chips if skills_chips else 'N/A'}</p>
-                            <a href=\"{step['catalog_url']}\" target="_blank" class="btn btn-primary">View Program</a>
+                            <a href=\"{step['catalog_url']}\" target="_blank" class="card-button">View Program</a>
                         </div>
                     </div>
                 </div>
@@ -643,16 +643,11 @@ def learning_plan_generator():
             
     elif not generatePlan:
         st.header("**Generate Your First Learning Plan!**")
-        st.markdown("Use the sidebar to give us context on the learning plan you are trying to build. Click Generate Plan when you are ready!")
-        
-        with st.expander("Detailed Instructions"):
-            st.markdown(f"""
+        st.markdown(f"""
             * Write a short and clear description of the goals of the learning plan.
             * Write a short and clear description of the job profile this learning plan serves.
             * Optional: Upload supporting context files from the client.
-            * Click "Generate Plan".
-            """
-            )
+            * Click "Generate Plan".""")
         
 # Call the function to render the form
 learning_plan_generator()
