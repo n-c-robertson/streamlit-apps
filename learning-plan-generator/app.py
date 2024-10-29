@@ -436,7 +436,7 @@ def generateLearningPlan(message, jobProfile, uploadedFile):
                 filtered_titles = retrieve_matching_courses(query=message, programs=programs)
                 filtered_programs = [p for p in programs if p['title'] in filtered_titles]
             
-            with st.status("Building Learning Plan..."):
+            with st.status("Building Learning Plan (takes 1 minute)..."):
         
                 message = f"""Build a Udacity learning plan that meets the following requirements: {message}. Build someone for the 
                 following job profile: {jobProfile}. ONLY use offerings in the catalog dataset, where you'll find relevant metadata 
@@ -547,7 +547,7 @@ def learning_plan_generator():
         learningRequirements = st.text_area(
             "Learning Requirements", 
              placeholder="Enter your learning requirements...",
-             value=f"""Generate a learning plan for ai. I want to take people who know nothing about ai and give them some basic fluency. By the end of the plan, they should have a decent conceptual understanding of ai, as well as some basic scripting skills with ai libraries. This should take roughly six months to complete.""",
+             value=f"""Generate a learning plan for quantitative analysts. I want to take entry level data analysts and prepare them to build AI/ML workflows in quant contexts. It should take 6 months EXACTLY.""",
              height=100
         )
         
@@ -555,7 +555,7 @@ def learning_plan_generator():
         jobProfile = st.text_area(
             "Job Description", 
             placeholder="Enter the job description...", 
-            value=f"""I'm training to train data analysts. They will be responsible for BI / data analysis functions in the company. But, we are also trying to make them more AI / ML focused, and push for more predictive and gen AI capabilities in the company. """,
+            value=f"""I'm training data analysts into quantitative analysts. Quants do financial modeling, predicting, and forecasting to guide investments at our company.""",
             height=100
         )
     
@@ -588,7 +588,7 @@ def learning_plan_generator():
             plan, considered_titles = generateLearningPlan(learningRequirements, jobProfile, unifiedFile)
             
             # Basic formatted Learning Plans.
-            st.markdown(f"**<h1>{plan['title']}</h1>**")
+            st.markdown(f"#**<{plan['title']}**")
 
             for step in plan['steps']:
                 st.markdown(horizontalCard(step), unsafe_allow_html=True)
