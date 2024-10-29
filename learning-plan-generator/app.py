@@ -23,9 +23,14 @@ background = """
 
 /* Set all Streamlit components to have white backgrounds */
 [data-testid="stTextArea"],
-[data-testid="stButton"],
-[data-testid="stSidebar"] {
+[data-testid="stButton"] {
     background-color: white;
+    border-radius: 5px; /* Optional: Add border radius for rounded corners */
+    padding: 10px; /* Optional: Add padding for better spacing */
+}
+
+[data-testid="stSidebar"] {
+    background-color: grey;
     border-radius: 5px; /* Optional: Add border radius for rounded corners */
     padding: 10px; /* Optional: Add padding for better spacing */
 }
