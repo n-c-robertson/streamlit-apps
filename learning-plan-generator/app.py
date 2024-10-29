@@ -452,7 +452,7 @@ def learning_plan_generator():
 
         with col1:
             # Logo
-            st.image("https://www.google.com/url?sa=i&url=https%3A%2F%2Fwww.linkedin.com%2Fschool%2Fudacity%2F&psig=AOvVaw2oS7SVda4chHO0o81Q-sqa&ust=1730259837395000&source=images&cd=vfe&opi=89978449&ved=0CBQQjRxqFwoTCKjU0qnWsokDFQAAAAAdAAAAABAE",width=100)
+            st.image("https://media.licdn.com/dms/image/v2/C560BAQHiNYfm0YHKrg/company-logo_200_200/company-logo_200_200/0/1656621848677/udacity_logo?e=2147483647&v=beta&t=dA-PCLHt6eLXR8UzSr1r2JOASy7TBAd1HSPulqQiJtw",width=100)
 
         with col2:
             # Description
