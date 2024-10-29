@@ -35,17 +35,17 @@ background = """
 }
 
 .stButton > button {
-            background-color: blue; /* Change to your desired button color */
+            background-color: #2015FF; /* Change to your desired button color */
             color: white; /* Text color */
             border: none; /* Remove border */
             border-radius: 5px; /* Rounded corners */
-            padding: 10px 20px; /* Padding for the button */
+            padding: 10px 10px; /* Padding for the button */
             cursor: pointer; /* Pointer cursor on hover */
             transition: background-color 0.3s; /* Smooth transition */
         }
         
         .stButton > button:hover {
-            background-color: black; /* Change to your desired hover color */
+            background-color: #2015FF; /* Change to your desired hover color */
         }
 
 </style>
