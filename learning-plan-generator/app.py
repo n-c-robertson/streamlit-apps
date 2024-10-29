@@ -16,8 +16,8 @@ background = """
         
         .logo {
             position: absolute; /* Allows for absolute positioning */
-            top: 20px; /* Adjust top position as needed */
-            right: 0px; /* Adjust right position as needed */
+            top: 0px; /* Adjust top position as needed */
+            right: -30px; /* Adjust right position as needed */
             width: 50px; /* Set logo width */
         }
         
