@@ -413,58 +413,31 @@ def generateLearningPlan(message, jobProfile, uploadedFile):
 def horizontalCard(step):
     """Generates an HTML card for a learning step."""
     skills_chips = ''
-    modal_id = f"modal-{step['label'].replace(' ', '-')}"  # To ensure unique IDs even if labels have spaces
-
     if step['skills']:
         skills_list = step['skills'].split(', ')  # Assuming skills are a comma-separated string
-        # Show first 3 skills and count the remaining ones
-        displayed_skills = skills_list[:3]
-        remaining_skills_count = len(skills_list) - 3
-        skills_chips = ' '.join(f'<span class=\\"chip\\">{skill}</span>' for skill in displayed_skills)
-        
-        # Add "+[remaining count]" button if there are more than 3 skills
-        if remaining_skills_count > 0:
-            skills_chips += f' <button class=\\"btn btn-link\\" data-bs-toggle=\\"modal\\" data-bs-target=\\"#{modal_id}\\">+{remaining_skills_count}</button>'
-    
-    # Modal HTML for showing all skills
-    modal_html = f"""
-    <div class=\\"modal fade\\" id=\\"{modal_id}\\" tabindex=\\"-1\\" aria-labelledby=\\"{modal_id}-label\\" aria-hidden=\\"true\\">
-        <div class=\\"modal-dialog\\">
-            <div class=\\"modal-content\\">
-                <div class=\\"modal-header\\">
-                    <h5 class=\\"modal-title\\" id=\\"{modal_id}-label\\">All Skills</h5>
-                    <button type=\\"button\\" class=\\"btn-close\\" data-bs-dismiss=\\"modal\\" aria-label=\\"Close\\"></button>
-                </div>
-                <div class=\\"modal-body\\">
-                    {' '.join(f'<span class=\\"chip\\">{skill}</span>' for skill in skills_list)}
-                </div>
-            </div>
-        </div>
-    </div>
-    """
-    
+        skills_chips = ' '.join(f'<span class="chip">{skill}</span>' for skill in skills_list)
+
     return f"""
-        <div class=\\"container mt-5\\">
-            <div class=\\"card\\">
-                <div class=\\"row g-0\\">
-                    <div class=\\"col-3\\">
-                        <img src=\\"{step['image_url']}\\" class=\\"card-img-left\\" alt=\\"Learning Step Image\\">
+        <div class="container mt-5">
+            <div class="card">
+                <div class="row g-0">
+                    <div class="col-3">
+                        <img src=\"{step['image_url']}\" class="card-img-left" alt="Learning Step Image">
                     </div>
-                    <div class=\\"col-9\\">
-                        <div class=\\"card-body\\">
-                            <h5 class=\\"card-title\\">{step['label']}</h5>
-                            <p class=\\"card-text\\"><b>Description:</b> {step['short_description']}</p>
+                    <div class="col-9">
+                        <div class="card-body">
+                            <h5 class="card-title">{step['label']}</h5>
+                            <p class="card-text"><b>Description:</b> {step['short_description']}</p>
                             <p><b>Skills:</b> {skills_chips if skills_chips else 'N/A'}</p>
-                            <a href=\\"{step['catalog_url']}\\" target=\\"_blank\\" class=\\"btn btn-primary\\">View Program</a>
+                            <a href=\"{step['catalog_url']}\" target="_blank" class="btn btn-primary">View Program</a>
                         </div>
                     </div>
                 </div>
-                <div class=\\"card-footer text-muted\\">
+                <div class="card-footer text-muted">
                     <small>Duration: {step['duration']}</small>
-                    <span class=\\"float-end\\"><small>Difficulty: {step['difficulty']}</small></span>
+                    <span class="float-end"><small>Difficulty: {step['difficulty']}</small></span>
                 </div>
             </div>
-            {modal_html}
         </div>
     """
 
