@@ -591,41 +591,40 @@ def learning_plan_generator():
             plan, considered_titles = generateLearningPlan(learningRequirements, jobProfile, unifiedFile)
             
             # Basic formatted Learning Plans.
-            st.title(plan['title'])
-
-            # Description section
-            with st.expander(f"Short Description", expanded=True):
-                st.write(plan['short_description'])
-
-            with st.expander(f"Long Description", expanded=True):
-                st.write(plan['long_description'])
-
-            # Optional Solution Coverage and Gaps
-            if plan['solution_coverage']:
-                with st.expander(f"Solution Coverage", expanded=True):
-                    st.write(plan['solution_coverage'])
-
-            if plan['solution_gap']:
-                with st.expander(f"Solution Gaps", expanded=True):
-                    st.write(plan['solution_gap'])
-
-            # Optional Prerequisites
-            if plan['prerequisites']:
-                with st.expander(f"Prerequisites", expanded=True):
-                    st.write(plan['prerequisites'])
-
-            # Divider before Learning Plan Steps
-            st.divider()
-
-            # Learning Plan Steps
-            st.markdown("## Learning Plan Steps")
+            st.markdown(f"**<h1>{plan['title']}</h1>**")
 
             for step in plan['steps']:
                 st.markdown(horizontalCard(step), unsafe_allow_html=True)
                                 
-            # Divider before Completion Requirements
+            # Divider before Summary
             st.divider()
 
+            st.subheader('Summary')
+
+            # Description section
+            with st.expander(f"Short Description", expanded=False):
+                st.write(plan['short_description'])
+
+            with st.expander(f"Long Description", expanded=False):
+                st.write(plan['long_description'])
+
+            # Optional Solution Coverage and Gaps
+            if plan['solution_coverage']:
+                with st.expander(f"Solution Coverage", expanded=False):
+                    st.write(plan['solution_coverage'])
+
+            if plan['solution_gap']:
+                with st.expander(f"Solution Gaps", expanded=False):
+                    st.write(plan['solution_gap'])
+
+            # Optional Prerequisites
+            if plan['prerequisites']:
+                with st.expander(f"Prerequisites", expanded=False):
+                    st.write(plan['prerequisites'])
+
+            # Divider before diagnostic
+            st.divider()
+                
             # Some diagnostics for monitoring.
             st.subheader('Diagnostics')
 
@@ -645,6 +644,7 @@ def learning_plan_generator():
     elif not generatePlan:
         st.header("**Generate Your First Learning Plan!**")
         st.markdown("Use the sidebar to give us context on the learning plan you are trying to build. Click Generate Plan when you are ready!")
+        
         with st.expander("Detailed Instructions"):
             st.markdown(f"""
             * Write a short and clear description of the goals of the learning plan.
