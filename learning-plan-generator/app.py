@@ -2,8 +2,8 @@
 import streamlit as st
 import streamlit.components.v1 as components
 
-# Set the background image
-background_image = """
+# Set the background.
+background = """
 <style>
 [data-testid="stAppViewContainer"] > .main {
     background: linear-gradient(to bottom right, #FAFAFA, #E9E8FF, #4D44FF);
@@ -11,11 +11,25 @@ background_image = """
     background-position: center;
     background-repeat: no-repeat;
     min-height: 100vh; /* Ensures it covers the full viewport height */
+    position: relative; /* Set the position to relative to position the logo */
+}
+
+.logo {
+    position: absolute; /* Allows for absolute positioning */
+    top: 20px; /* Adjust top position as needed */
+    right: 20px; /* Adjust right position as needed */
+    width: 50px; /* Set logo width */
 }
 </style>
+
+<div class="main">
+    <img src="https://media.licdn.com/dms/image/v2/C560BAQHiNYfm0YHKrg/company-logo_200_200/company-logo_200_200/0/1656621848677/udacity_logo?e=2147483647&v=beta&t=dA-PCLHt6eLXR8UzSr1r2JOASy7TBAd1HSPulqQiJtw" alt="Logo" class="logo">
+    <!-- Other content goes here -->
+</div>
+
 """
 
-st.markdown(background_image, unsafe_allow_html=True)
+st.markdown(background, unsafe_allow_html=True)
 
 # Streamlit hack for getting bootstrap styling.
 st.markdown("""
