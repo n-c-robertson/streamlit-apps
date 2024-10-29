@@ -578,6 +578,14 @@ def learning_plan_generator():
         # Throw eror if both not called.
         else:
             st.error("Please fill in both fields before submitting.")
-
+            
+    elif not generatePlan:
+        st.header("Generate a learning plan")
+        st.text("Use the sidebar to give us context on the learning plan you are trying to build. Click Generate Plan when you are ready!")
+        with st.expander("Detailed Instructions"):
+            st.markdown(f"""
+            Write helpful instrucitons here.
+            """
+        
 # Call the function to render the form
 learning_plan_generator()
