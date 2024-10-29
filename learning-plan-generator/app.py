@@ -448,10 +448,15 @@ def learning_plan_generator():
 
     with st.sidebar:
 
-        st.image("https://upload.wikimedia.org/wikipedia/commons/3/3b/Udacity_logo.png",width=100)
-        
-        # Description
-        st.write("Enter your learning requirements and job description to generate a personalized learning plan.")
+        col1, col2 = st.columns([1,3])
+
+        with col1:
+            # Logo
+            st.image("https://upload.wikimedia.org/wikipedia/commons/3/3b/Udacity_logo.png",width=100)
+
+        with col2:
+            # Description
+            st.write("Enter your learning requirements and job description to generate a personalized learning plan.")
         
         # Input for learning requirements
         learningRequirements = st.text_area(
