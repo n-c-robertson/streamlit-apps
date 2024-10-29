@@ -541,7 +541,7 @@ def horizontalCard(step):
 def learning_plan_generator():
 
     with st.sidebar:
-        generatePlan = st.button("Generate Plan")
+        generatePlan_button1 = st.button("Generate Plan")
         
         # Input for learning requirements
         learningRequirements = st.text_area(
@@ -562,7 +562,7 @@ def learning_plan_generator():
         fileUpload = st.file_uploader("Feel free to upload supporting assets", type=["pdf", "docx", "txt", "csv", "xlsx"], accept_multiple_files=True)
     
     # If the plan was clicked.
-    if generatePlan:
+    if generatePlan_button1 or generatePlan_button2:
 
         # If both requirements and job profile data was provided.
         if learningRequirements and jobProfile:
@@ -645,6 +645,7 @@ def learning_plan_generator():
             * Write a short and clear description of the job profile this learning plan serves.
             * Optional: Upload supporting context files from the client.
             * Click "Generate Plan".""")
+        generatePlan_button2 = st.button("Generate Plan")
         
 # Call the function to render the form
 learning_plan_generator()
