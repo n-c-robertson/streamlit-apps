@@ -310,7 +310,7 @@ class LearningPlanStep(BaseModel):
     label: str
     image_url: str = Field(
         ...,
-        description=f"""the URL to the image for the offering based on the catalog's data."""
+        description=f"""the URL to the image for the offering based on the catalog's data. You MUST find this - this data exists in the catalog. Do NOT skip."""
     )
     duration: str = Field(
         ...,
