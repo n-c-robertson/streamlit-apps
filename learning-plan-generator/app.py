@@ -5,36 +5,36 @@ import streamlit.components.v1 as components
 # Set the background.
 background = """
 <style>
-[data-testid="stAppViewContainer"] > .main {
-    background: linear-gradient(to bottom right, #FAFAFA, #E9E8FF, #4D44FF);
-    background-size: cover;
-    background-position: center;
-    background-repeat: no-repeat;
-    min-height: 100vh; /* Ensures it covers the full viewport height */
-    position: relative; /* Set the position to relative to position the logo */
-}
-
-.logo {
-    position: absolute; /* Allows for absolute positioning */
-    top: 20px; /* Adjust top position as needed */
-    right: 0px; /* Adjust right position as needed */
-    width: 50px; /* Set logo width */
-}
-
-/* Set all Streamlit components to have white backgrounds */
-[data-testid="stTextArea"] {
-    background-color: white;
-    border-radius: 5px; /* Optional: Add border radius for rounded corners */
-    padding: 10px; /* Optional: Add padding for better spacing */
-}
-
-[data-testid="stSidebar"] {
-    background-color: #DFDFDF;
-    border-radius: 5px; /* Optional: Add border radius for rounded corners */
-    padding: 10px; /* Optional: Add padding for better spacing */
-}
-
-.stButton > button {
+        [data-testid="stAppViewContainer"] > .main {
+            background: linear-gradient(to bottom right, #FAFAFA, #E9E8FF, #4D44FF);
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            min-height: 100vh; /* Ensures it covers the full viewport height */
+            position: relative; /* Set the position to relative to position the logo */
+        }
+        
+        .logo {
+            position: absolute; /* Allows for absolute positioning */
+            top: 20px; /* Adjust top position as needed */
+            right: 0px; /* Adjust right position as needed */
+            width: 50px; /* Set logo width */
+        }
+        
+        /* Set all Streamlit components to have white backgrounds */
+        [data-testid="stTextArea"] {
+            background-color: white;
+            border-radius: 5px; /* Optional: Add border radius for rounded corners */
+            padding: 10px; /* Optional: Add padding for better spacing */
+        }
+        
+        [data-testid="stSidebar"] {
+            background-color: #DFDFDF;
+            border-radius: 5px; /* Optional: Add border radius for rounded corners */
+            padding: 10px; /* Optional: Add padding for better spacing */
+        }
+        
+        .stButton > button {
             background-color: #2015FF; /* Change to your desired button color */
             color: white; /* Text color */
             border: none; /* Remove border */
@@ -50,6 +50,30 @@ background = """
             border: none
         }
 
+        .stExpander {
+            background-color: #fff; /* Change to your desired expander background color */
+            border: 1px solid #ccc; /* Border color */
+            border-radius: 5px; /* Rounded corners */
+        }
+        
+        .stExpander:hover {
+            background-color: #fff; /* Change to your desired hover color */
+        }
+
+        /* Style for expander title */
+        .stExpander .stExpanderHeader {
+            background-color: #fff; /* Header background color */
+            color: white; /* Header text color */
+            padding: 10px; /* Padding for header */
+            border-radius: 5px; /* Rounded corners for header */
+            cursor: pointer; /* Pointer cursor on hover */
+            transition: background-color 0.3s; /* Smooth transition for header */
+        }
+
+        /* Hover effect for header */
+        .stExpander .stExpanderHeader:hover {
+            background-color: #fff; /* Change to your desired hover color */
+        }
 </style>
 
 <div class="main">
