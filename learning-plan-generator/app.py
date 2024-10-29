@@ -34,6 +34,20 @@ background = """
     padding: 10px; /* Optional: Add padding for better spacing */
 }
 
+.stButton > button {
+            background-color: blue; /* Change to your desired button color */
+            color: white; /* Text color */
+            border: none; /* Remove border */
+            border-radius: 5px; /* Rounded corners */
+            padding: 10px 20px; /* Padding for the button */
+            cursor: pointer; /* Pointer cursor on hover */
+            transition: background-color 0.3s; /* Smooth transition */
+        }
+        
+        .stButton > button:hover {
+            background-color: black; /* Change to your desired hover color */
+        }
+
 </style>
 
 <div class="main">
@@ -489,6 +503,8 @@ def horizontalCard(step):
 def learning_plan_generator():
 
     with st.sidebar:
+
+        generatePlan = st.button("Generate Plan")
         
         st.title("Learning Plan Generator")
         
@@ -511,8 +527,6 @@ def learning_plan_generator():
         )
     
         fileUpload = st.file_uploader("Feel free to upload supporting assets", type=["pdf", "docx", "txt", "csv", "xlsx"], accept_multiple_files=True)
-    
-        generatePlan = st.button("Generate Plan")
     
     # If the plan was clicked.
     if generatePlan:
@@ -594,7 +608,7 @@ def learning_plan_generator():
             st.error("Please fill in both fields before submitting.")
             
     elif not generatePlan:
-        st.header("**Generate Your First Learning Plan!")
+        st.header("**Generate Your First Learning Plan!**")
         st.markdown("Use the sidebar to give us context on the learning plan you are trying to build. Click Generate Plan when you are ready!")
         with st.expander("Detailed Instructions"):
             st.markdown(f"""
