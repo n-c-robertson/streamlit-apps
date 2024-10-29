@@ -17,7 +17,7 @@ background = """
 .logo {
     position: absolute; /* Allows for absolute positioning */
     top: 20px; /* Adjust top position as needed */
-    right: 20px; /* Adjust right position as needed */
+    right: 0px; /* Adjust right position as needed */
     width: 50px; /* Set logo width */
 }
 </style>
@@ -473,19 +473,12 @@ def horizontalCard(step):
 
 
 def learning_plan_generator():
-    st.title("Learning Plan Generator")
 
     with st.sidebar:
-
-        col1, col2 = st.columns([1,3])
-
-        with col1:
-            # Logo
-            st.image("https://media.licdn.com/dms/image/v2/C560BAQHiNYfm0YHKrg/company-logo_200_200/company-logo_200_200/0/1656621848677/udacity_logo?e=2147483647&v=beta&t=dA-PCLHt6eLXR8UzSr1r2JOASy7TBAd1HSPulqQiJtw",width=100)
-
-        with col2:
-            # Description
-            st.write("Enter your learning requirements and job description to generate a personalized learning plan.")
+        
+        st.title("Learning Plan Generator")
+        
+        st.write("Enter your learning requirements and job description to generate a personalized learning plan.")
         
         # Input for learning requirements
         learningRequirements = st.text_area(
