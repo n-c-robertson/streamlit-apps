@@ -1,7 +1,7 @@
 Jinja2==3.1.4
 humanize==4.11.0
 numpy==2.0.0
-openai==1.45.0
+openai==1.58.1
 pandas==2.2.2
 plotly==5.23.0
 pydantic==2.8.2
