@@ -1,0 +1,11 @@
+Jinja2==3.1.4
+humanize==4.11.0
+numpy==2.0.0
+openai==1.45.0
+pandas==2.2.2
+plotly==5.23.0
+pydantic==2.8.2
+PyPDF2==3.0.1
+requests==2.32.3
+scikit-learn==1.5.1
+streamlit==1.38.0
