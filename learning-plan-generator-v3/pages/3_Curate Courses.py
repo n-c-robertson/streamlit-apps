@@ -50,9 +50,11 @@ def process_submission():
 		chat_agent.update_conversation(f'''When processing the user's request, ONLY use courses from this catalog {matches}''', role='system')
 		# Receive the results from OpenAI.
 		preferred_catalog = chat_agent.chatgpt(format_=data_models.ProgramList).programs
+		preferred_catalog_keys = [program.program_key for program in preferred_catalog]
+		preferred_catalog = catalog.fetch_catalog(keys=preferred_catalog_keys)
 
 	# Overwrite the preferred catalog session state variable with OpenAI results.
-	st.session_state['preferred_catalog'] = pd.DataFrame([program.dict() for program in preferred_catalog]) # dataframe result for rendering the page.
+	st.session_state['preferred_catalog'] = pd.DataFrame([program for program in preferred_catalog]) # dataframe result for rendering the page.
 	st.session_state['courses'] = file_management.df_to_string_csv(st.session_state['preferred_catalog']) # string result for OpenAI in the final prompt.
 
 	# Display success message.
