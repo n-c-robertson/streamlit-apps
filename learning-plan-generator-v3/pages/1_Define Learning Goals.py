@@ -79,12 +79,21 @@ uploads = st.file_uploader(label='Upload Supporting Assets', type=["pdf", "docx"
 if st.button('submit'):
 	process_submission()
 
+	# Allow the user to download a CSV of the latest version of the goals.
+	st.download_button(
+			   "Download Learning Goals",
+			   st.session_state['response'].to_csv(index=False).encode("utf-8"),
+			   "learning_goals.csv",
+			   "text/csv",
+			   key='learning-goals-csv'
+			)
+
 # If the user has not yet clicked submit, check to see if the user already has a saved state. If yes, show the table.
 else:
 	if 'response' in st.session_state:
 		st.table(st.session_state['response'])
 
-		# Allow the user to download a CSV of the latest version of the taxonomy.
+		# Allow the user to download a CSV of the latest version of the goals.
 		st.download_button(
 			   "Download Learning Goals",
 			   st.session_state['response'].to_csv(index=False).encode("utf-8"),
