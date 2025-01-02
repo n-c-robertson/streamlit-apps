@@ -7,6 +7,7 @@ import data_models
 import chat_agent 
 import plan_generator
 import page_layout
+import file_management
 
 # add `generate_learning_plans_prompt()` to the chat agent's context if this is the
 # first time a user has visited this page. We are also going to reset the chat conversation because
@@ -51,7 +52,9 @@ def process_submission():
 				plan_generator.generateSkillsReport(skills_report_raw)
 
 			# append results.
-			learningPlans.append((plan, skills_report_raw))
+			st.write(type(skills_report_raw))
+			st.write(skills_report_raw)
+			learningPlans.append((plan, skills_report_raw.subjects))
 
 		# If any error is hit that isn't handled at a lower level, throw an error and say it is a hallucination.
 		# There were some lower level errors that used to occur that looked like hallucinations. But those should

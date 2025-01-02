@@ -15,14 +15,38 @@ if 'initial_courses_prompt_already_ran' not in st.session_state:
 	chat_agent.update_conversation(chat_agent.select_courses_prompt(), role='system')
 	st.session_state['initial_courses_prompt_already_ran'] = True
 
-# Get 50~ courses that could match the user's requirements based on the context from the prior pages. Save this in the session states 
-# `matches` (which cannot be overidden) and `prefiltered_catalog` (which a user can override and filter).
-matches = catalog.retrieve_matching_courses(query=' '.join([st.session_state['requirements'], st.session_state['skills']]))
-st.session_state['matches'] = matches
+def generate_catalog(type_selections,duration_selections,difficulty_selections):
 
-# But don't accidentally override the current preferred results.
-if 'preferred_catalog' not in st.session_state:
+	"""
+	Generate a catalog based on the filters passed through.
+	"""
+
+	# Get 50~ courses that could match the user's requirements based on the context from the prior pages and their filters. Save this in 
+	# the session states `matches` (which cannot be overidden) and `prefiltered_catalog` (which a user can override and filter).
+	query = ' '.join([st.session_state['requirements'], st.session_state['skills']])
+
+	matches = catalog.retrieve_matching_courses(
+		query=query,
+		type_selections=type_selections,
+		duration_selections=duration_selections,
+		difficulty_selections=difficulty_selections
+		)
+
+	st.session_state['matches'] = matches
 	st.session_state['preferred_catalog'] = matches
+
+
+if 'catalog_seeded' not in st.session_state:
+
+	# Run generate_catalog once so we have something to seed the page.
+	types = ['Nanodegree','Course','Free Course']
+	durations = ['months','weeks','days','hours','minutes']
+	difficulties = ['Advanced','Intermediate','Beginner','Fluency','Discovery']
+
+	generate_catalog(types, durations, difficulties)
+
+	# Prevent it from re-running.
+	st.session_state['catalog_seeded'] = True
 
 def process_submission():
 
@@ -75,19 +99,77 @@ if st.session_state['requirements'] == 'Not Defined' or st.session_state['skills
 	st.error("Oops! Looks like you might not have gone through all the steps. To unlock this page, make sure you go through each of the previous steps on the other tabs.",icon='🤖')
 
 else:
-	# Chat interface.
-	user_input = st.text_area(
-		'Which courses do you want to include in your Learning Plan?', 
-		value='I\'d like for these courses to be filtered for 10-15 courses that are the best fits for solving the Python skills I care about, as well as a handful of SQL skills-focused courses.', 
-		key='input_val'
-	)
 
-	# Trigger the processing when the 'submit' button is pressed.
-	if st.button('submit'):
-		process_submission()
+	st.write('First, select the types of programs you want in your plan.')
+
+	types = ['Nanodegree','Course','Free Course']
+	durations = ['months','weeks','days','hours','minutes']
+	difficulties = ['Advanced','Intermediate','Beginner','Fluency','Discovery']
+
+	# Multiselect filters.
+	type_selections = st.multiselect(
+			"Select Types",
+			types,
+			types
+		)
+
+	duration_selections = st.multiselect(
+			"Select Durations",
+			durations,durations
+		)
+
+	difficulty_selections = st.multiselect(
+			"Select Difficulties",
+			difficulties,
+			difficulties
+		)
+
+	if st.button('Generate Catalog'):
+
+		if 'catalog_generated' not in st.session_state:
+				st.session_state['catalog_generated'] = True
+
+			# Chat interface.
+		user_input = st.text_area(
+			'Which courses do you want to include in your Learning Plan?', 
+			value='I\'d like for these courses to be filtered for 10-15 courses that are the best fits for solving the Python skills I care about, as well as a handful of SQL skills-focused courses.', 
+			key='input_val'
+		)
+
+		# Update the catalog first.
+		generate_catalog(type_selections,duration_selections,difficulty_selections)
+
+		# Trigger the processing when the 'submit' button is pressed.
+		if st.button('submit'):
+
+			# Process any OpenAI querying on top of the catalog.
+			process_submission()
+
+			# Allow the user to download a CSV of the preferred courses.
+			st.download_button(
+				"Download Preferred Courses",
+				st.session_state['preferred_catalog'].to_csv(index=False).encode("utf-8"),
+				"preferred_courses.csv",
+				"text/csv",
+				key='preferred-courses-csv'
+				)
+
+		# Before a user clicks submit, allow them to see the catalog.
+		catalog.showCourses(st.session_state['preferred_catalog'], num_columns=3)
 
 	else:
 		# If someone revisits the page, they see the preferred catalog from their last interaction. If there is not last interaction,
-		# it shows the full set of potential matches.
-		print(type(st.session_state['preferred_catalog']))
-		catalog.showCourses(st.session_state['preferred_catalog'], num_columns=3)
+		# it show a catalog only if they generated one from the filters. Othrewise, nothing is shown.
+
+		if 'catalog_generated' in st.session_state:
+
+			catalog.showCourses(st.session_state['preferred_catalog'], num_columns=3)
+
+			# Allow the user to download a CSV of the preferred courses.
+			st.download_button(
+				"Download Preferred Courses",
+				st.session_state['preferred_catalog'].to_csv(index=False).encode("utf-8"),
+				"preferred_courses.csv",
+				"text/csv",
+				key='preferred-courses-csv'
+				)

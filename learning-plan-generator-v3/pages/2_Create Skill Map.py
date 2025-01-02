@@ -89,7 +89,25 @@ else:
 	if st.button('submit'):
 		process_submission()
 
+		# Allow the user to download a CSV of the latest version of the taxonomy.
+		st.download_button(
+			   "Download Skills CSV",
+			   st.session_state['taxonomy_df'].to_csv(index=False).encode("utf-8"),
+			   "taxonomy.csv",
+			   "text/csv",
+			   key='taxonomy-csv'
+			)
+
 	else:
 		# If the user has not yet clicked submit, check to see if the user already has a saved state. If yes, show the sunburst chart.
 		if not st.session_state['taxonomy_df'].empty:
 			taxonomy.generate_sunburst(st.session_state['curated_taxonomy'])
+
+			# Allow the user to download a CSV of the latest version of the taxonomy.
+			st.download_button(
+			   "Download Skills CSV",
+			   st.session_state['taxonomy_df'].to_csv(index=False).encode("utf-8"),
+			   "taxonomy.csv",
+			   "text/csv",
+			   key='taxonomy-csv'
+			)

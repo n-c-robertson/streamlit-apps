@@ -83,3 +83,13 @@ if st.button('submit'):
 else:
 	if 'response' in st.session_state:
 		st.table(st.session_state['response'])
+
+		# Allow the user to download a CSV of the latest version of the taxonomy.
+		st.download_button(
+			   "Download Learning Goals",
+			   st.session_state['response'].to_csv(index=False).encode("utf-8"),
+			   "learning_goals.csv",
+			   "text/csv",
+			   key='learning-goals-csv'
+			)
+
