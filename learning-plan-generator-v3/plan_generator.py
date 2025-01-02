@@ -43,7 +43,7 @@ def generateSkillsReport(data):
 	# Display the DataFrame as a table
 	st.dataframe(df,use_container_width=True)
 
-def step_to_dict(step, programs=programs):
+def fetch_program_metadata(step, programs=programs):
 
 	"""
 	While OpenAI is making the decisions for the steps in the Learning Plan, all it is selecting
@@ -52,7 +52,8 @@ def step_to_dict(step, programs=programs):
 	where hallucinations can occur.
 
 		Args:
-			step: A step in a learning plan.
+			step: A Udacity program. Typically this will be a step in a Learning Plan, but it can also be
+			used on an individual program for some standalone catalog management use cases.
 			programs: the data from the unified catalog.
 
 		Returns:
@@ -106,7 +107,7 @@ def formatLearningPlan(response):
 		"solution_gap": response.solutionGap,
 		"prerequisites": response.prerequisites,
 		"extracurricular": response.extracurricular,
-		"steps": [step_to_dict(step) for step in response.steps],
+		"steps": [fetch_program_metadata(step) for step in response.steps],
 		}
 
 	return response_dict

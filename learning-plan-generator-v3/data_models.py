@@ -45,6 +45,9 @@ class DomainsClass(BaseModel):
 
 # A program in the Learning Plan.
 class Program(BaseModel):
+	program_key: str = Field(
+		...,
+		description="The udacity course key for this course. Will have something like `cd` or `nd` in it")
 	program_type: str
 	catalog_url: str
 	duration: str

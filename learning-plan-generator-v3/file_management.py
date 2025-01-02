@@ -2,6 +2,7 @@
 import pandas as pd
 from io import StringIO
 import PyPDF2
+import json
 
 def extract_text_from_pdf(pdf_file):
 	"""
@@ -142,3 +143,19 @@ def df_to_string_csv(df):
 	csv_result = csv_string.getvalue()
 
 	return csv_result
+
+def download_json(data):
+	"""
+	Turn any data structure -- list, dictionary, whatever -- into a json blob that is
+	easier to download in a .json file.
+
+		Args:
+			data: the data that needs to be transformed.
+
+		Returns:
+			json_bytes: the data ready to be written in a json file.
+	"""
+	json_data = json.dumps(data)
+	json_bytes = json_data.encode('utf-8')
+	
+	return json_bytes

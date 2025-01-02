@@ -103,7 +103,7 @@ programs = fetch_catalog()
 # Also store a pandas DataFrame representation of the value.
 programs_df = pd.DataFrame(programs)
 
-def retrieve_matching_courses(query, top_n=50, programs=programs):
+def retrieve_matching_courses(query, type_selections, duration_selections, difficulty_selections, top_n=50, programs=programs):
 
 	"""
 	Using term-frequency-inverse-document-frequency to return the top `n` programs based on the
@@ -112,6 +112,9 @@ def retrieve_matching_courses(query, top_n=50, programs=programs):
 		Args:
 			query: The search query that the user runs. In the context of this application, this will 
 			be the user's context from their OpenAI conversation.
+			type_selections: the program types to include.
+			duration_selections: the program durations to include.
+			difficulty_selections: the difficulty seleections to include.
 			top_n: the number of results to return (default 50).
 			programs: The programs data returned by `fetch_catalog`.
 
@@ -119,9 +122,34 @@ def retrieve_matching_courses(query, top_n=50, programs=programs):
 			A pandas DataFrame of the top programs.
 	"""
 
+	# Create a copy of the catalog that can be filtered.
+	filtered_programs_ = programs.copy()
+
+	# Filter that catalog based on the requirements passed through.
+	filtered_programs_ = [program for program in filtered_programs_ if program['program_type'] in type_selections]
+	filtered_programs_ = [program for program in filtered_programs_ if program['difficulty'] in difficulty_selections]
+
+	# Slightly more wordy handling of durations.
+	filtered_programs = []
+
+	for program in filtered_programs_:
+		for duration in duration_selections:
+			if duration[:-1] in program['duration']:
+				filtered_programs.append(program)
+				continue
+			continue
+
+	print(type_selections)
+	print(duration_selections)
+	print(difficulty_selections)
+	print(len(programs))
+	print(len(filtered_programs))
+
+
+
 	# Create a list of all course skills
-	summaries = [course['title'] + ' ' + course['summary'] + ' ' + ' '.join(course['skill_names']) for course in programs]
-	course_titles = [course['title'] for course in programs]
+	summaries = [course['title'] + ' ' + course['summary'] + ' ' + ' '.join(course['skill_names']) for course in filtered_programs]
+	course_titles = [course['title'] for course in filtered_programs]
 
 	# Use TF-IDF vectorizer to vectorize query and course summaries
 	vectorizer = TfidfVectorizer(stop_words='english')
@@ -135,8 +163,7 @@ def retrieve_matching_courses(query, top_n=50, programs=programs):
 	
 	titles = [course_titles[i] for i in matching_indices]
 
-	#st.session_state['matches'] = pd.DataFrame([program for program in programs if program['title'] in titles]) # This might not make sense to do.
-	return pd.DataFrame([program for program in programs if program['title'] in titles])
+	return pd.DataFrame([program for program in filtered_programs if program['title'] in titles])
 
 
 def generateCourseCard(program):
