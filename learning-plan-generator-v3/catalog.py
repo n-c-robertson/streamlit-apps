@@ -10,13 +10,13 @@ from jinja2 import Template
 import humanize
 
 @st.cache_data
-def fetch_catalog():
+def fetch_catalog(keys=None):
 
 	"""
 	Fetch the unified catalog.
 
 		Args:
-			None
+			keys: a list of program keys to pass to the catalog.
 
 		Returns:
 			List of dictionaries where each dictionary is a piece of content in the public catalog.
@@ -89,6 +89,10 @@ def fetch_catalog():
 			'skill_names': result['skill_names']
 		} for result in catalog_results
 	]
+
+	# If we are fetching metadata for a specific set of course keys, filter those here.
+	if keys != None:
+		programs = [program for program in programs if program['program_key'] in keys]
 
 	# Return programs.
 	return programs
