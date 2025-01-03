@@ -68,7 +68,7 @@ def fetch_program_metadata(step, programs=programs):
 		"title": next((item['title'] for item in programs if item['program_key']==step.program_key)),
 		"duration": next((item['duration'] for item in programs if item['program_key']==step.program_key)),
 		"catalog_url": next((item['catalog_url'] for item in programs if item['program_key']==step.program_key)),
-		"short_description": step.short_description if hasattr(step, 'short_description') else None,
+		"short_description": next((item['summary'] for item in programs if item['program_key']==step.program_key)),
 		"long_description": next((item['summary'] for item in programs if item['program_key']==step.program_key)),
 		"skills": next((item['skill_names'] for item in programs if item['program_key']==step.program_key)),
 		"recommendation_reason": step.recommendation_reason if hasattr(step, 'recommendation_reason') else '',
