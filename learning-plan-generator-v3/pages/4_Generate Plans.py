@@ -52,8 +52,6 @@ def process_submission():
 				plan_generator.generateSkillsReport(skills_report_raw)
 
 			# append results.
-			st.write(type(skills_report_raw))
-			st.write(skills_report_raw)
 			learningPlans.append((plan, skills_report_raw.subjects))
 
 		# If any error is hit that isn't handled at a lower level, throw an error and say it is a hallucination.
