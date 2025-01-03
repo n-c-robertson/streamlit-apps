@@ -31,17 +31,20 @@ def process_submission():
 			`skills`.
 	"""
 
+	# Upload all files.
+	files = file_management.upload_and_merge_files(uploads)
+
 	# Which domains seem relevant?
 	with st.status("Identifying Domains..."):
-		domain_response = taxonomy.identify_domains(user_input)
+		domain_response = taxonomy.identify_domains(user_input  + 'Supporting Files:' + files)
 
 	# For the selected domains, which subjects seem relevant?
 	with st.status("Selecting Subjects..."):
-		subject_response = taxonomy.select_subjects(user_input, domain_response)
+		subject_response = taxonomy.select_subjects(user_input  + 'Supporting Files:' + files, domain_response)
 
 	# For the selected subjects, which skills seem relevant?
 	with st.status("Curating Skills..."):
-		skill_response = taxonomy.curate_skills(user_input, domain_response, subject_response)
+		skill_response = taxonomy.curate_skills(user_input  + 'Supporting Files:' + files, domain_response, subject_response)
 
 	# Prune the tree so that we only include domains and subjects where relevant skills were found.
 	# This is necessary because the top down approach of this curation process might identify a domain
@@ -84,6 +87,9 @@ else:
 		value="My Analysts need to learn Python and SQL. More specifically, they need experience in standard Python libraries for data science like pandas, numpy, and matplotlib. SQL, they really just need to know how to query databases and do basic ETLs. Aspirationally, we\'d love to also see some of them get exposure to machine learning, but that is a stretch goal.", 
 		key='input_val', 
 	)
+
+	# File uploads. Allows pdf, docx, txt, csv, and xlsx. Supports multiple file uploads.
+	uploads = st.file_uploader(label='Upload Supporting Assets', type=["pdf", "docx", "txt", "csv", "xlsx"], accept_multiple_files=True)
 
 	# Trigger the processing when the 'submit' button is pressed.
 	if st.button('submit'):
