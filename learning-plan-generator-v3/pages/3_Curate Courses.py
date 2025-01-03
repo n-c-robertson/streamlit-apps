@@ -77,16 +77,23 @@ def process_submission():
 		preferred_catalog_keys = [program.program_key for program in preferred_catalog]
 		preferred_catalog = catalog.fetch_catalog(keys=preferred_catalog_keys)
 
-	# Overwrite the preferred catalog session state variable with OpenAI results.
+	# Preferred catalogs are the AI selected ones. Courses is a string context of preferred courses. Matches is updated to be the secondary matches.
+	# that were filtered for, but that weren't selected by AI.
 	st.session_state['preferred_catalog'] = pd.DataFrame([program for program in preferred_catalog]) # dataframe result for rendering the page.
 	st.session_state['courses'] = file_management.df_to_string_csv(st.session_state['preferred_catalog']) # string result for OpenAI in the final prompt.
+	st.session_state['matches'] = st.session_state['matches'][~st.session_state['matches'].apply(tuple, axis=1).isin(st.session_state['preferred_catalog'].apply(tuple, axis=1))]
+
 
 	# Display success message.
 	st.success('When ready, proceed to the next step.', icon="✅")
 	st.toast(page_layout.random_toast_message())
 
 	# Display the courses in rows with three columns
+	st.subheader(f'''{len(st.session_state['preferred_catalog'])} preferred matches, {len(st.session_state['matches'])} backup matches''')
+	st.write('Preferred Matches')
 	catalog.showCourses(st.session_state['preferred_catalog'], num_columns=3)
+	st.write('Secondary Matches')
+	catalog.showCourses(st.session_state['matches'], num_columns=3)
 
 # Page title.
 st.title('Curate Courses')
@@ -142,10 +149,7 @@ else:
 		# Process any OpenAI querying on top of the catalog.
 		process_submission()
 
-		# Before a user clicks submit, allow them to see the catalog.
-		catalog.showCourses(st.session_state['preferred_catalog'], num_columns=3)
-
-			# Allow the user to download a CSV of the preferred courses.
+		# Allow the user to download a CSV of the preferred courses.
 		st.download_button(
 				"Download Preferred Courses",
 				st.session_state['preferred_catalog'].to_csv(index=False).encode("utf-8"),
@@ -160,7 +164,11 @@ else:
 
 		if 'catalog_generated' in st.session_state:
 
+			st.subheader(f'''{len(st.session_state['preferred_catalog'])} Preferred results, {len(st.session_state['matches'])} backup results''')
+			st.write('Preferred matches')
 			catalog.showCourses(st.session_state['preferred_catalog'], num_columns=3)
+			st.write('Backup matches')
+			catalog.showCourses(st.session_state['matches'], num_columns=3)
 
 			# Allow the user to download a CSV of the preferred courses.
 			st.download_button(
