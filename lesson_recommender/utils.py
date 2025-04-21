@@ -10,7 +10,8 @@ def fetch_data():
 	#sheet_name='Sheet1'
 	#url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
 	#df = pd.read_csv(url, dtype=str, sep=',',header=0)
-	df = pd.read_csv('lesson_catalog.csv')
+	#df = pd.read_csv('lesson_catalog.csv')
+	df = pd.read_csv(url='https://raw.githubusercontent.com/n-c-robertson/streamlit-apps/refs/heads/main/lesson_recommender/lesson_catalog.csv')
 	return df
 
 def display_results(df_search):
