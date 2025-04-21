@@ -1,6 +1,5 @@
 accelerate==1.6.0
 altair==5.5.0
-altgraph @ file:///AppleInternal/Library/BuildRoots/2c89a47b-9dd5-11ef-938f-6e654a286000/Library/Caches/com.apple.xbs/Sources/python3/altgraph-0.17.2-py2.py3-none-any.whl
 annotated-types==0.7.0
 anyio==4.7.0
 appnope==0.1.4
