@@ -38,7 +38,9 @@ def search_lessons(query, df, client=client, top_k=10000):
     )
     query_embedding = response.data[0].embedding
 
-    parquet_df = pd.read_parquet('lesson_and_skills_embeddings_openai.parquet')
+    #parquet_df = pd.read_parquet('lesson_and_skills_embeddings_openai.parquet')
+    parquet_df = pd.read_parquet('https://raw.githubusercontent.com/n-c-robertson/streamlit-apps/refs/heads/main/lesson_recommender/lesson_and_skills_embeddings_openai.parquet')
+
     lesson_embeddings = np.array(parquet_df['lesson_and_skills_embeddings'].tolist())
 
     similarities = cosine_similarity([query_embedding], lesson_embeddings)[0]       ####!
