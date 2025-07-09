@@ -18,5 +18,3 @@ st.markdown(
     A staff password is required to run Tab 1 and 3 since execute read and create tasks against Udacity's services. If you do not have the staff password, reach out to Nathan Robertson.
     """
    )
-"""
-)
