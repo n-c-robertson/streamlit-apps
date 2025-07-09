@@ -5,24 +5,18 @@ st.set_page_config(
     page_icon="👋",
 )
 
-st.write("# Welcome to Streamlit! 👋")
-
-st.sidebar.success("Select a demo above.")
+st.write("# Welcome to Assessment Creator! 👋")
 
 st.markdown(
     """
-    Streamlit is an open-source app framework built specifically for
-    Machine Learning and Data Science projects.
-    **👈 Select a demo from the sidebar** to see some examples
-    of what Streamlit can do!
-    ### Want to learn more?
-    - Check out [streamlit.io](https://streamlit.io)
-    - Jump into our [documentation](https://docs.streamlit.io)
-    - Ask a question in our [community
-        forums](https://discuss.streamlit.io)
-    ### See more complex demos
-    - Use a neural net to [analyze the Udacity Self-driving Car Image
-        Dataset](https://github.com/streamlit/demo-self-driving)
-    - Explore a [New York City rideshare dataset](https://github.com/streamlit/demo-uber-nyc-pickups)
+    This is a short-term prototype created by the Skills product delivery team to facilitate the generation, review, and creation of Assessments and their Questions in in the assessments api (Udacity Assessments).
+
+    - Tab 1: Generate Assessments based on program keys from the Udacity catalog.
+    - Tab 2: A human in the loop workflow for reviewing questions.
+    - Tab 3: Uploading your reviewed question set to Udacity and creating your assessments.
+
+    A staff password is required to run Tab 1 and 3 since execute read and create tasks against Udacity's services. If you do not have the staff password, reach out to Nathan Robertson.
+    """
+   )
 """
 )
