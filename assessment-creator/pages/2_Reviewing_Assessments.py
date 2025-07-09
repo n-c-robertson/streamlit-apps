@@ -312,7 +312,6 @@ def main():
                     # Show preview of accepted questions
                     with st.expander("👀 Preview Accepted Questions"):
                         st.dataframe(download_data, use_container_width=True)
-                    ("No difficulty or skill data available in the dataset for heatmap visualization.")
             else:
                 st.info("No questions have been accepted yet. Accept some questions to enable download.")
     
