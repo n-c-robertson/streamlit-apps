@@ -231,22 +231,23 @@ def extract_content(section_content_definitions):
 def learning_objective_generator(section_content_definitions):
 
     for section in section_content_definitions:
-        # Aggregate all difficulty levels, skills, and content from each content key.
-        difficulty_levels = set()
+
+        # Aggregate all content, skills, and difficulty levels for this section.
+        all_content = ""
         all_skills = set()
-        all_content = str()
-        
-        for key in section['content_keys']:
-            diff_obj = section['difficulty_level'].get(key)
-            if diff_obj:
-                difficulty_levels.add(diff_obj.get('name'))
-            for skill in section['skills'].get(key, []):
-                if skill.get('name'):
-                    all_skills.add(skill.get('name'))
-            content_str = section['content'].get(key, "")
-            if content_str:
-                all_content += "\n" + content_str
-        
+        difficulty_levels = set()
+
+        for content_key in section['content_keys']:
+            if content_key in section.get('content', {}):
+                all_content += "\n\n" + section['content'][content_key]
+            if content_key in section.get('skills', {}):
+                for skill in section['skills'][content_key]:
+                    all_skills.add(skill.get('name', ''))
+            if content_key in section.get('difficulty_level', {}):
+                difficulty = section['difficulty_level'][content_key]
+                if difficulty:
+                    difficulty_levels.add(difficulty.get('name', ''))
+
         # Convert sets to sorted lists for clarity.
         difficulties = sorted(list(difficulty_levels))
         skills = sorted(list(all_skills))
@@ -254,7 +255,8 @@ def learning_objective_generator(section_content_definitions):
         
         start_completion_time = time.perf_counter()
         
-        chat_completion_response = settings.openai_client.chat.completions.create(
+        # Use context management for OpenAI API call
+        chat_completion_response = settings.call_openai_with_fallback(
             model=settings.CHAT_COMPLETIONS_MODEL,
             response_format=settings.CHAT_COMPLETIONS_RESPONSE_FORMAT,
             temperature=settings.CHAT_COMPLETIONS_TEMPERATURE,
@@ -382,8 +384,8 @@ def process_concept(section_key, node, lesson, concept, difficulty_level, skills
     
     start_time = time.perf_counter()
     
-    # Call the OpenAI API.
-    chat_completion_response = settings.openai_client.chat.completions.create(
+    # Use context management for OpenAI API call
+    chat_completion_response = settings.call_openai_with_fallback(
         model=settings.CHAT_COMPLETIONS_MODEL,
         response_format=settings.CHAT_COMPLETIONS_RESPONSE_FORMAT,
         temperature=settings.CHAT_COMPLETIONS_TEMPERATURE,
@@ -626,7 +628,7 @@ def evaluate_question(learning_objectives, qc, question_types):
     """
     try:
         start_time = time.perf_counter()
-        response = settings.openai_client.chat.completions.create(
+        response = settings.call_openai_with_fallback(
             model=settings.CHAT_COMPLETIONS_MODEL,
             response_format=settings.CHAT_COMPLETIONS_RESPONSE_FORMAT,
             temperature=settings.CHAT_COMPLETIONS_TEMPERATURE,
