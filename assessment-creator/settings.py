@@ -28,11 +28,11 @@ from sklearn.metrics.pairwise import cosine_similarity
 ENVIRONMENT = 'production'
 
 # API key for service account.
-UDACITY_API_KEY = st.secrets['udacity_api_key']
+UDACITY_JWT = st.secrets['jwt_token']
 
 def production_headers():
     STAFF_HEADERS = {
-        'Authorization': f'Token {UDACITY_API_KEY}',
+        'Authorization': f'Token {UDACITY_JWT}',
         'Content-Type': 'application/json'
     }
     return STAFF_HEADERS
