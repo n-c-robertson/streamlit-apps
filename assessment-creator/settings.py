@@ -27,12 +27,12 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 ENVIRONMENT = 'production'
 
-# Nathan's JWT key. But it will expire every 3 weeks.
-UDACITY_JWT = st.secrets['jwt_token']
+# API key for service account.
+UDACITY_API_KEY = st.secrets['udacity_api_key']
 
 def production_headers():
     STAFF_HEADERS = {
-        'Authorization': f'Bearer {UDACITY_JWT}',
+        'Authorization': f'Token {UDACITY_API_KEY}',
         'Content-Type': 'application/json'
     }
     return STAFF_HEADERS
