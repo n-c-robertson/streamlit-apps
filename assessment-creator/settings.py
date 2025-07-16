@@ -32,7 +32,7 @@ UDACITY_JWT = st.secrets['jwt_token']
 
 def production_headers():
     STAFF_HEADERS = {
-        'Authorization': f'Token {UDACITY_JWT}',
+        'Authorization': f'Bearer {UDACITY_JWT}',
         'Content-Type': 'application/json'
     }
     return STAFF_HEADERS
