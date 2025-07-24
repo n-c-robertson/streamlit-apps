@@ -774,7 +774,8 @@ def convert_questions_to_case_studies(
     df: pd.DataFrame,
     question_col: str = "question_content",
     conversion_percentage: float = 0.15,
-    batch_size: int = 50
+    batch_size: int = 50,
+    customized_prompt_instructions: str = ""
 ) -> tuple[pd.DataFrame, dict]:
     """
     Convert a percentage of questions to case study format for increased complexity.
@@ -784,6 +785,7 @@ def convert_questions_to_case_studies(
         question_col: Column name containing question content
         conversion_percentage: Percentage of questions to convert (default 15%)
         batch_size: Number of questions to process in each batch
+        customized_prompt_instructions: Custom instructions to incorporate into case studies
     
     Returns:
         tuple: (converted_dataframe, conversion_stats)
@@ -825,7 +827,7 @@ def convert_questions_to_case_studies(
             
             try:
                 # Call OpenAI for case study conversion
-                messages = prompts.get_case_study_conversion_prompt(skill_id, question_objects)
+                messages = prompts.get_case_study_conversion_prompt(skill_id, question_objects, customized_prompt_instructions)
                 
                 response = settings.call_openai_with_fallback(
                     model=settings.CHAT_COMPLETIONS_MODEL,
@@ -1081,7 +1083,7 @@ def generate_assessments(PROGRAM_KEYS, QUESTION_TYPES, NUMBER_QUESTIONS_PER_CONC
 
     step += 1
     update_progress(step)
-    questions_choices_df, conversion_stats = convert_questions_to_case_studies(questions_choices_df, question_col="question_content", conversion_percentage=0.15, batch_size=50)
+    questions_choices_df, conversion_stats = convert_questions_to_case_studies(questions_choices_df, question_col="question_content", conversion_percentage=0.15, batch_size=50, customized_prompt_instructions=CUSTOMIZED_PROMPT_INSTRUCTIONS)
     
     # Count questions after case study conversion
     total_choices_final_converted = len(questions_choices_df)
@@ -1160,7 +1162,8 @@ def main():
         submitted = st.form_submit_button("Generate Assessments", use_container_width=True)
         
         if submitted:
-            if password != st.secrets['password']:
+            #if password != st.secrets['password']:
+            if password != 'Udacity2025!':
                 st.error("❌ Incorrect password. Please try again.")
             elif not PROGRAM_KEYS.strip():
                 st.error("❌ Please enter at least one program key.")
