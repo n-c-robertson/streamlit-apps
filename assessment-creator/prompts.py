@@ -643,13 +643,14 @@ Return your converted questions as per the specified JSON schema.
 ]
 
 
-def get_case_study_conversion_prompt(skill_id, questions_list):
+def get_case_study_conversion_prompt(skill_id, questions_list, customized_prompt_instructions=""):
     """
     Generate the case study conversion prompt for a group of questions.
     
     Args:
         skill_id: The skill ID that all questions are testing
         questions_list: List of question objects to convert to case study format
+        customized_prompt_instructions: Custom instructions to append to the prompt
     
     Returns:
         List of message dictionaries for the OpenAI API
@@ -659,10 +660,18 @@ def get_case_study_conversion_prompt(skill_id, questions_list):
     for i, question_obj in enumerate(questions_list):
         formatted_questions += f"{i}. {question_obj['question']['content']}\n"
     
+    # Add custom instructions if provided
+    custom_instructions_text = ""
+    if customized_prompt_instructions and customized_prompt_instructions.strip():
+        custom_instructions_text = f"\n\n**Custom Instructions**: {customized_prompt_instructions.strip()}\n\nPlease incorporate these custom requirements into your case study conversions."
+    
     user_prompt = case_study_conversion_prompt[1]['content'].format(
         skill_id=skill_id,
         questions_list=formatted_questions
     )
+    
+    # Append custom instructions to the user prompt
+    user_prompt += custom_instructions_text
     
     return [
         case_study_conversion_prompt[0],
