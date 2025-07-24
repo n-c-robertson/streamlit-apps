@@ -30,6 +30,7 @@ ENVIRONMENT = 'production'
 # API key for service account.
 UDACITY_JWT = st.secrets['jwt_token']
 
+
 def production_headers():
     STAFF_HEADERS = {
         'Authorization': f'Bearer {UDACITY_JWT}',
