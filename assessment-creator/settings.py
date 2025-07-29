@@ -30,7 +30,6 @@ ENVIRONMENT = 'production'
 # API key for service account.
 UDACITY_JWT = st.secrets['jwt_token']
 
-
 def production_headers():
     STAFF_HEADERS = {
         'Authorization': f'Bearer {UDACITY_JWT}',
@@ -40,6 +39,9 @@ def production_headers():
 
 ASSESSMENTS_API_URL = st.secrets['assessments_api_url']
 CLASSROOM_CONTENT_API_URL = st.secrets['classroom_content_api_url']
+SKILLS_API_URL = st.secrets['skills_api_url']
+
+PASSWORD = st.secrets['password']
 
 openai_client = OpenAI(
     api_key = st.secrets['openai_api_key']
