@@ -1528,63 +1528,69 @@ def plot_section_scores(results_df):
 
 with st.form("Analyze Assessments"):
     assessment_id = st.text_input("Assessment ID", value='c84dd4d7-0fa0-47e7-9757-ac5b2ceb85d6')
+    st.markdown('#### Staff Password')
+    password = st.text_input("Staff Password", type="password", help="Enter the required staff password")
     submitted = st.form_submit_button("Submit")
 
 if submitted:
-    results_df = get_results(assessment_id)
-    user_skills_df = user_skills(results_df)
-    
-    # Skills Analysis Expander
-    with st.expander("Skills Analysis", expanded=False):
-        st.info("**Skills Analysis**: These charts show how learners perform across different skills. The heatmap displays individual skill performance, while the correlation chart shows which skills learners tend to score similarly on.")
-        plot_net_skills_heatmap(user_skills_df)
-        plot_skill_correlation_heatmap(user_skills_df)
-    
-    # Assessment Performance Expander
-    with st.expander("Assessment Performance Analysis", expanded=False):
-        st.info("**Assessment Performance Analysis**: These charts analyze question quality, score distributions, and section performance. The question analysis shows which questions are most effective, while the histogram and section charts show overall performance patterns.")
-        plot_question_analysis(results_df)
-        plot_total_score_histogram(results_df)
-        plot_section_scores(results_df)
 
-    # Recommendations Expander
-    with st.expander("Learner Recommendations", expanded=False):
-        st.subheader("Content Recommendations Based on Skill Gaps")
-        st.info("**Content Recommendations**: Based on learners' skill gaps, these tables show personalized content recommendations. The program table summarizes top program recommendations, the lesson table shows individual lesson suggestions, and the learner table provides detailed recommendations for each user.")
+    if password != settings.PASSWORD:
+        st.error("❌ Incorrect password. Please try again.") 
+    else:
+        results_df = get_results(assessment_id)
+        user_skills_df = user_skills(results_df)
         
-        # Get recommendations from Skills API
-        with st.spinner("Fetching recommendations from Skills API..."):
-            recommendations_df = get_skills_recommendations(user_skills_df, results_df)
+        # Skills Analysis Expander
+        with st.expander("Skills Analysis", expanded=False):
+            st.info("**Skills Analysis**: These charts show how learners perform across different skills. The heatmap displays individual skill performance, while the correlation chart shows which skills learners tend to score similarly on.")
+            plot_net_skills_heatmap(user_skills_df)
+            plot_skill_correlation_heatmap(user_skills_df)
         
-        if not recommendations_df.empty:
-            # Add the program recommendations table
-            st.markdown("### Program Recommendations Summary Table")
-            st.caption("**Program Summary**: Shows which programs are most commonly recommended as top choices, along with the skills they address for users who have them as their #1 recommendation.")
-            program_table_df = create_program_recommendations_table(recommendations_df)
+        # Assessment Performance Expander
+        with st.expander("Assessment Performance Analysis", expanded=False):
+            st.info("**Assessment Performance Analysis**: These charts analyze question quality, score distributions, and section performance. The question analysis shows which questions are most effective, while the histogram and section charts show overall performance patterns.")
+            plot_question_analysis(results_df)
+            plot_total_score_histogram(results_df)
+            plot_section_scores(results_df)
+
+        # Recommendations Expander
+        with st.expander("Learner Recommendations", expanded=False):
+            st.subheader("Content Recommendations Based on Skill Gaps")
+            st.info("**Content Recommendations**: Based on learners' skill gaps, these tables show personalized content recommendations. The program table summarizes top program recommendations, the lesson table shows individual lesson suggestions, and the learner table provides detailed recommendations for each user.")
             
-            if program_table_df is not None:
-                # Display the table
-                st.dataframe(program_table_df, use_container_width=True)
+            # Get recommendations from Skills API
+            with st.spinner("Fetching recommendations from Skills API..."):
+                recommendations_df = get_skills_recommendations(user_skills_df, results_df)
             
-            # Add the lesson recommendations table
-            st.markdown("### Lesson Recommendations Summary Table")
-            st.caption("**Lesson Summary**: Displays individual lesson recommendations for each user, showing their top 5 lessons and associated programs in a user-friendly format.")
-            lesson_table_df = create_lesson_recommendations_table(recommendations_df)
-            
-            if lesson_table_df is not None:
-                # Display the table
-                st.dataframe(lesson_table_df, use_container_width=True)
-            
-            # Add the learner recommendations table
-            st.markdown("### Learner Recommendations Table")
-            st.caption("**Learner Details**: Comprehensive view of all recommendations for each learner, including their weak skills, top lessons, and program recommendations.")
-            learner_table_df = create_learner_recommendations_csv(recommendations_df)
-            
-            if learner_table_df is not None:
-                # Display the table
-                st.dataframe(learner_table_df, use_container_width=True)
+            if not recommendations_df.empty:
+                # Add the program recommendations table
+                st.markdown("### Program Recommendations Summary Table")
+                st.caption("**Program Summary**: Shows which programs are most commonly recommended as top choices, along with the skills they address for users who have them as their #1 recommendation.")
+                program_table_df = create_program_recommendations_table(recommendations_df)
                 
+                if program_table_df is not None:
+                    # Display the table
+                    st.dataframe(program_table_df, use_container_width=True)
+                
+                # Add the lesson recommendations table
+                st.markdown("### Lesson Recommendations Summary Table")
+                st.caption("**Lesson Summary**: Displays individual lesson recommendations for each user, showing their top 5 lessons and associated programs in a user-friendly format.")
+                lesson_table_df = create_lesson_recommendations_table(recommendations_df)
+                
+                if lesson_table_df is not None:
+                    # Display the table
+                    st.dataframe(lesson_table_df, use_container_width=True)
+                
+                # Add the learner recommendations table
+                st.markdown("### Learner Recommendations Table")
+                st.caption("**Learner Details**: Comprehensive view of all recommendations for each learner, including their weak skills, top lessons, and program recommendations.")
+                learner_table_df = create_learner_recommendations_csv(recommendations_df)
+                
+                if learner_table_df is not None:
+                    # Display the table
+                    st.dataframe(learner_table_df, use_container_width=True)
+                    
 
-        else:
-            st.warning("No recommendations available. This could be due to API issues or no weak skills identified.")
-    
+            else:
+                st.warning("No recommendations available. This could be due to API issues or no weak skills identified.")
+        
