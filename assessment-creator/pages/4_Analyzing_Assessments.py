@@ -259,6 +259,69 @@ def plot_recommendation_charts(recommendations_df):
         # Display the table
         st.dataframe(lesson_table_df, use_container_width=True)
 
+def create_lesson_recommendations_table(recommendations_df):
+    """
+    Create a summary table showing lesson recommendations aggregated by lesson.
+    """
+    if recommendations_df.empty:
+        st.warning("No recommendations data available for table export.")
+        return None
+    
+    # Aggregate by lesson title, program title, and program key
+    lesson_counts = recommendations_df.groupby(['lessonTitle', 'parentTitle', 'parentKey']).size().reset_index(name='recommendationCount')
+    lesson_counts = lesson_counts.sort_values('recommendationCount', ascending=False)
+    
+    # Add top skills addressed (count unique users with gaps in each skill - only for users who are being recommended this specific lesson)
+    lesson_skills = []
+    for _, row in lesson_counts.iterrows():
+        lesson_title = row['lessonTitle']
+        parent_key = row['parentKey']
+        
+        # Get users who were recommended this specific lesson
+        lesson_users = set()
+        for user_id in recommendations_df['userId'].unique():
+            user_recommendations = recommendations_df[recommendations_df['userId'] == user_id]
+            # Check if this user was recommended this specific lesson
+            user_lesson_recommendations = user_recommendations[
+                (user_recommendations['lessonTitle'] == lesson_title) & 
+                (user_recommendations['parentKey'] == parent_key)
+            ]
+            if not user_lesson_recommendations.empty:
+                lesson_users.add(user_id)
+        
+        # Get all weak skills for users who were recommended this lesson
+        skill_user_counts = {}
+        for user_id in lesson_users:
+            user_recommendations = recommendations_df[recommendations_df['userId'] == user_id]
+            if not user_recommendations.empty:
+                weak_skills = user_recommendations.iloc[0]['weakSkills']
+                for skill in weak_skills:
+                    if skill not in skill_user_counts:
+                        skill_user_counts[skill] = set()
+                    skill_user_counts[skill].add(user_id)
+        
+        # Count unique users per skill and get top 5
+        skill_counts = {skill: len(users) for skill, users in skill_user_counts.items()}
+        top_5_skills = sorted(skill_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+        top_skills_text = ', '.join([f"{skill} ({count} users)" for skill, count in top_5_skills])
+        
+        lesson_skills.append(top_skills_text)
+    
+    lesson_counts['topSkillsAddressed'] = lesson_skills
+    
+    # Rename columns for display
+    lesson_counts = lesson_counts.rename(columns={
+        'parentKey': 'Key (Program Key)',
+        'parentTitle': 'Program Title',
+        'lessonTitle': 'Lesson Title',
+        'recommendationCount': '# of Users Recommended'
+    })
+    
+    # Reorder columns
+    lesson_counts = lesson_counts[['Key (Program Key)', 'Program Title', 'Lesson Title', '# of Users Recommended', 'topSkillsAddressed']]
+    
+    return lesson_counts
+
 def create_learner_recommendations_csv(recommendations_df):
     """
     Create downloadable CSV with one record per user and pivoted columns for lessons and programs.
@@ -283,14 +346,15 @@ def create_learner_recommendations_csv(recommendations_df):
             'weakSkills': ', '.join(user_data['weakSkills'])
         }
         
-        # Get top 5 lessons per learner (by taking first 5 unique lessons)
+        # Get top 5 lessons per learner (by taking first 5 unique lessons in order)
         user_lessons = user_recommendations.drop_duplicates(subset=['lessonTitle']).head(5)
         
-        # Add lesson recommendations
-        for i, lesson in user_lessons.iterrows():
+        # Add lesson recommendations (treat first lesson as lesson_1, second as lesson_2, etc.)
+        for i, (_, lesson) in enumerate(user_lessons.iterrows()):
             lesson_num = i + 1
-            user_record[f'lesson_{lesson_num}'] = lesson['lessonTitle']
-            user_record[f'lesson_{lesson_num}_program'] = lesson['parentTitle']
+            # Format as "Lesson Title (Parent Title)"
+            lesson_display = f"{lesson['lessonTitle']} ({lesson['parentTitle']})"
+            user_record[f'lesson_{lesson_num}'] = lesson_display
         
         # Get top 1 program per learner (most common parent key)
         program_counts = user_recommendations['parentKey'].value_counts()
@@ -334,10 +398,7 @@ def create_learner_recommendations_csv(recommendations_df):
             column_mapping[col] = 'Weak Skills'
         elif col.startswith('lesson_'):
             lesson_num = col.split('_')[1]
-            if col.endswith('_program'):
-                column_mapping[col] = f'Lesson {lesson_num} Program'
-            else:
-                column_mapping[col] = f'Lesson {lesson_num}'
+            column_mapping[col] = f'Lesson {lesson_num}'
         elif col.startswith('program_'):
             program_num = col.split('_')[1]
             column_mapping[col] = f'Program {program_num}'
@@ -536,93 +597,6 @@ def create_program_recommendations_table(recommendations_df):
     })
     
     return program_counts_df
-
-def create_lesson_recommendations_table(recommendations_df):
-    """
-    Create a pivoted table showing lesson recommendations with one record per user.
-    """
-    if recommendations_df.empty:
-        st.warning("No recommendations data available for table export.")
-        return None
-    
-    # Create pivoted data structure
-    pivoted_data = []
-    
-    for user_id in recommendations_df['userId'].unique():
-        user_recommendations = recommendations_df[recommendations_df['userId'] == user_id]
-        
-        # Get user info
-        user_data = user_recommendations.iloc[0]
-        
-        # Initialize user record
-        user_record = {
-            'userId': user_id,
-            'totalScore': user_data['totalScore'],
-            'weakSkills': ', '.join(user_data['weakSkills'])
-        }
-        
-        # Get top 5 lessons per learner (by taking first 5 unique lessons)
-        user_lessons = user_recommendations.drop_duplicates(subset=['lessonTitle']).head(5)
-        
-        # Add lesson recommendations
-        for i, lesson in user_lessons.iterrows():
-            lesson_num = i + 1
-            user_record[f'lesson_{lesson_num}'] = lesson['lessonTitle']
-            user_record[f'lesson_{lesson_num}_program'] = lesson['parentTitle']
-        
-        # Get top 1 program per learner (most common parent key)
-        program_counts = user_recommendations['parentKey'].value_counts()
-        if not program_counts.empty:
-            top_program_key = program_counts.index[0]
-            program_data = user_recommendations[user_recommendations['parentKey'] == top_program_key].iloc[0]
-            user_record['program_1'] = program_data['parentTitle']
-        
-        pivoted_data.append(user_record)
-    
-    # Convert to DataFrame
-    pivoted_df = pd.DataFrame(pivoted_data)
-    
-    # Reorder columns to have user info first, then lesson recommendations, then program
-    base_columns = ['userId', 'totalScore', 'weakSkills']
-    lesson_columns = []
-    program_columns = []
-    
-    # Collect all lesson and program columns
-    for col in pivoted_df.columns:
-        if col.startswith('lesson_'):
-            lesson_columns.append(col)
-        elif col.startswith('program_'):
-            program_columns.append(col)
-    
-    # Sort lesson columns by number
-    lesson_columns.sort(key=lambda x: int(x.split('_')[1]))
-    
-    # Create final column order
-    final_columns = base_columns + lesson_columns + program_columns
-    pivoted_df = pivoted_df[final_columns]
-    
-    # Rename columns for better display
-    column_mapping = {}
-    for col in pivoted_df.columns:
-        if col == 'userId':
-            column_mapping[col] = 'User ID'
-        elif col == 'totalScore':
-            column_mapping[col] = 'Total Score'
-        elif col == 'weakSkills':
-            column_mapping[col] = 'Weak Skills'
-        elif col.startswith('lesson_'):
-            lesson_num = col.split('_')[1]
-            if col.endswith('_program'):
-                column_mapping[col] = f'Lesson {lesson_num} Program'
-            else:
-                column_mapping[col] = f'Lesson {lesson_num}'
-        elif col.startswith('program_'):
-            program_num = col.split('_')[1]
-            column_mapping[col] = f'Program {program_num}'
-    
-    pivoted_df = pivoted_df.rename(columns=column_mapping)
-    
-    return pivoted_df
 
 def fetch_attempts(assessment_id, limit=10):
     page = 1
