@@ -1162,7 +1162,7 @@ def main():
         submitted = st.form_submit_button("Generate Assessments", use_container_width=True)
         
         if submitted:
-            if password != st.secrets['password']:
+            if password != settings.PASSWORD:
                 st.error("❌ Incorrect password. Please try again.")
             elif not PROGRAM_KEYS.strip():
                 st.error("❌ Please enter at least one program key.")
