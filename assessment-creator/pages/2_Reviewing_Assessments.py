@@ -110,13 +110,18 @@ def display_question(question_data, question_index, total_questions):
         edited_choices = []
         
         for i, record in enumerate(records):
+            # Create label with correct answer indicator
+            choice_label = f"Choice {chr(65 + i)}:"
+            if record['choice_isCorrect']:
+                choice_label += " ✅ (Correct Answer)"
+            
             # Editable choice content
             edited_choice = st.text_area(
-                f"Choice {chr(65 + i)}:",
+                choice_label,
                 value=record['choice_content'],
                 key=f"choice_edit_{question_index}_{i}",
                 height=68,
-                help=f"Edit choice {chr(65 + i)} content"
+                help=f"Edit choice {chr(65 + i)} content" + (" (This is the correct answer)" if record['choice_isCorrect'] else "")
             )
             edited_choices.append({
                 'choice_content': edited_choice,
