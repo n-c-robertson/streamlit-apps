@@ -627,7 +627,7 @@ def get_qc_id(qc):
     unique_str += qc['question'].get('difficultyLevelId', '')
     return hashlib.md5(unique_str.encode('utf-8')).hexdigest()
 
-def process_concept(sectionId, node, lesson, concept, difficulty_level, skills, learning_objectives, number_questions_per_concept, question_types, customized_difficulty, customized_prompt_instructions, assessment_type="placement"):
+def process_concept(sectionId, node, lesson, concept, difficulty_level, difficulty_level_uri, skills, learning_objectives, number_questions_per_concept, question_types, customized_difficulty, customized_prompt_instructions, assessment_type="placement"):
     # Build atom content from concept atoms.
     atom_content = ""
     quiz_atoms = []
@@ -779,6 +779,7 @@ def process_concept(sectionId, node, lesson, concept, difficulty_level, skills, 
     for qc in valid_questions:
         # Attach metadata.
         qc['question']['sectionId'] = sectionId
+        qc['question']['difficultyLevelUri'] = difficulty_level_uri  # Set the difficulty URI
         qc['question']['source'] = {
             'partTitle': node['title'],
             'partKey': node['key'],
@@ -828,9 +829,11 @@ def process_concepts(section_content_definitions, number_questions_per_concept, 
                 # For readiness, we use the first available difficulty and skills from the original program keys
                 # Get difficulty from first available key
                 difficulty_level = None
+                difficulty_level_uri = None
                 for key in section['content_keys']:
                     if section['difficulty_level'].get(key):
                         difficulty_level = section['difficulty_level'][key]['name']
+                        difficulty_level_uri = section['difficulty_level'][key].get('uri', '')
                         break
                 
                 if not difficulty_level:
@@ -839,7 +842,9 @@ def process_concepts(section_content_definitions, number_questions_per_concept, 
                 # Use original prerequisite skills for question generation
                 skills = list(original_prerequisite_skills)
                 
-                print(f"\nProcessing lesson node {lesson_key} with skills: {skills}")
+                print(f"\nProcessing lesson node {lesson_key}")
+                print(f"Difficulty level: {difficulty_level} (URI: {difficulty_level_uri})")
+                print(f"Skills: {skills}")
                 
                 futures = []
                 concept_count = 0
@@ -854,7 +859,7 @@ def process_concepts(section_content_definitions, number_questions_per_concept, 
                                     process_concept,
                                     section['content_keys'][0],  # Use first original program key as sectionId
                                     node, node, concept,  # For lesson nodes, pass node as both node and lesson
-                                    difficulty_level, skills, learning_objectives,
+                                    difficulty_level, difficulty_level_uri, skills, learning_objectives,
                                     number_questions_per_concept, question_types, customized_difficulty, customized_prompt_instructions,
                                     assessment_type
                                 )
@@ -870,7 +875,7 @@ def process_concepts(section_content_definitions, number_questions_per_concept, 
                                             process_concept,
                                             section['content_keys'][0],  # Use first original program key as sectionId
                                             node, lesson, concept,
-                                            difficulty_level, skills, learning_objectives,
+                                            difficulty_level, difficulty_level_uri, skills, learning_objectives,
                                             number_questions_per_concept, question_types, customized_difficulty, customized_prompt_instructions,
                                             assessment_type
                                         )
@@ -900,11 +905,13 @@ def process_concepts(section_content_definitions, number_questions_per_concept, 
             # Original placement logic
             for key in section['content_keys']:
                 difficulty_level = section['difficulty_level'][key]['name']
+                difficulty_level_uri = section['difficulty_level'][key].get('uri', '')
                 skills = [s['name'] for s in section['skills'][key]]
                 node = section['nodes'][key]
                 
                 print(f"\n=== PLACEMENT SKILLS VALIDATION ===")
                 print(f"Program key: {key}")
+                print(f"Difficulty level: {difficulty_level} (URI: {difficulty_level_uri})")
                 print(f"Skills for question generation: {skills}")
 
                 futures = []
@@ -916,7 +923,7 @@ def process_concepts(section_content_definitions, number_questions_per_concept, 
                                     executor.submit(
                                         process_concept,
                                         key, node, lesson, concept,
-                                        difficulty_level, skills, learning_objectives,
+                                        difficulty_level, difficulty_level_uri, skills, learning_objectives,
                                         number_questions_per_concept, question_types, customized_difficulty, customized_prompt_instructions,
                                         assessment_type
                                     )
