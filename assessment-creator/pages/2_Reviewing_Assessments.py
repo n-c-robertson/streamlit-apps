@@ -83,6 +83,47 @@ def display_question(question_data, question_index, total_questions):
         else:
             st.info("⏳ Pending")
     
+    # Extract metadata from the first record (all records for a question have the same metadata)
+    if question_data['records']:
+        first_record = question_data['records'][0]
+        
+        # Create metadata display
+        col1, col2, col3 = st.columns([1, 1, 2])
+        
+        with col1:
+            # Skill display
+            skill_id = first_record.get('skillId', 'Unknown Skill')
+            st.markdown(f"**Skill:**")
+            st.write(skill_id)
+        
+        with col2:
+            # Difficulty display
+            difficulty = first_record.get('difficultyLevelId', 'Unknown Difficulty')
+            st.markdown(f"**Difficulty:**")
+            st.write(difficulty)
+        
+        with col3:
+            # Content URI with expandable details
+            source = first_record.get('source', {})
+            if isinstance(source, str):
+                try:
+                    source = ast.literal_eval(source)
+                except:
+                    source = {}
+            
+            uri = source.get('uri', 'No URI available')
+            concept_title = source.get('conceptTitle', 'Unknown Concept')
+            lesson_title = source.get('lessonTitle', 'Unknown Lesson')
+            
+            st.markdown(f"**Content Source:**")
+            with st.expander(f"📚 {concept_title}", expanded=False):
+                st.markdown(f"**Lesson:** {lesson_title}")
+                st.markdown(f"**Concept:** {concept_title}")
+                if uri != 'No URI available':
+                    st.markdown(f"**URI:** [{uri}]({uri})")
+                else:
+                    st.markdown("**URI:** Not available")
+    
     # Question form
     with st.form(f"question_form_{question_index}"):
 
