@@ -27,7 +27,8 @@ import settings
 # SETTINGS
 #========================================
 
-CLASSROOM_CONTENT_API_URL = st.secrets['classroom_content_api_url']
+#CLASSROOM_CONTENT_API_URL = st.secrets['classroom_content_api_url']
+#CLASSROOM_CONTENT_API_URL = "https://api.udacity.com/api/classroom-content/v1/graphql"
 
 #========================================
 # QUERIES
@@ -54,6 +55,10 @@ def query_component(key, locale="en-us"):
                     name
                     uri
                   }
+                  prerequisite_skills {
+                    name
+                    uri
+                  }
                 }
               }
               root_node {
@@ -72,7 +77,7 @@ def query_component(key, locale="en-us"):
 
     try:
         resp = requests.post(
-            CLASSROOM_CONTENT_API_URL,
+            settings.CLASSROOM_CONTENT_API_URL,
             headers=settings.production_headers(),
             json=payload
         )
@@ -90,179 +95,94 @@ def query_node(node_id):
     payload = {
         "query": """
         query AssessmentsAPINotebooks_NodeQuery($id: Int!) {
-          node(id: $id) {
-            ...on Nanodegree {
+  node(id: $id) {
+    ... on Nanodegree {
+      key
+      locale
+      version
+      semantic_type
+      title
+      parts {
+        key
+        locale
+        version
+        semantic_type
+        title
+        modules {
+          key
+          locale
+          version
+          semantic_type
+          title
+          lessons {
+            key
+            locale
+            version
+            semantic_type
+            title
+            concepts {
               key
               locale
               version
               semantic_type
               title
-              parts {
-                key
-                locale
-                version
-                semantic_type
-                title
-                modules {
+              progress_key
+              atoms {
+                ... on TextAtom {
                   key
                   locale
                   version
                   semantic_type
                   title
-                  lessons {
-                    key
-                    locale
-                    version
-                    semantic_type
-                    title
-                    concepts {
-                      key
-                      locale
-                      version
-                      semantic_type
-                      title
-                      progress_key
-                      atoms {
-                        ...on TextAtom {
-                          key
-                          locale
-                          version
-                          semantic_type
-                          title
-                          text
-                        }
-                        ...on VideoAtom {
-                          key
-                          locale
-                          version
-                          semantic_type
-                          title
-                          video {
-                            vtt_url
-                          }
-                        }
-                        ... on RadioQuizAtom {
-                          semantic_type
-                          question {
-                            prompt
-                            answers {
-                              is_correct
-                              text
-                            }
-                          }
-                        }
-                        ... on CheckboxQuizAtom {
-                          semantic_type
-                          question {
-                            prompt
-                            correct_feedback
-                            answers {
-                              is_correct
-                              text
-                            }
-                          }
-                        }
-                        ... on MatchingQuizAtom {
-                          semantic_type
-                          question {
-                            answers_label
-                            concepts_label
-                            concepts {
-                              text
-                              correct_answer {
-                                text
-                              }
-                            }
-                            complex_prompt { text }
-                            answers { text }
-                          }
-                        }
-                      }
+                  text
+                }
+                ... on VideoAtom {
+                  key
+                  locale
+                  version
+                  semantic_type
+                  title
+                  video {
+                    vtt_url
+                  }
+                }
+                ... on RadioQuizAtom {
+                  semantic_type
+                  question {
+                    prompt
+                    answers {
+                      is_correct
+                      text
                     }
                   }
                 }
-              }
-            }
-            ...on Part {
-              key
-              locale
-              version
-              semantic_type
-              title
-              modules {
-                key
-                locale
-                version
-                semantic_type
-                title
-                lessons {
-                  key
-                  locale
-                  version
+                ... on CheckboxQuizAtom {
                   semantic_type
-                  title
-                  concepts {
-                    key
-                    locale
-                    version
-                    semantic_type
-                    title
-                    progress_key
-                    atoms {
-                      ...on TextAtom {
-                        key
-                        locale
-                        version
-                        semantic_type
-                        title
+                  question {
+                    prompt
+                    correct_feedback
+                    answers {
+                      is_correct
+                      text
+                    }
+                  }
+                }
+                ... on MatchingQuizAtom {
+                  semantic_type
+                  question {
+                    answers_label
+                    concepts_label
+                    concepts {
+                      text
+                      correct_answer {
                         text
                       }
-                      ...on VideoAtom {
-                        key
-                        locale
-                        version
-                        semantic_type
-                        title
-                        video {
-                          vtt_url
-                        }
-                      }
-                      ... on RadioQuizAtom {
-                        semantic_type
-                        question {
-                          prompt
-                          answers {
-                            is_correct
-                            text
-                          }
-                        }
-                      }
-                      ... on CheckboxQuizAtom {
-                        semantic_type
-                        question {
-                          prompt
-                          correct_feedback
-                          answers {
-                            is_correct
-                            text
-                          }
-                        }
-                      }
-                      ... on MatchingQuizAtom {
-                        semantic_type
-                        question {
-                          answers_label
-                          concepts_label
-                          concepts {
-                            text
-                            correct_answer {
-                              text
-                            }
-                          }
-                          complex_prompt { text }
-                          answers { text }
-                        }
-                      }
+                    }
+                    complex_prompt {
+                      text
+                    }
+                    answers {
+                      text
                     }
                   }
                 }
@@ -270,6 +190,175 @@ def query_node(node_id):
             }
           }
         }
+      }
+    }
+    ... on Part {
+      key
+      locale
+      version
+      semantic_type
+      title
+      modules {
+        key
+        locale
+        version
+        semantic_type
+        title
+        lessons {
+          key
+          locale
+          version
+          semantic_type
+          title
+          concepts {
+            key
+            locale
+            version
+            semantic_type
+            title
+            progress_key
+            atoms {
+              ... on TextAtom {
+                key
+                locale
+                version
+                semantic_type
+                title
+                text
+              }
+              ... on VideoAtom {
+                key
+                locale
+                version
+                semantic_type
+                title
+                video {
+                  vtt_url
+                }
+              }
+              ... on RadioQuizAtom {
+                semantic_type
+                question {
+                  prompt
+                  answers {
+                    is_correct
+                    text
+                  }
+                }
+              }
+              ... on CheckboxQuizAtom {
+                semantic_type
+                question {
+                  prompt
+                  correct_feedback
+                  answers {
+                    is_correct
+                    text
+                  }
+                }
+              }
+              ... on MatchingQuizAtom {
+                semantic_type
+                question {
+                  answers_label
+                  concepts_label
+                  concepts {
+                    text
+                    correct_answer {
+                      text
+                    }
+                  }
+                  complex_prompt {
+                    text
+                  }
+                  answers {
+                    text
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    ... on Lesson {
+      key
+      locale
+      version
+      semantic_type
+      title
+      concepts {
+        key
+        locale
+        version
+        semantic_type
+        title
+        progress_key
+        atoms {
+          ... on TextAtom {
+            key
+            locale
+            version
+            semantic_type
+            title
+            text
+          }
+          ... on VideoAtom {
+            key
+            locale
+            version
+            semantic_type
+            title
+            video {
+              vtt_url
+            }
+          }
+          ... on RadioQuizAtom {
+            semantic_type
+            question {
+              prompt
+              answers {
+                is_correct
+                text
+              }
+            }
+          }
+          ... on CheckboxQuizAtom {
+            semantic_type
+            question {
+              prompt
+              correct_feedback
+              answers {
+                is_correct
+                text
+              }
+            }
+          }
+          ... on MatchingQuizAtom {
+            semantic_type
+            question {
+              answers_label
+              concepts_label
+              concepts {
+                text
+                correct_answer {
+                  text
+                }
+              }
+              complex_prompt {
+                text
+              }
+              answers {
+                text
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
         """,
         "variables": {
             "id": node_id
@@ -278,7 +367,7 @@ def query_node(node_id):
 
     try:
         response = requests.post(
-            CLASSROOM_CONTENT_API_URL,
+            settings.CLASSROOM_CONTENT_API_URL,
             headers=settings.production_headers(),
             json=payload
         )
