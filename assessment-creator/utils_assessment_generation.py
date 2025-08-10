@@ -111,12 +111,23 @@ def fetch_readiness_lessons_from_skills_api(prerequisite_skills):
         }
     }
     
+    print(f"\n=== SKILLS API DEBUG ===")
+    print(f"URL: {settings.SKILLS_API_URL}")
+    print(f"Payload: {json.dumps(payload, indent=2)}")
+    
     try:
         # Send POST request
         response = requests.post(settings.SKILLS_API_URL, headers=headers, data=json.dumps(payload))
+        print(f"Response status: {response.status_code}")
+        
         response.raise_for_status()
         
         api_response = response.json()
+        print(f"API response type: {type(api_response)}")
+        print(f"API response length: {len(api_response) if isinstance(api_response, list) else 'not a list'}")
+        
+        if isinstance(api_response, list) and len(api_response) > 0:
+            print(f"First item keys: {list(api_response[0].keys()) if api_response[0] else 'empty item'}")
         
         # Extract lesson IDs from the response
         lesson_ids = []
@@ -124,12 +135,18 @@ def fetch_readiness_lessons_from_skills_api(prerequisite_skills):
             if 'lesson' in item and 'content' in item['lesson'] and 'id' in item['lesson']['content']:
                 lesson_id = item['lesson']['content']['id']
                 lesson_ids.append(lesson_id)
+                print(f"Found lesson ID: {lesson_id}")
+        
+        print(f"Total lesson IDs found: {len(lesson_ids)}")
+        print(f"=== END SKILLS API DEBUG ===\n")
         
         return lesson_ids
         
-    except requests.RequestException:
+    except requests.RequestException as e:
+        print(f"Skills API request error: {e}")
         return []
-    except Exception:
+    except Exception as e:
+        print(f"Skills API processing error: {e}")
         return []
 
 def add_program_data(section_content_definitions, assessment_type="placement"):
@@ -1042,11 +1059,11 @@ def json_to_dataframe(section_content_definitions):
                     'choice_content': choice.get('content'),
                     'choice_isCorrect': choice.get('isCorrect'),
                     'choice_orderIndex': choice.get('orderIndex'),
-                    'questionEvaluation': question.get('evaluation'),
-                    'relevanceAndClarity': question.get('relevanceAndClarity'),
-                    'questionTypeDiversity': question.get('questionTypeDiversity'),
-                    'choiceQuality': question.get('choiceQuality'),
-                    'generalAdherence': question.get('generalAdherence')
+                    'questionEvaluation': qc.get('eval', {}).get('questionEvaluation'),
+                    'relevanceAndClarity': qc.get('eval', {}).get('relevanceAndClarity'),
+                    'questionTypeDiversity': qc.get('eval', {}).get('questionTypeDiversity'),
+                    'choiceQuality': qc.get('eval', {}).get('choiceQuality'),
+                    'generalAdherence': qc.get('eval', {}).get('generalAdherence')
                 }
                 rows.append(row)
     
@@ -1452,8 +1469,31 @@ def filter_questions_by_evaluation(
     unique_questions_df = df.groupby('question_content').first().reset_index()
     initial_unique_questions = len(unique_questions_df)
     
+    print(f"\n=== EVALUATION FILTERING DEBUG ===")
+    print(f"Initial unique questions: {initial_unique_questions}")
+    
+    # Check evaluation values
+    eval_values = unique_questions_df[evaluation_col].value_counts()
+    print(f"Evaluation value counts:")
+    for value, count in eval_values.items():
+        print(f"  {value}: {count}")
+    
     # Filter questions that PASS evaluation
     passed_questions = unique_questions_df[unique_questions_df[evaluation_col] == 'PASS']['question_content'].tolist()
+    
+    print(f"Questions that PASSED evaluation: {len(passed_questions)}")
+    
+    # If no questions pass, let's be less strict and keep questions with non-null evaluations
+    if len(passed_questions) == 0:
+        print("WARNING: No questions passed evaluation! Keeping questions with non-null evaluations...")
+        non_null_questions = unique_questions_df[unique_questions_df[evaluation_col].notna()]['question_content'].tolist()
+        print(f"Questions with non-null evaluations: {len(non_null_questions)}")
+        
+        if len(non_null_questions) > 0:
+            passed_questions = non_null_questions
+        else:
+            print("WARNING: No questions have evaluation results! Keeping all questions...")
+            passed_questions = unique_questions_df['question_content'].tolist()
     
     # Filter the dataframe to only keep questions that passed evaluation
     filtered_df = df[df['question_content'].isin(passed_questions)].reset_index(drop=True)
@@ -1461,6 +1501,9 @@ def filter_questions_by_evaluation(
     # Calculate statistics
     after_evaluation_unique_questions = len(passed_questions)
     failed_questions = initial_unique_questions - after_evaluation_unique_questions
+    
+    print(f"Final questions after evaluation filtering: {after_evaluation_unique_questions}")
+    print(f"=== END EVALUATION FILTERING DEBUG ===\n")
     
     evaluation_stats = {
         'initial_unique_questions': initial_unique_questions,
@@ -1830,6 +1873,12 @@ def generate_assessments(PROGRAM_KEYS, QUESTION_TYPES, QUESTION_LIMIT, CUSTOMIZE
     total_choices = len(questions_choices_df)
     unique_questions = questions_choices_df['question_content'].nunique()
     question_counts.append(("After Converting to DataFrame", unique_questions, total_choices))
+    
+    print(f"\n=== DATAFRAME CONVERSION DEBUG ===")
+    print(f"Questions after dataframe conversion: {unique_questions} unique questions, {total_choices} total choices")
+    if unique_questions == 0:
+        print("ERROR: No questions in dataframe after conversion!")
+    print(f"=== END DATAFRAME CONVERSION DEBUG ===\n")
 
     step += 1
     update_progress(step)
@@ -1869,29 +1918,30 @@ def generate_assessments(PROGRAM_KEYS, QUESTION_TYPES, QUESTION_LIMIT, CUSTOMIZE
 
     step += 1
     update_progress(step)
-    code_conversion_stats = convert_questions_to_code_format_based_on_metadata(section_content_definitions, conversion_percentage=0.30, customized_prompt_instructions=CUSTOMIZED_PROMPT_INSTRUCTIONS)
+    # Convert code format questions directly on the filtered dataframe
+    questions_choices_df, code_conversion_stats = convert_questions_to_code_format_dataframe(
+        questions_choices_df, 
+        conversion_percentage=0.30, 
+        customized_prompt_instructions=CUSTOMIZED_PROMPT_INSTRUCTIONS
+    )
     
-    # After code conversion, we need to regenerate the dataframe to get accurate counts
-    questions_choices_df_after_code = json_to_dataframe(section_content_definitions)
-    unique_questions_after_code = questions_choices_df_after_code['question_content'].nunique()
-    total_choices_after_code = len(questions_choices_df_after_code)
+    # Count questions after code conversion
+    unique_questions_after_code = questions_choices_df['question_content'].nunique()
+    total_choices_after_code = len(questions_choices_df)
     question_counts.append(("After Code Format Conversion", unique_questions_after_code, total_choices_after_code))
-    
-    # Update the dataframe to use the one with code conversions
-    questions_choices_df = questions_choices_df_after_code
 
     step += 1
     update_progress(step)
-    tuning_stats = tune_distractors(section_content_definitions, tuning_percentage=0.20)
+    # Tune distractors directly on the filtered dataframe
+    questions_choices_df, tuning_stats = tune_distractors_dataframe(
+        questions_choices_df, 
+        tuning_percentage=0.20
+    )
     
-    # After distractor tuning, regenerate the dataframe to get final accurate counts
-    questions_choices_df_after_tuning = json_to_dataframe(section_content_definitions)
-    unique_questions_after_tuning = questions_choices_df_after_tuning['question_content'].nunique()
-    total_choices_after_tuning = len(questions_choices_df_after_tuning)
+    # Count questions after distractor tuning
+    unique_questions_after_tuning = questions_choices_df['question_content'].nunique()
+    total_choices_after_tuning = len(questions_choices_df)
     question_counts.append(("After Distractor Tuning", unique_questions_after_tuning, total_choices_after_tuning))
-    
-    # Update the dataframe to use the one with tuned distractors
-    questions_choices_df = questions_choices_df_after_tuning
 
     step += 1
     update_progress(step)
@@ -2051,3 +2101,287 @@ def select_best_question_with_ai(skill, candidate_questions):
             
     except json.JSONDecodeError:
         return candidate_questions[0]  # Fallback to first candidate
+
+def convert_questions_to_code_format_dataframe(
+    df: pd.DataFrame,
+    conversion_percentage: float = 0.30,
+    customized_prompt_instructions: str = ""
+) -> tuple[pd.DataFrame, dict]:
+    """
+    Convert questions to include code markdown based on coding content detection in the dataframe.
+    Works directly on the filtered dataframe to preserve filtering results.
+    
+    Parameters:
+        df: The filtered dataframe containing questions and choices
+        conversion_percentage: Percentage of coding questions to convert (default 30%)
+        customized_prompt_instructions: Additional instructions for the conversion
+    
+    Returns:
+        tuple: (converted_dataframe, conversion_stats)
+    """
+    # Get unique questions for analysis
+    unique_questions_df = df.groupby('question_content').first().reset_index()
+    
+    # Detect coding content in questions (simple heuristic)
+    coding_questions = []
+    for _, row in unique_questions_df.iterrows():
+        question_content = row['question_content']
+        if detect_coding_content(question_content):
+            coding_questions.append(question_content)
+    
+    total_questions = len(unique_questions_df)
+    total_coding_questions = len(coding_questions)
+    
+    # If no questions are coding marked, skip this step
+    if total_coding_questions == 0:
+        return df, {
+            "converted_questions": 0,
+            "total_questions": total_questions,
+            "total_coding_questions": 0,
+            "conversion_percentage": 0,
+            "reason": "No questions with coding content found"
+        }
+    
+    # Calculate how many questions to convert
+    target_conversion_count = int(total_questions * conversion_percentage)
+    
+    # If less than target percentage of questions are coding, get all of them
+    if total_coding_questions <= target_conversion_count:
+        questions_to_convert = coding_questions
+        actual_conversion_count = total_coding_questions
+    else:
+        # Sample target percentage from coding questions
+        questions_to_convert = random.sample(coding_questions, target_conversion_count)
+        actual_conversion_count = target_conversion_count
+    
+    converted_count = 0
+    failed_conversions = 0
+    
+    # Convert selected questions to include code markdown
+    for question_content in questions_to_convert:
+        try:
+            # Get all rows for this question
+            question_rows = df[df['question_content'] == question_content]
+            if question_rows.empty:
+                continue
+                
+            # Get the first row to extract question data
+            first_row = question_rows.iloc[0]
+            
+            # Prepare the question data for conversion
+            question_data = {
+                "question": {
+                    "content": question_content,
+                    "skillId": first_row.get('skillId', ''),
+                    "difficultyLevelId": first_row.get('difficultyLevelId', ''),
+                    "category": first_row.get('category', ''),
+                    "status": first_row.get('question_status', 'ACTIVE')
+                },
+                "choices": []
+            }
+            
+            # Add choices from all rows for this question
+            for _, row in question_rows.iterrows():
+                question_data["choices"].append({
+                    "content": row.get('choice_content', ''),
+                    "isCorrect": row.get('choice_isCorrect', False),
+                    "orderIndex": row.get('choice_orderIndex', 0),
+                    "status": row.get('choice_status', 'ACTIVE')
+                })
+            
+            # Convert to JSON string
+            questions_json = json.dumps({"questions_choices": [question_data]}, ensure_ascii=False)
+            
+            # Get the conversion prompt
+            prompt_messages = prompts.get_code_conversion_prompt(
+                first_row.get('skillId', ''),
+                questions_json,
+                first_row.get('difficultyLevelId', ''),
+                [first_row.get('skillId', '')],  # skills
+                "",  # learning_objectives (not needed for conversion)
+                "",  # question_types (not needed for conversion)
+                "",  # content (not needed for conversion)
+                "No Change",  # customized_difficulty
+                customized_prompt_instructions
+            )
+            
+            # Make API call using the existing client from settings
+            response = settings.openai_client.chat.completions.create(
+                model=settings.CHAT_COMPLETIONS_MODEL,
+                messages=prompt_messages,
+                temperature=0.3,
+                max_tokens=4000
+            )
+            
+            # Parse the response
+            response_content = response.choices[0].message.content.strip()
+            
+            # Try to extract JSON from the response
+            try:
+                # Look for JSON in the response
+                json_match = re.search(r'\{.*\}', response_content, re.DOTALL)
+                if json_match:
+                    converted_data = json.loads(json_match.group())
+                    
+                    if "questions_choices" in converted_data and len(converted_data["questions_choices"]) > 0:
+                        converted_qc = converted_data["questions_choices"][0]
+                        
+                        # Update the question content in the dataframe
+                        df.loc[df['question_content'] == question_content, 'question_content'] = converted_qc["question"]["content"]
+                        
+                        # Update choices if available
+                        converted_choices = converted_qc.get("choices", [])
+                        for _, row_idx in enumerate(df[df['question_content'] == converted_qc["question"]["content"]].index):
+                            choice_order = df.loc[row_idx, 'choice_orderIndex']
+                            for choice in converted_choices:
+                                if choice.get('orderIndex') == choice_order:
+                                    df.loc[row_idx, 'choice_content'] = choice.get('content', df.loc[row_idx, 'choice_content'])
+                                    df.loc[row_idx, 'choice_isCorrect'] = choice.get('isCorrect', df.loc[row_idx, 'choice_isCorrect'])
+                                    break
+                        
+                        converted_count += 1
+                    else:
+                        failed_conversions += 1
+                else:
+                    failed_conversions += 1
+                    
+            except json.JSONDecodeError:
+                # If conversion fails, keep the original question
+                failed_conversions += 1
+                continue
+                
+        except Exception:
+            # If conversion fails, keep the original question
+            failed_conversions += 1
+            continue
+    
+    return df, {
+        "converted_questions": converted_count,
+        "failed_conversions": failed_conversions,
+        "total_questions": total_questions,
+        "total_coding_questions": total_coding_questions,
+        "conversion_percentage": (converted_count / total_questions * 100) if total_questions > 0 else 0,
+        "reason": f"Converted {converted_count} out of {actual_conversion_count} selected questions"
+    }
+
+def tune_distractors_dataframe(df: pd.DataFrame, tuning_percentage=0.20) -> tuple[pd.DataFrame, dict]:
+    """
+    Tune distractors for a percentage of questions to make them more challenging.
+    Works directly on the filtered dataframe to preserve filtering results.
+    
+    Args:
+        df: The filtered dataframe containing questions and choices
+        tuning_percentage: Percentage of questions to tune (default 20%)
+    
+    Returns:
+        tuple: (tuned_dataframe, tuning_stats)
+    """
+    # Get unique questions for analysis
+    unique_questions_df = df.groupby('question_content').first().reset_index()
+    total_questions = len(unique_questions_df)
+    
+    if total_questions == 0:
+        return df, {
+            "tuned_questions": 0,
+            "total_questions": 0,
+            "tuning_percentage": 0,
+            "reason": "No questions found to tune"
+        }
+    
+    # Calculate how many questions to tune
+    questions_to_tune_count = max(1, int(total_questions * tuning_percentage))
+    
+    # Randomly select questions to tune
+    questions_to_tune = random.sample(unique_questions_df['question_content'].tolist(), min(questions_to_tune_count, total_questions))
+    
+    tuned_count = 0
+    failed_tuning = 0
+    
+    # Tune selected questions
+    for question_content in questions_to_tune:
+        try:
+            # Get all rows for this question
+            question_rows = df[df['question_content'] == question_content]
+            if question_rows.empty:
+                continue
+                
+            # Get the first row to extract question data
+            first_row = question_rows.iloc[0]
+            
+            # Prepare the question data for tuning
+            question_data = {
+                "question": {
+                    "content": question_content,
+                    "skillId": first_row.get('skillId', ''),
+                    "difficultyLevelId": first_row.get('difficultyLevelId', ''),
+                    "category": first_row.get('category', ''),
+                    "status": first_row.get('question_status', 'ACTIVE')
+                },
+                "choices": []
+            }
+            
+            # Add choices from all rows for this question
+            for _, row in question_rows.iterrows():
+                question_data["choices"].append({
+                    "content": row.get('choice_content', ''),
+                    "isCorrect": row.get('choice_isCorrect', False),
+                    "orderIndex": row.get('choice_orderIndex', 0),
+                    "status": row.get('choice_status', 'ACTIVE')
+                })
+            
+            # Get the tuning prompt
+            prompt_messages = prompts.get_distractor_tuning_prompt(question_data)
+            
+            # Make API call
+            response = settings.call_openai_with_fallback(
+                model=settings.CHAT_COMPLETIONS_MODEL,
+                response_format=settings.CHAT_COMPLETIONS_RESPONSE_FORMAT,
+                temperature=settings.CHAT_COMPLETIONS_TEMPERATURE,
+                messages=prompt_messages
+            )
+            
+            # Parse the response
+            response_content = response.choices[0].message.content.strip()
+            
+            # Clean and parse JSON response
+            try:
+                # Remove any JSON code fences
+                cleaned_response = response_content.replace('```json', '').replace('```', '').strip()
+                tuned_data = json.loads(cleaned_response)
+                
+                # Update the question with tuned distractors
+                if "question" in tuned_data and "choices" in tuned_data:
+                    # Update question content if changed
+                    new_question_content = tuned_data["question"].get("content", question_content)
+                    df.loc[df['question_content'] == question_content, 'question_content'] = new_question_content
+                    
+                    # Update choices
+                    tuned_choices = tuned_data.get("choices", [])
+                    for _, row_idx in enumerate(df[df['question_content'] == new_question_content].index):
+                        choice_order = df.loc[row_idx, 'choice_orderIndex']
+                        for choice in tuned_choices:
+                            if choice.get('orderIndex') == choice_order:
+                                df.loc[row_idx, 'choice_content'] = choice.get('content', df.loc[row_idx, 'choice_content'])
+                                df.loc[row_idx, 'choice_isCorrect'] = choice.get('isCorrect', df.loc[row_idx, 'choice_isCorrect'])
+                                break
+                    
+                    tuned_count += 1
+                else:
+                    failed_tuning += 1
+                    
+            except json.JSONDecodeError:
+                failed_tuning += 1
+                continue
+                
+        except Exception:
+            failed_tuning += 1
+            continue
+    
+    return df, {
+        "tuned_questions": tuned_count,
+        "failed_tuning": failed_tuning,
+        "total_questions": total_questions,
+        "questions_selected_for_tuning": len(questions_to_tune),
+        "tuning_percentage": (tuned_count / total_questions * 100) if total_questions > 0 else 0,
+        "reason": f"Tuned {tuned_count} out of {len(questions_to_tune)} selected questions"
+    }
