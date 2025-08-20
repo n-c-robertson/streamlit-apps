@@ -22,14 +22,6 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import settings
 
-
-#========================================
-# SETTINGS
-#========================================
-
-#CLASSROOM_CONTENT_API_URL = st.secrets['classroom_content_api_url']
-#CLASSROOM_CONTENT_API_URL = "https://api.udacity.com/api/classroom-content/v1/graphql"
-
 #========================================
 # QUERIES
 #========================================
