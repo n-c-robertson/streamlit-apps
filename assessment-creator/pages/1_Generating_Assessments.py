@@ -27,8 +27,8 @@ def main():
         st.markdown('#### Required Parameters')
         PROGRAM_KEYS = st.text_input(
             'Program Keys (comma separated)', 
-            value='cd13303,cd13318,cd13267,cd1827', 
-            placeholder='Enter program keys (comma separated)',
+            value='cd13303,cd13318,cd13267,cd1827 (use CD keys, not ND keys)', 
+            placeholder='Enter program keys (comma separated). Use CD keys, not ND keys.',
             help="Enter the program keys for the content you want to generate questions for (cd101, cd102, etc.)"
         )
         
