@@ -62,14 +62,15 @@ def main():
 
             CUSTOMIZED_DIFFICULTY = st.select_slider('Custom Difficulty', options=['Much Easier', 'Easier', 'A Little Easier', 'No Change', 'A Little Harder', 'Harder', 'Much Harder'], value='No Change', help="Adjust the base difficulty of the questions.")
 
-            TEMPERATURE = st.slider(
-            'Temperature', 
-            value=0.2, 
-            min_value=0.0, 
-            max_value=1.0, 
-            step=0.1,
-            help="Controls creativity vs consistency. Lower values (0.1-0.3) produce more consistent questions. Higher values (0.7-0.9) produce more creative questions, with some risk of hallucinations."
-        )
+            # Disabled in gpt-5, remove later if not neeeded.
+            #TEMPERATURE = st.slider(
+            #'Temperature', 
+            #value=0.2, 
+            #min_value=0.0, 
+            #max_value=1.0, 
+            #step=0.1,
+            #help="Controls creativity vs consistency. Lower values (0.1-0.3) produce more consistent questions. Higher values (0.7-0.9) produce more creative questions, with some risk of hallucinations."
+        #)
 
             CUSTOMIZED_PROMPT_INSTRUCTIONS = st.text_area('Custom Instructions', value='', help="Enter additional instructions for the prompt. This will be appended to the base prompt.")
 
@@ -99,7 +100,7 @@ def main():
                             QUESTION_LIMIT, 
                             CUSTOMIZED_DIFFICULTY, 
                             CUSTOMIZED_PROMPT_INSTRUCTIONS, 
-                            TEMPERATURE, 
+                            #TEMPERATURE,  # removed in GPT5.
                             ASSESSMENT_TYPE, # Pass the selected assessment type
                             QUESTIONS_PER_CONCEPT,
                             progress_bar, 
