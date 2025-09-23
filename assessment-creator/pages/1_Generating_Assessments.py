@@ -54,6 +54,13 @@ def main():
                 help="Set a maximum number of questions in the final assessment. If the limit is higher than available questions, an AI agent will select the best questions for each skill."
             )
 
+            QUESTIONS_PER_CONCEPT = st.selectbox(
+                'Questions per Concept',
+                options=[1,2,3,4,5], 
+                value=1, 
+                help="generates multiple questions per page in a Udacity course. Significantly increases run time."
+            )
+
             CUSTOMIZED_DIFFICULTY = st.select_slider('Custom Difficulty', options=['Much Easier', 'Easier', 'A Little Easier', 'No Change', 'A Little Harder', 'Harder', 'Much Harder'], value='No Change', help="Adjust the base difficulty of the questions.")
 
             TEMPERATURE = st.slider(
@@ -95,6 +102,7 @@ def main():
                             CUSTOMIZED_PROMPT_INSTRUCTIONS, 
                             TEMPERATURE, 
                             ASSESSMENT_TYPE, # Pass the selected assessment type
+                            QUESTIONS_PER_CONCEPT,
                             progress_bar, 
                             progress_text
                         )
