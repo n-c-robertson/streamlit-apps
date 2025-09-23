@@ -57,7 +57,6 @@ def main():
             QUESTIONS_PER_CONCEPT = st.selectbox(
                 'Questions per Concept',
                 options=[1,2,3,4,5], 
-                value=1, 
                 help="generates multiple questions per page in a Udacity course. Significantly increases run time."
             )
 
