@@ -1742,9 +1742,9 @@ def tune_distractors(section_content_definitions, tuning_percentage=0.20):
         "reason": f"Tuned {tuned_count} out of {len(questions_to_tune)} selected questions"
     }
 
-def generate_assessments(PROGRAM_KEYS, QUESTION_TYPES, QUESTION_LIMIT, CUSTOMIZED_DIFFICULTY, CUSTOMIZED_PROMPT_INSTRUCTIONS, TEMPERATURE, ASSESSMENT_TYPE, progress_bar=None, progress_text=None):
-    # Default questions per concept to 1
-    NUMBER_QUESTIONS_PER_CONCEPT = 1
+def generate_assessments(PROGRAM_KEYS, QUESTION_TYPES, QUESTION_LIMIT, CUSTOMIZED_DIFFICULTY, CUSTOMIZED_PROMPT_INSTRUCTIONS, TEMPERATURE, ASSESSMENT_TYPE, NUMBER_QUESTIONS_PER_CONCEPT, progress_bar=None, progress_text=None):
+    # Used to be defaulted to 1, now set to up to 5 to allow work around for Solutions Architects.
+    NUMBER_QUESTIONS_PER_CONCEPT = NUMBER_QUESTIONS_PER_CONCEPT
     
     steps = [
         "Preparing program keys...",
