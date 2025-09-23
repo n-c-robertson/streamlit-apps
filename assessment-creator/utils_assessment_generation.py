@@ -604,7 +604,7 @@ def learning_objective_generator(section_content_definitions):
             chat_completion_response = settings.call_openai_with_fallback(
                 model=settings.CHAT_COMPLETIONS_MODEL,
                 response_format=settings.CHAT_COMPLETIONS_RESPONSE_FORMAT,
-                temperature=settings.CHAT_COMPLETIONS_TEMPERATURE,
+                #temperature=settings.CHAT_COMPLETIONS_TEMPERATURE, #not supported in gpt 5
                 messages=messages
                                 )
         except Exception as e:
@@ -723,7 +723,7 @@ def process_concept(sectionId, node, lesson, concept, difficulty_level, difficul
     chat_completion_response = settings.call_openai_with_fallback(
         model=settings.CHAT_COMPLETIONS_MODEL,
         response_format=settings.CHAT_COMPLETIONS_RESPONSE_FORMAT,
-        temperature=settings.CHAT_COMPLETIONS_TEMPERATURE,
+        #temperature=settings.CHAT_COMPLETIONS_TEMPERATURE, # not supported in gpt 5.
         messages=prompt_messages
     )
     
@@ -980,7 +980,7 @@ def evaluate_question(learning_objectives, qc, question_types):
         response = settings.call_openai_with_fallback(
             model=settings.CHAT_COMPLETIONS_MODEL,
             response_format=settings.CHAT_COMPLETIONS_RESPONSE_FORMAT,
-            temperature=settings.CHAT_COMPLETIONS_TEMPERATURE,
+            #temperature=settings.CHAT_COMPLETIONS_TEMPERATURE, # not supported in gpt 5.
             messages=messages
         )
         evaluation_result = json.loads(response.choices[0].message.content)
@@ -1209,7 +1209,7 @@ def dedupe_questions_keep_choices(
             response = settings.call_openai_with_fallback(
                 model=settings.CHAT_COMPLETIONS_MODEL,
                 response_format=settings.CHAT_COMPLETIONS_RESPONSE_FORMAT,
-                temperature=settings.CHAT_COMPLETIONS_TEMPERATURE,
+                #temperature=settings.CHAT_COMPLETIONS_TEMPERATURE, #not supported in gpt 5.
                 messages=messages
             )
             
@@ -1283,7 +1283,7 @@ def filter_content_specific_questions(
             response = settings.call_openai_with_fallback(
                 model=settings.CHAT_COMPLETIONS_MODEL,
                 response_format=settings.CHAT_COMPLETIONS_RESPONSE_FORMAT,
-                temperature=settings.CHAT_COMPLETIONS_TEMPERATURE,
+                #temperature=settings.CHAT_COMPLETIONS_TEMPERATURE, #not supported in gpt 5
                 messages=messages
             )
             
@@ -1381,7 +1381,7 @@ def convert_questions_to_case_studies(
                 response = settings.call_openai_with_fallback(
                     model=settings.CHAT_COMPLETIONS_MODEL,
                     response_format=settings.CHAT_COMPLETIONS_RESPONSE_FORMAT,
-                    temperature=settings.CHAT_COMPLETIONS_TEMPERATURE,
+                    #temperature=settings.CHAT_COMPLETIONS_TEMPERATURE, # not supported in gpt 5.
                     messages=messages
                 )
                 
@@ -1606,7 +1606,7 @@ def convert_questions_to_code_format_based_on_metadata(
             response = settings.openai_client.chat.completions.create(
                 model=settings.CHAT_COMPLETIONS_MODEL,
                 messages=prompt_messages,
-                temperature=0.3,
+                #temperature=0.3, # not supported in gpt 5.
                 max_tokens=4000
             )
             
@@ -1704,7 +1704,7 @@ def tune_distractors(section_content_definitions, tuning_percentage=0.20):
             response = settings.call_openai_with_fallback(
                 model=settings.CHAT_COMPLETIONS_MODEL,
                 response_format=settings.CHAT_COMPLETIONS_RESPONSE_FORMAT,
-                temperature=settings.CHAT_COMPLETIONS_TEMPERATURE,
+                #temperature=settings.CHAT_COMPLETIONS_TEMPERATURE, # not supported in gpt5
                 messages=prompt_messages
             )
             
@@ -1742,7 +1742,18 @@ def tune_distractors(section_content_definitions, tuning_percentage=0.20):
         "reason": f"Tuned {tuned_count} out of {len(questions_to_tune)} selected questions"
     }
 
-def generate_assessments(PROGRAM_KEYS, QUESTION_TYPES, QUESTION_LIMIT, CUSTOMIZED_DIFFICULTY, CUSTOMIZED_PROMPT_INSTRUCTIONS, TEMPERATURE, ASSESSMENT_TYPE, NUMBER_QUESTIONS_PER_CONCEPT, progress_bar=None, progress_text=None):
+def generate_assessments(
+    PROGRAM_KEYS, 
+    QUESTION_TYPES, 
+    QUESTION_LIMIT, 
+    CUSTOMIZED_DIFFICULTY, 
+    CUSTOMIZED_PROMPT_INSTRUCTIONS, 
+    #TEMPERATURE, 
+    ASSESSMENT_TYPE, 
+    NUMBER_QUESTIONS_PER_CONCEPT, 
+    progress_bar=None, 
+    progress_text=None
+):
     # Used to be defaulted to 1, now set to up to 5 to allow work around for Solutions Architects.
     NUMBER_QUESTIONS_PER_CONCEPT = NUMBER_QUESTIONS_PER_CONCEPT
     
