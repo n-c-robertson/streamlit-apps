@@ -100,7 +100,8 @@ def main():
                             QUESTION_LIMIT, 
                             CUSTOMIZED_DIFFICULTY, 
                             CUSTOMIZED_PROMPT_INSTRUCTIONS, 
-                            #TEMPERATURE,  # removed in GPT5.
+                            #TEMPERATURE,  # removed in GPT5, replacing with dummy below.
+                            1,
                             ASSESSMENT_TYPE, # Pass the selected assessment type
                             QUESTIONS_PER_CONCEPT,
                             progress_bar, 
