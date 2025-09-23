@@ -1748,7 +1748,7 @@ def generate_assessments(
     QUESTION_LIMIT, 
     CUSTOMIZED_DIFFICULTY, 
     CUSTOMIZED_PROMPT_INSTRUCTIONS, 
-    #TEMPERATURE, 
+    TEMPERATURE, 
     ASSESSMENT_TYPE, 
     NUMBER_QUESTIONS_PER_CONCEPT, 
     progress_bar=None, 
@@ -2096,7 +2096,7 @@ def select_best_question_with_ai(skill, candidate_questions):
     response = settings.call_openai_with_fallback(
         model=settings.CHAT_COMPLETIONS_MODEL,
         response_format=settings.CHAT_COMPLETIONS_RESPONSE_FORMAT,
-        temperature=0.1,  # Low temperature for consistent selection
+        #temperature=0.1,  # Low temperature for consistent selection
         messages=prompt_messages
     )
     
@@ -2227,7 +2227,7 @@ def convert_questions_to_code_format_dataframe(
             response = settings.openai_client.chat.completions.create(
                 model=settings.CHAT_COMPLETIONS_MODEL,
                 messages=prompt_messages,
-                temperature=0.3,
+                #temperature=0.3,
                 max_tokens=4000
             )
             
@@ -2354,7 +2354,7 @@ def tune_distractors_dataframe(df: pd.DataFrame, tuning_percentage=0.20) -> tupl
             response = settings.call_openai_with_fallback(
                 model=settings.CHAT_COMPLETIONS_MODEL,
                 response_format=settings.CHAT_COMPLETIONS_RESPONSE_FORMAT,
-                temperature=settings.CHAT_COMPLETIONS_TEMPERATURE,
+                #temperature=settings.CHAT_COMPLETIONS_TEMPERATURE,
                 messages=prompt_messages
             )
             
