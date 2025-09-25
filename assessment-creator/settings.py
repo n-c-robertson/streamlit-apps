@@ -204,7 +204,7 @@ def call_openai_with_context_management(messages, **kwargs):
     
     if not system_message or not user_message:
         # Fall back to direct API call if message structure is unexpected
-        return openai_client.chat.completions.create(messages=messages, **kwargs, background=True)
+        return openai_client.chat.completions.create(messages=messages, **kwargs)
     
     # Create chunked messages if needed
     message_arrays = create_chunked_messages(
@@ -214,7 +214,7 @@ def call_openai_with_context_management(messages, **kwargs):
     
     if len(message_arrays) == 1:
         # No chunking needed, make direct API call
-        return openai_client.chat.completions.create(messages=message_arrays[0], **kwargs, background=True)
+        return openai_client.chat.completions.create(messages=message_arrays[0], **kwargs)
     
     # Multiple chunks needed - process each chunk and combine results
     print(f"Processing {len(message_arrays)} chunks...")
@@ -223,7 +223,7 @@ def call_openai_with_context_management(messages, **kwargs):
     for i, chunk_messages in enumerate(message_arrays):
         print(f"Processing chunk {i+1}/{len(message_arrays)}...")
         try:
-            response = openai_client.chat.completions.create(messages=chunk_messages, **kwargs, background=True)
+            response = openai_client.chat.completions.create(messages=chunk_messages, **kwargs)
             all_responses.append(response)
             # Add small delay between chunks to avoid rate limiting
             if i < len(message_arrays) - 1:
@@ -260,7 +260,7 @@ def call_openai_with_fallback(messages, **kwargs):
     """
     try:
         # First, try the original request
-        return openai_client.chat.completions.create(messages=messages, **kwargs, background=True)
+        return openai_client.chat.completions.create(messages=messages, **kwargs)
     except Exception as e:
         error_message = str(e).lower()
         
@@ -314,4 +314,4 @@ def _call_openai_with_truncated_content(messages, max_tokens_per_message=50000, 
         else:
             truncated_messages.append(message)
     
-    return openai_client.chat.completions.create(messages=truncated_messages, **kwargs, background=True)
+    return openai_client.chat.completions.create(messages=truncated_messages, **kwargs)
