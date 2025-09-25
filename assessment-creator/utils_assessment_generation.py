@@ -1003,9 +1003,9 @@ def evaluate_questions(section_content_definitions, question_types):
                 executor.submit(evaluate_question, learning_objectives, qc, question_types)
                 for qc in questions_choices
             ]
-            for future in concurrent.futures.as_completed(futures, timeout=300):  # Optional timeout per future.
+            for future in concurrent.futures.as_completed(futures, timeout=100000):  # Optional timeout per future.
                 try:
-                    qc, eval_result = future.result(timeout=60)  # Timeout for each future's result.
+                    qc, eval_result = future.result(timeout=100000)  # Timeout for each future's result.
                     if eval_result is not None:
                         qc['eval'] = eval_result  # Attach the evaluation result to the question object.
                 except Exception as e:
