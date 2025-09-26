@@ -176,10 +176,10 @@ The "skillId" you output MUST BE one of the following: {skills}.
     ```
   - If there is an opportunity to incorporate markdown formatted code snippets that feels relevant to the content, prioritize this.
   
-- **Custom Instructions**:
-  - Factor in these custom instructions. Where the custom instructions conflict with the rest of the prompt, defer to the custom instructions.
-    - **customized difficulty**: the question difficulty should be {customized_difficulty} relative to the content. If "No Change", ignore this.
-    - **customized prompt instructions**: The customer has these unique requirements:{customized_prompt_instructions}. If No instructions provided, ignore this.
+- **Custom Instructions / Overrides**:
+  - These instructions should OVERRIDE any previous instructions.
+    - **customized difficulty**: the question difficulty should be {customized_difficulty} than the content.
+    - **customized prompt instructions**: The customer has these unique requirements that MUST be factored in: {customized_prompt_instructions}.
 
 This formatting ensures that code is clearly presented and easily readable within the assessment content.
 
