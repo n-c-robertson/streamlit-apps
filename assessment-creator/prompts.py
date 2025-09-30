@@ -858,6 +858,9 @@ and should be transformed into more challenging, real-world scenario-based quest
 Original questions to convert:
 {questions_list}
 
+
+**IMPORTANT: Each case study question MUST be 30-60 words.**
+
 For each question:
 1. Identify the core concept being tested
 2. Create a realistic, industry-relevant scenario that requires application of this concept
