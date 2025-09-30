@@ -106,7 +106,7 @@ Follow the instructions in the user prompt precisely. We want to generate the be
     {
         'role': 'user',
         'content': """You are to generate {number_questions_per_concept} question(s) for the following Udacity content.
-The questions must be tailored to the following difficulty level: {difficulty_level} and based on the following skills: {skills}.
+The questions must be based on the following skills: {skills}.
 The "difficultyLevelId" you output MUST BE this one: {difficulty_level}.
 The "skillId" you output MUST BE one of the following: {skills}.
 
@@ -325,7 +325,7 @@ Follow the instructions in the user prompt precisely. We want to generate the be
     {
         'role': 'user',
         'content': """You are to generate {number_questions_per_concept} question(s) that test learners' readiness and prerequisite knowledge for the following Udacity content.
-The questions must be tailored to the following difficulty level: {difficulty_level} and based on the following prerequisite skills: {skills}.
+The questions must be based on the following prerequisite skills: {skills}.
 The "difficultyLevelId" you output MUST BE this one: {difficulty_level}.
 The "skillId" you output MUST BE one of the following: {skills}.
 
