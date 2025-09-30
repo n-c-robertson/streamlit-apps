@@ -865,7 +865,7 @@ and should be transformed into more challenging, real-world scenario-based quest
 Original questions to convert:
 {questions_list}
 
-**IMPORTANT: Each case study question MUST be 150-300 words long with detailed scenarios.**
+**IMPORTANT: Each case study question MUST be 40-80 words.**
 
 For each question:
 1. Identify the core concept being tested
