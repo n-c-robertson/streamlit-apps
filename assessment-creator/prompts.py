@@ -831,41 +831,30 @@ JSON Schema:
 
 Guidelines for case study conversion:
 - **Maintain Concept Alignment**: The case study must test the same core concept as the original question
-- **Increase Complexity**: Make the question more challenging by requiring analysis of a real-world scenario
 - **Add Context**: Provide relevant background information, constraints, or situational details
 - **Require Application**: Students should need to apply the concept rather than just recall it
 - **Realistic Scenarios**: Use believable, industry-relevant situations that professionals might encounter
 - **Clear Problem Statement**: The case study should present a clear problem or decision to be made
-- **Appropriate Difficulty**: The case study should be one difficulty level higher than the original question
 - **Maintain Question Type**: Keep the same question type (SINGLE_CHOICE or MULTIPLE_CHOICE only - these are the only supported types)
 - **Update Choices**: Modify answer choices to reflect the case study context while maintaining the same correct answer logic
 
 **SUPPORTED QUESTION TYPES:**
 - **SINGLE_CHOICE**: One correct answer and three plausible distractors (4 total choices)
-- **MULTIPLE_CHOICE**: Multiple correct answers with distractors (4-5 total choices)
+- **MULTIPLE_CHOICE**: Multiple correct answers with distractors (4 total choices)
 
 **CRITICAL LENGTH REQUIREMENTS:**
-- **Minimum Length**: Each case study question must be AT LEAST 150-200 words long
-- **Target Length**: Aim for 200-300 words per case study question
+- **Target Length**: Aim for 40-80 words per case study question
 - **Structure**: The case study should include:
-  * A detailed scenario description (2-3 sentences)
-  * Specific context and constraints (1-2 sentences)
-  * The problem or decision to be made (1 sentence)
-  * A clear question that requires analysis (1 sentence)
-- **No Short Questions**: Avoid simple, direct questions. Every case study must be a detailed scenario.
+  * A simple, clear scenario description (1-2 sentences)
+  * Specific context and constraints (1 sentences)
+  * A clear question the problem or decision to be made (1 sentence)
 
 **Case Study Structure Template:**
-"[Company/Organization] is [detailed situation description with specific context]. [Additional background information about the organization, industry, or constraints]. [Specific problem or challenge they are facing]. [What decision or analysis is needed]?"
+"[Company/Organization] is [situation description with context]. [Specific problem or challenge they are facing]. [What decision or analysis is needed]?"
 
-**Examples of good case study transformations:**
+**Example of a good case study question**
+A logistics company is gathering data from IoT sensors on fleet vehicles to enhance predictive maintenance and route optimization using real-time predictive analytics. To ensure data integrity and timeliness, which approach should be implemented for effective real-time data gathering?
 
-**SINGLE_CHOICE Example:**
-- Original: "What is the purpose of regularization in machine learning?"
-- Case Study: "MedTech Solutions, a healthcare startup developing AI-powered diagnostic tools, has trained a deep learning model to detect early-stage cancer from medical imaging data. The model achieves 95% accuracy on their training dataset of 10,000 images, but when tested on new patient data from different hospitals, the accuracy drops to 78%. The team suspects overfitting and needs to implement regularization techniques to improve generalization. The model will be deployed in clinical settings where false negatives could have serious consequences. Which regularization technique would be most appropriate to address this specific overfitting issue while maintaining high sensitivity for cancer detection?"
-
-**MULTIPLE_CHOICE Example:**
-- Original: "Which sorting algorithms have O(n log n) average time complexity?"
-- Case Study: "GlobalPay Financial Services processes over 50 million credit card transactions daily across their fraud detection system. The transaction data arrives in batches throughout the day, with each batch containing 100,000-500,000 records that need to be sorted by timestamp before being fed into their real-time fraud detection algorithms. Processing speed is critical as delays could result in millions of dollars in fraudulent charges, and the data is typically partially sorted due to the nature of batch processing. The system has limited memory constraints and must handle varying batch sizes efficiently. Which sorting algorithms would be most suitable for this specific high-volume, time-critical use case? Select all that apply."
 """
     },
     {
@@ -880,22 +869,15 @@ Original questions to convert:
 
 For each question:
 1. Identify the core concept being tested
-2. Create a detailed, realistic, industry-relevant scenario that requires application of this concept
-3. Include specific context, constraints, and background information
-4. Formulate a question that presents a specific problem or decision to be made
-5. Update the answer choices to reflect the case study context
-6. Ensure the correct answer logic remains the same, but requires deeper analysis
+2. Create a realistic, industry-relevant scenario that requires application of this concept
+3. Formulate a question that presents a specific problem or decision to be made
+4. Update the answer choices to reflect the case study context
+5. Ensure the correct answer logic remains the same, but requires deeper analysis
 
 The case study MUST:
-- Be 150-300 words long (this is a strict requirement)
-- Include a detailed scenario with company/organization context
-- Present specific constraints, challenges, or industry considerations
-- Test the same underlying concept but in a complex real-world application
-- Require analysis and application rather than simple recall
+- Test the same underlying concept but in a real-world application
 - Maintain the same question type and structure
-- Feel like a realistic professional scenario a practitioner would encounter
-
-**Length Check**: Before returning, verify each case study question is at least 150 words. If not, expand the scenario with more details, context, or constraints.
+- Feel like a realistic scenario a practitioner would encounter
 
 Return your converted questions as per the specified JSON schema.
 """
