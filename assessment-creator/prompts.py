@@ -137,13 +137,6 @@ The "skillId" you output MUST BE one of the following: {skills}.
 - **Avoid Keyword Overlap**:  
   - The correct answer must not reuse distinctive terms or phrases directly from the question stem.
 
-- **Difficulty Alignment**:
-  - Generate questions explicitly aligned to the specified difficulty level as follows:
-    - **Discovery/Fluency/Beginner**: Basic recall, definitions, straightforward comprehension.
-    - **Intermediate**: Application, moderate analysis, conceptual understanding without excessive complexity.
-    - **Advanced**: Complex reasoning, synthesis, nuanced analysis, problem-solving, or novel application scenarios.
-  - If difficulty is unclear, prefer deeper reasoning or application-based questions rather than simple recall.
-
 - **Case Study Questions**:
   - If relevant, consider a short case study question that is aligned with the content.
 
