@@ -843,7 +843,7 @@ Guidelines for case study conversion:
 - **MULTIPLE_CHOICE**: Multiple correct answers with distractors (4 total choices)
 
 **CRITICAL LENGTH REQUIREMENTS:**
-- **Target Length**: Aim for 40-80 words per case study question
+- **Target Length**: Aim for 30-60 words per case study question
 - **Structure**: The case study should include:
   * A simple, clear scenario description (1-2 sentences)
   * Specific context and constraints (1 sentences)
@@ -864,8 +864,6 @@ and should be transformed into more challenging, real-world scenario-based quest
 
 Original questions to convert:
 {questions_list}
-
-**IMPORTANT: Each case study question MUST be 150-300 words long with detailed scenarios.**
 
 For each question:
 1. Identify the core concept being tested
