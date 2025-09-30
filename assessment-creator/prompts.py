@@ -106,7 +106,7 @@ Follow the instructions in the user prompt precisely. We want to generate the be
     {
         'role': 'user',
         'content': """You are to generate {number_questions_per_concept} question(s) for the following Udacity content.
-The questions must be tailored to the following difficulty level: {difficulty_level} and based on the following skills: {skills}.
+The questions must be based on the following skills: {skills}.
 The "difficultyLevelId" you output MUST BE this one: {difficulty_level}.
 The "skillId" you output MUST BE one of the following: {skills}.
 
@@ -136,13 +136,6 @@ The "skillId" you output MUST BE one of the following: {skills}.
 
 - **Avoid Keyword Overlap**:  
   - The correct answer must not reuse distinctive terms or phrases directly from the question stem.
-
-- **Difficulty Alignment**:
-  - Generate questions explicitly aligned to the specified difficulty level as follows:
-    - **Discovery/Fluency/Beginner**: Basic recall, definitions, straightforward comprehension.
-    - **Intermediate**: Application, moderate analysis, conceptual understanding without excessive complexity.
-    - **Advanced**: Complex reasoning, synthesis, nuanced analysis, problem-solving, or novel application scenarios.
-  - If difficulty is unclear, prefer deeper reasoning or application-based questions rather than simple recall.
 
 - **Case Study Questions**:
   - If relevant, consider a short case study question that is aligned with the content.
@@ -332,7 +325,7 @@ Follow the instructions in the user prompt precisely. We want to generate the be
     {
         'role': 'user',
         'content': """You are to generate {number_questions_per_concept} question(s) that test learners' readiness and prerequisite knowledge for the following Udacity content.
-The questions must be tailored to the following difficulty level: {difficulty_level} and based on the following prerequisite skills: {skills}.
+The questions must be based on the following prerequisite skills: {skills}.
 The "difficultyLevelId" you output MUST BE this one: {difficulty_level}.
 The "skillId" you output MUST BE one of the following: {skills}.
 
@@ -843,7 +836,7 @@ Guidelines for case study conversion:
 - **MULTIPLE_CHOICE**: Multiple correct answers with distractors (4 total choices)
 
 **CRITICAL LENGTH REQUIREMENTS:**
-- **Target Length**: Aim for 40-80 words per case study question
+- **Target Length**: Aim for 30-60 words per case study question
 - **Structure**: The case study should include:
   * A simple, clear scenario description (1-2 sentences)
   * Specific context and constraints (1 sentences)
@@ -865,7 +858,8 @@ and should be transformed into more challenging, real-world scenario-based quest
 Original questions to convert:
 {questions_list}
 
-**IMPORTANT: Each case study question MUST be 40-80 words.**
+
+**IMPORTANT: Each case study question MUST be 30-60 words.**
 
 For each question:
 1. Identify the core concept being tested
