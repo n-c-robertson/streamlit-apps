@@ -362,7 +362,7 @@ def create_assessment(assessment_title, description=""):
                 "passMessage": "Congratulations, you passed!",
                 "failMessage": "Unfortunately, you did not pass.",
                 "termsAgreement": "",
-                "assessmentType": PLACEMENT 
+                "assessmentType": "PLACEMENT" 
             }
         }
         
