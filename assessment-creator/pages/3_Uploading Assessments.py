@@ -556,13 +556,18 @@ def create_question(section_id, question_data):
         # Remove any None or empty values to avoid validation issues
         formatted_source = {k: v for k, v in formatted_source.items() if v is not None and v != ''}
         print(f"Formatted source: {formatted_source}")
+
+        if question_data['category'] == "MULTIPLE_CHOICE":
+            category_enum = 0
+        elif question_data['category'] == "SINGLE_CHOICE":
+            category_enum = 3
         
         question_variables = {
             "input": {
                 'sectionId': section_id,
                 'difficultyLevelId': question_data['difficultyLevelId'],
                 'skillId': question_data['skillId'],
-                'category': question_data['category'],
+                'category': category_enum,
                 'status': question_data['question_status'],
                 'content': question_data['question_content'],
                 'source': formatted_source,
