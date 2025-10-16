@@ -433,7 +433,7 @@ def create_section(assessment_id, section_title, num_questions_to_ask=10):
                 "assessmentId": assessment_id,
                 "title": section_title,
                 "description": "",
-                "status": 0, # enum for ACTIVE
+                "status": "ACTIVE",
                 "isAdaptive": False,
                 "isRandom": True,
                 "numberOfQuestionsToAsk": num_questions_to_ask,
