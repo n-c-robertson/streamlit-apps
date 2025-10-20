@@ -115,6 +115,8 @@ if submitted:
                 if program_table_df is not None:
                     # Display the table
                     st.dataframe(program_table_df, use_container_width=True)
+                else:
+                    st.info("Dataframe is empty.")
                 
                 # Add the lesson recommendations table
                 st.markdown("### Lesson Recommendations Summary Table")
@@ -124,6 +126,8 @@ if submitted:
                 if lesson_table_df is not None:
                     # Display the table
                     st.dataframe(lesson_table_df, use_container_width=True)
+                else:
+                    st.info("Dataframe is empty.")
                 
                 # Add the learner recommendations table
                 st.markdown("### Learner Recommendations Table")
@@ -133,6 +137,8 @@ if submitted:
                 if learner_table_df is not None:
                     # Display the table
                     st.dataframe(learner_table_df, use_container_width=True)
+                else:
+                    st.info("Dataframe is empty.")
                     
 
             else:
