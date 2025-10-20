@@ -168,14 +168,6 @@ def get_skills_recommendations(user_skills_df, results_df, difficulty_filter=Non
             payload["filter"]["parent_type"] = {"$in": program_type_filter}
         if program_keys_for_filter:
             payload["filter"]["parent_key"] = {"$in": program_keys_for_filter}
-
-        # Delete later if no longer needed..
-        # DEBUG: Enhanced logging
-        #print(f"\n=== API CALL DEBUG for User {user_id} ===")
-        #print(f"API URL: {settings.SKILLS_API_URL}")
-        #print(f"Headers: {headers}")
-        #print(f"Payload: {json.dumps(payload, indent=2)}")
-        #print(f"Skills needing improvement: {skills_needing_improvement}")
         
         user_recommendations = []
         
@@ -206,8 +198,6 @@ def get_skills_recommendations(user_skills_df, results_df, difficulty_filter=Non
                         except Exception as e:
                             print(e)
                             continue
-                    print('processed recommendations for user')
-                    print(user_recommendations)
                     
                     return {'status': 'success', 'recommendations': user_recommendations, 'user_id': user_id}
                     
@@ -1266,6 +1256,7 @@ def create_lesson_recommendations_table(recommendations_df):
     """
     Create a summary table showing lesson recommendations aggregated by lesson.
     """
+    print("INPUT TO CREATE_LESSON_RECOMMENDATIONS_TABLE")
     print(recommendations_df.shape)
     print(recommendations_df.head())
   
