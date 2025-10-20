@@ -189,7 +189,7 @@ def get_skills_recommendations(user_skills_df, results_df, difficulty_filter=Non
                                   'weakSkills': skills_needing_improvement,
                                   'parentKey': metadata.get('parent_key', ''),
                                   'parentTitle': metadata.get('parent_title', ''),
-                                  'lessonTitle': metadata.get('title', ''),
+                                  'lessonTitle': metadata.get('lesson_title', ''),
                                   'lessonId': lesson_content.get('id', ''),
                                   'content': lesson_content.get('summary', '')
                                     }  
