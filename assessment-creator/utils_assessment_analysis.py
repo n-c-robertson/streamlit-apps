@@ -223,7 +223,8 @@ def get_skills_recommendations(user_skills_df, results_df, difficulty_filter=Non
                                 
                                 if recommendation:
                                     user_recommendations.append(recommendation)
-                        except Exception:
+                        except Exception as e:
+                            print(e)
                             continue
                     
                     return {'status': 'success', 'recommendations': user_recommendations, 'user_id': user_id}
