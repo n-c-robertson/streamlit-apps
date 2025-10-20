@@ -1266,6 +1266,9 @@ def create_lesson_recommendations_table(recommendations_df):
     """
     Create a summary table showing lesson recommendations aggregated by lesson.
     """
+    print(recommendations_df.shape)
+    print(recommendations_df.head())
+  
     if recommendations_df.empty:
         return None
     
