@@ -168,6 +168,9 @@ def get_skills_recommendations(user_skills_df, results_df, difficulty_filter=Non
             payload["filter"]["parent_type"] = {"$in": program_type_filter}
         if program_keys_for_filter:
             payload["filter"]["parent_key"] = {"$in": program_keys_for_filter}
+
+        # DEBUG.
+        print(payload)
         
         user_recommendations = []
         
