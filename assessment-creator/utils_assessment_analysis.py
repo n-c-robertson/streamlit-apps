@@ -188,10 +188,11 @@ def get_skills_recommendations(user_skills_df, results_df, difficulty_filter=Non
                     
                     # Extract recommendations
                     for item in api_response:
-                        print(item)
                         try:
                             if isinstance(item, dict):
-                                recommendation = None
+                                #recommendation = None
+                                # The line above was causing skips. Pass for now.
+                                pass
                                 
                                 if 'lesson' in item and 'content' in item['lesson']:
                                     # Current API structure
