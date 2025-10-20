@@ -47,7 +47,7 @@ openai_client = OpenAI(
     api_key = st.secrets['openai_api_key']
 )
 
-CHAT_COMPLETIONS_MODEL = 'gpt-5'
+CHAT_COMPLETIONS_MODEL = 'gpt-4o'
 CHAT_COMPLETIONS_TEMPERATURE = 0.2
 CHAT_COMPLETIONS_RESPONSE_FORMAT = {
     'type': 'json_object'
