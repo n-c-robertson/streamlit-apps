@@ -132,6 +132,8 @@ if submitted:
                 # Add the learner recommendations table
                 st.markdown("### Learner Recommendations Table")
                 st.caption("**Learner Details**: Comprehensive view of all recommendations for each learner, including their weak skills, top lessons, and program recommendations.")
+                st.write("INPUT")
+                st.dataframe(recommendations_df)
                 learner_table_df = utils_assessment_analysis.create_learner_recommendations_table(recommendations_df)
                 
                 if learner_table_df is not None:
