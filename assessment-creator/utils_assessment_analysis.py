@@ -226,6 +226,8 @@ def get_skills_recommendations(user_skills_df, results_df, difficulty_filter=Non
                         except Exception as e:
                             print(e)
                             continue
+                    print('processed recommendations for user')
+                    print(user_recommendations)
                     
                     return {'status': 'success', 'recommendations': user_recommendations, 'user_id': user_id}
                     
