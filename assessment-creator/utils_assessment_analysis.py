@@ -189,40 +189,20 @@ def get_skills_recommendations(user_skills_df, results_df, difficulty_filter=Non
                     # Extract recommendations
                     for item in api_response:
                         try:
-                            if isinstance(item, dict):
-                                #recommendation = None
-                                # The line above was causing skips. Pass for now.
-                                pass
-                                
-                                if 'lesson' in item and 'content' in item['lesson']:
-                                    # Current API structure
-                                    lesson_content = item['lesson']['content']
-                                    recommendation = {
-                                        'userId': user_id,
-                                        'totalScore': user_total_score,
-                                        'weakSkills': skills_needing_improvement,
-                                        'parentKey': lesson_content.get('parent_key', ''),
-                                        'parentTitle': lesson_content.get('parent_title', ''),
-                                        'lessonTitle': lesson_content.get('title', ''),
-                                        'lessonId': lesson_content.get('id', ''),
-                                        'content': lesson_content.get('description', '')
-                                    }
-                                elif 'search' in item and 'metadata' in item.get('search', {}):
-                                    # Legacy API structure
-                                    metadata = item['search']['metadata']
-                                    content = item['search'].get('content', '')
-                                    recommendation = {
-                                        'userId': user_id,
-                                        'totalScore': user_total_score,
-                                        'weakSkills': skills_needing_improvement,
-                                        'parentKey': metadata.get('parent_key'),
-                                        'parentTitle': metadata.get('parent_title'),
-                                        'lessonTitle': metadata.get('lesson_title'),
-                                        'content': content
-                                    }
-                                
-                                if recommendation:
-                                    user_recommendations.append(recommendation)
+                            lesson_content = item['lesson']['content']
+                            metadata = item['search']['metadata']
+                            recommendation = {
+                                  'userId': user_id,
+                                  'totalScore': user_total_score,
+                                  'weakSkills': skills_needing_improvement,
+                                  'parentKey': lesson_content.get('parent_key', ''),
+                                  'parentTitle': metadata.get('parent_title', ''),
+                                  'lessonTitle': metadata.get('title', ''),
+                                  'lessonId': lesson_content.get('id', ''),
+                                  'content': lesson_content.get('description', '')
+                                    }  
+                            user_recommendations.append(recommendation)
+                          
                         except Exception as e:
                             print(e)
                             continue
