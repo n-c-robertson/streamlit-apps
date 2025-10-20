@@ -195,11 +195,11 @@ def get_skills_recommendations(user_skills_df, results_df, difficulty_filter=Non
                                   'userId': user_id,
                                   'totalScore': user_total_score,
                                   'weakSkills': skills_needing_improvement,
-                                  'parentKey': lesson_content.get('parent_key', ''),
+                                  'parentKey': metadata.get('parent_key', ''),
                                   'parentTitle': metadata.get('parent_title', ''),
                                   'lessonTitle': metadata.get('title', ''),
                                   'lessonId': lesson_content.get('id', ''),
-                                  'content': lesson_content.get('description', '')
+                                  'content': lesson_content.get('summary', '')
                                     }  
                             user_recommendations.append(recommendation)
                           
