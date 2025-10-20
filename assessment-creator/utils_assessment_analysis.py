@@ -169,13 +169,13 @@ def get_skills_recommendations(user_skills_df, results_df, difficulty_filter=Non
         if program_keys_for_filter:
             payload["filter"]["parent_key"] = {"$in": program_keys_for_filter}
 
-        # DEBUG.
+        # Delete later if no longer needed..
         # DEBUG: Enhanced logging
-        print(f"\n=== API CALL DEBUG for User {user_id} ===")
-        print(f"API URL: {settings.SKILLS_API_URL}")
-        print(f"Headers: {headers}")
-        print(f"Payload: {json.dumps(payload, indent=2)}")
-        print(f"Skills needing improvement: {skills_needing_improvement}")
+        #print(f"\n=== API CALL DEBUG for User {user_id} ===")
+        #print(f"API URL: {settings.SKILLS_API_URL}")
+        #print(f"Headers: {headers}")
+        #print(f"Payload: {json.dumps(payload, indent=2)}")
+        #print(f"Skills needing improvement: {skills_needing_improvement}")
         
         user_recommendations = []
         
@@ -188,6 +188,7 @@ def get_skills_recommendations(user_skills_df, results_df, difficulty_filter=Non
                     
                     # Extract recommendations
                     for item in api_response:
+                        print(item)
                         try:
                             if isinstance(item, dict):
                                 recommendation = None
