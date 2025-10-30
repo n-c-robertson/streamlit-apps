@@ -58,7 +58,7 @@ Now, generate a similar set of objectives based on the aggregated content above.
 ]
 
 def get_learning_objectives_prompt(skills, difficulties, aggregated_content):
-    user_prompt = generate_learning_objections_prompt[1]['content'].format(
+    user_prompt = generate_learning_objectives_prompt[1]['content'].format(
         skills=skills,
         difficulties=difficulties,
         aggregated_content=aggregated_content
