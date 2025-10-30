@@ -732,7 +732,6 @@ def process_concept(sectionId, node, lesson, concept, difficulty_level, difficul
         chat_completion_response.choices[0].message.content.replace('```json','').replace('```','')
     )
 
-    print(f"AI Response received. Raw questions_choices count: {len(chat_completion.get('questions_choices', []))}")
 
     # Check if this concept has coding content
     has_coding_content_in_concept = False
@@ -1787,32 +1786,62 @@ def generate_assessments(
 
     # Track question counts at each step
     question_counts = []
+    
+    # Track debug outputs from each step
+    debug_outputs = {}
 
     step = 0
 
     update_progress(step)
     section_content_definitions = prep_program_keys(PROGRAM_KEYS)
+    debug_outputs['prep_program_keys'] = {
+        'output': str(section_content_definitions)[:1000],  # Limit to 1000 chars
+        'type': type(section_content_definitions).__name__
+    }
     
     step += 1
     update_progress(step)
     section_content_definitions, missing_prerequisite_skills = add_program_data(section_content_definitions, assessment_type=ASSESSMENT_TYPE)
+    debug_outputs['add_program_data'] = {
+        'output': str(section_content_definitions)[:1000],
+        'type': type(section_content_definitions).__name__,
+        'missing_prerequisite_skills': missing_prerequisite_skills
+    }
 
     step += 1
     update_progress(step)
     section_content_definitions = add_node_data(section_content_definitions, assessment_type=ASSESSMENT_TYPE)
+    debug_outputs['add_node_data'] = {
+        'output': str(section_content_definitions)[:1000],
+        'type': type(section_content_definitions).__name__,
+        'node_count': sum(len(s.get('nodes', {})) for s in section_content_definitions)
+    }
 
     step += 1
     update_progress(step)
-    process_nodes(section_content_definitions, assessment_type=ASSESSMENT_TYPE)
+    all_nodes = process_nodes(section_content_definitions, assessment_type=ASSESSMENT_TYPE)
+    debug_outputs['process_nodes'] = {
+        'output': f"Processed {len(all_nodes)} nodes",
+        'type': 'list',
+        'node_count': len(all_nodes)
+    }
 
     step += 1
     update_progress(step)
     section_content_definitions = extract_content(section_content_definitions)
+    debug_outputs['extract_content'] = {
+        'output': str(section_content_definitions)[:1000],
+        'type': type(section_content_definitions).__name__
+    }
 
     step += 1
     update_progress(step)
     try:
         section_content_definitions = learning_objective_generator(section_content_definitions)
+        debug_outputs['learning_objective_generator'] = {
+            'output': str([s.get('learning_objectives', {}) for s in section_content_definitions])[:1000],
+            'type': 'list'
+        }
     except Exception as e:
         print(f"Error in learning objectives generation: {e}")
         print(format_exception_details(e))
@@ -1822,6 +1851,11 @@ def generate_assessments(
     step += 1
     update_progress(step)
     section_content_definitions = process_concepts(section_content_definitions, NUMBER_QUESTIONS_PER_CONCEPT, QUESTION_TYPES, CUSTOMIZED_DIFFICULTY, CUSTOMIZED_PROMPT_INSTRUCTIONS, ASSESSMENT_TYPE)
+    debug_outputs['process_concepts'] = {
+        'output': f"Generated questions for {len(section_content_definitions)} sections",
+        'type': 'list',
+        'total_questions': sum(len(s.get('questions_choices', [])) for s in section_content_definitions)
+    }
     
     # Count questions after processing concepts
     total_questions = sum(len(section.get('questions_choices', [])) for section in section_content_definitions)
@@ -1871,21 +1905,35 @@ def generate_assessments(
             'conversion_stats': {'initial_unique_questions': 0, 'successfully_converted': 0},
             'code_conversion_stats': {'converted_questions': 0, 'total_questions': 0},
             'tuning_stats': {'tuned_questions': 0, 'total_questions': 0},
-            'missing_prerequisite_skills': missing_prerequisite_skills
+            'missing_prerequisite_skills': missing_prerequisite_skills,
+            'debug_outputs': debug_outputs
         }
         return questions_choices_df, progress_data
 
     step += 1
     update_progress(step)
     section_content_definitions = redistribute_order_indices(section_content_definitions)
+    debug_outputs['redistribute_order_indices'] = {
+        'output': 'Order indices redistributed',
+        'type': 'list'
+    }
 
     step += 1
     update_progress(step)
     section_content_definitions = evaluate_questions(section_content_definitions, QUESTION_TYPES)
+    debug_outputs['evaluate_questions'] = {
+        'output': f"Evaluated questions for {len(section_content_definitions)} sections",
+        'type': 'list'
+    }
 
     step += 1
     update_progress(step)
     questions_choices_df = json_to_dataframe(section_content_definitions)
+    debug_outputs['json_to_dataframe'] = {
+        'output': f"DataFrame with {len(questions_choices_df)} rows, {questions_choices_df['question_content'].nunique()} unique questions",
+        'type': 'DataFrame',
+        'shape': questions_choices_df.shape
+    }
     
     # Count questions after converting to dataframe
     total_choices = len(questions_choices_df)
@@ -1901,6 +1949,11 @@ def generate_assessments(
     step += 1
     update_progress(step)
     questions_choices_df, evaluation_stats = filter_questions_by_evaluation(questions_choices_df, evaluation_col="questionEvaluation")
+    debug_outputs['filter_questions_by_evaluation'] = {
+        'output': f"Filtered to {questions_choices_df['question_content'].nunique()} unique questions",
+        'type': 'DataFrame',
+        'evaluation_stats': evaluation_stats
+    }
     
     # Count questions after evaluation filtering
     total_choices_after_eval = len(questions_choices_df)
@@ -1910,6 +1963,11 @@ def generate_assessments(
     step += 1
     update_progress(step)
     questions_choices_df, intermediate_counts = dedupe_questions_keep_choices(questions_choices_df, question_col="question_content", similarity_threshold=0.75)
+    debug_outputs['dedupe_questions_keep_choices'] = {
+        'output': f"Deduplicated to {questions_choices_df['question_content'].nunique()} unique questions",
+        'type': 'DataFrame',
+        'intermediate_counts': intermediate_counts
+    }
     
     # Count questions after deduplication
     total_choices_final = len(questions_choices_df)
@@ -1919,6 +1977,11 @@ def generate_assessments(
     step += 1
     update_progress(step)
     questions_choices_df, filtering_stats = filter_content_specific_questions(questions_choices_df, question_col="question_content", batch_size=50)
+    debug_outputs['filter_content_specific_questions'] = {
+        'output': f"Filtered to {questions_choices_df['question_content'].nunique()} unique questions",
+        'type': 'DataFrame',
+        'filtering_stats': filtering_stats
+    }
     
     # Count questions after filtering
     total_choices_final_filtered = len(questions_choices_df)
@@ -1928,6 +1991,11 @@ def generate_assessments(
     step += 1
     update_progress(step)
     questions_choices_df, conversion_stats = convert_questions_to_case_studies(questions_choices_df, question_col="question_content", conversion_percentage=0.15, batch_size=50, customized_prompt_instructions=CUSTOMIZED_PROMPT_INSTRUCTIONS)
+    debug_outputs['convert_questions_to_case_studies'] = {
+        'output': f"Converted {conversion_stats.get('successfully_converted', 0)} questions to case studies",
+        'type': 'DataFrame',
+        'conversion_stats': conversion_stats
+    }
     
     # Count questions after case study conversion
     total_choices_final_converted = len(questions_choices_df)
@@ -1942,6 +2010,11 @@ def generate_assessments(
         conversion_percentage=0.30, 
         customized_prompt_instructions=CUSTOMIZED_PROMPT_INSTRUCTIONS
     )
+    debug_outputs['convert_questions_to_code_format'] = {
+        'output': f"Converted {code_conversion_stats.get('converted_questions', 0)} questions to code format",
+        'type': 'DataFrame',
+        'code_conversion_stats': code_conversion_stats
+    }
     
     # Count questions after code conversion
     unique_questions_after_code = questions_choices_df['question_content'].nunique()
@@ -1955,6 +2028,11 @@ def generate_assessments(
         questions_choices_df, 
         tuning_percentage=0.20
     )
+    debug_outputs['tune_distractors'] = {
+        'output': f"Tuned {tuning_stats.get('tuned_questions', 0)} questions",
+        'type': 'DataFrame',
+        'tuning_stats': tuning_stats
+    }
     
     # Count questions after distractor tuning
     unique_questions_after_tuning = questions_choices_df['question_content'].nunique()
@@ -1966,6 +2044,11 @@ def generate_assessments(
     # Apply intelligent question selection if limit is specified and not "No Limit"
     if QUESTION_LIMIT != "No Limit":
         questions_choices_df, selection_stats = intelligent_question_selection(questions_choices_df, QUESTION_LIMIT, question_col="question_content")
+        debug_outputs['intelligent_question_selection'] = {
+            'output': f"Selected {questions_choices_df['question_content'].nunique()} questions",
+            'type': 'DataFrame',
+            'selection_stats': selection_stats
+        }
         
         # Count questions after selection
         total_choices_after_selection = len(questions_choices_df)
@@ -1976,6 +2059,11 @@ def generate_assessments(
         selection_stats = {
             'selection_needed': False,
             'reason': 'No question limit specified'
+        }
+        debug_outputs['intelligent_question_selection'] = {
+            'output': 'Skipped - no question limit specified',
+            'type': 'skipped',
+            'selection_stats': selection_stats
         }
 
     step += 1
@@ -1991,7 +2079,8 @@ def generate_assessments(
         'conversion_stats': conversion_stats,
         'code_conversion_stats': code_conversion_stats,
         'tuning_stats': tuning_stats,
-        'missing_prerequisite_skills': missing_prerequisite_skills
+        'missing_prerequisite_skills': missing_prerequisite_skills,
+        'debug_outputs': debug_outputs
     }
 
     return questions_choices_df, progress_data

@@ -15,7 +15,7 @@ format string interpretation issues.
 """
 
 # 1st prompt: generate learning objectives based on aggregated content.
-generate_learning_objections_prompt = [
+generate_learning_objectives_prompt = [
     {
         'role': 'system',
         'content': """You are an AI assistant for Udacity tasked with generating technical assessment learning objectives from provided Udacity content.
@@ -64,7 +64,7 @@ def get_learning_objectives_prompt(skills, difficulties, aggregated_content):
         aggregated_content=aggregated_content
     )
     return [
-        generate_learning_objections_prompt[0],
+        generate_learning_objectives_prompt[0],
         {'role': 'user', 'content': user_prompt}
     ]
 
