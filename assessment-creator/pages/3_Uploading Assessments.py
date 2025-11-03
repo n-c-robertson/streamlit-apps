@@ -240,9 +240,9 @@ def add_id_fields(df):
             unmapped_rows = df[df['skillId'] == '']
             skill_uri_to_title = {}
             
-            for _, row in unmapped_rows.iterrows():
+            for idx, row in unmapped_rows.iterrows():
                 skill_uri = row['skillUri']
-                skill_title = row['skillId']  # Original skill name/title
+                skill_title = orig_skill_names.loc[idx]  # Get original skill name using row index
                 if skill_uri not in skill_uri_to_title:
                     skill_uri_to_title[skill_uri] = skill_title
             
