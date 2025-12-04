@@ -942,67 +942,7 @@ def main():
         st.markdown("---")
         
         # ─────────────────────────────────────────────────────────────
-        # 2. Skill Gap Prioritization
-        # ─────────────────────────────────────────────────────────────
-        st.markdown("#### Skill Gap Prioritization")
-        st.markdown("*Skills that appear most frequently as 'needs improvement' — prioritize training here.*")
-        
-        if len(weak_df) > 0:
-            # Count weak skills across all users - aggregate by Skill only to dedupe
-            skill_gaps = weak_df.groupby('Skill').agg({
-                'Subdomain': 'first',
-                'Topic': 'first'
-            }).reset_index()
-            skill_gaps['Users Affected'] = weak_df.groupby('Skill').size().values
-            skill_gaps['% of Cohort'] = (skill_gaps['Users Affected'] / len(attempts_df) * 100).round(1)
-            skill_gaps = skill_gaps[['Subdomain', 'Topic', 'Skill', 'Users Affected', '% of Cohort']]
-            skill_gaps = skill_gaps.sort_values('Users Affected', ascending=False)
-            
-            # Top 20 skill gaps (descending order - highest at top, deduped by skill name)
-            top_gaps = skill_gaps.drop_duplicates(subset=['Skill']).head(20)
-            
-            # Color based on severity
-            colors = ['#f5a000' if pct >= 50 else '#C353A5' if pct >= 25 else '#9B00F5' 
-                     for pct in top_gaps['% of Cohort']]
-            
-            fig_gaps = go.Figure()
-            
-            fig_gaps.add_trace(go.Bar(
-                x=top_gaps['Users Affected'],
-                y=top_gaps['Skill'],
-                orientation='h',
-                marker_color=colors,
-                text=[f"{pct}%" for pct in top_gaps['% of Cohort']],
-                textposition='outside',
-                textfont=dict(color='#8888a0', size=10),
-                hovertemplate='<b>%{y}</b><br>Users: %{x}<br><extra></extra>'
-            ))
-            
-            fig_gaps.update_layout(
-                xaxis_title='Number of Users',
-                title=dict(text='Top 20 Skills Needing Improvement (Training Priorities)', 
-                          font=dict(size=14, color='#f0f0f5')),
-                xaxis=dict(gridcolor='rgba(255,255,255,0.1)'),
-                yaxis=dict(gridcolor='rgba(255,255,255,0.1)', tickfont=dict(size=10), autorange='reversed'),
-                paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)',
-                font=dict(color='#f0f0f5'),
-                height=max(400, len(top_gaps) * 25),
-                margin=dict(t=50, l=200, r=60, b=50),
-                showlegend=False
-            )
-            
-            st.plotly_chart(fig_gaps, use_container_width=True)
-            
-            with st.expander("View Full Skill Gap Table"):
-                st.dataframe(skill_gaps, hide_index=True, use_container_width=True)
-        else:
-            st.info("No weak skills data available.")
-        
-        st.markdown("---")
-        
-        # ─────────────────────────────────────────────────────────────
-        # 3. Subdomain Radar/Spider Chart
+        # 2. Topic Coverage Radar/Spider Chart
         # ─────────────────────────────────────────────────────────────
         st.markdown("#### Topic Coverage Radar")
         st.markdown("*Quick view of organizational strengths vs. gaps across all topics. Each shape represents a subdomain.*")
@@ -1315,47 +1255,6 @@ def main():
                 st.info("No skill data available for sunburst chart.")
         else:
             st.info("No skill data available for sunburst chart.")
-        
-        st.markdown("---")
-        
-        # ─────────────────────────────────────────────────────────────
-        # 5. Skill Co-occurrence Analysis
-        # ─────────────────────────────────────────────────────────────
-        st.markdown("#### Skill Co-occurrence Analysis")
-        st.markdown("*'Users weak in X tend to also be weak in Y' — helps design bundled learning paths.*")
-        
-        if len(attempts_df) > 0:
-            # Build co-occurrence matrix for weak skills
-            from collections import Counter
-            from itertools import combinations
-            
-            # Get all weak skill pairs
-            skill_pairs = []
-            for skills in attempts_df['needs_improvement_skills']:
-                if len(skills) >= 2:
-                    for pair in combinations(sorted(skills), 2):
-                        skill_pairs.append(pair)
-            
-            if skill_pairs:
-                pair_counts = Counter(skill_pairs)
-                top_pairs = pair_counts.most_common(15)
-                
-                if top_pairs:
-                    pairs_df = pd.DataFrame(top_pairs, columns=['Skill Pair', 'Co-occurrences'])
-                    pairs_df['Skill A'] = pairs_df['Skill Pair'].apply(lambda x: x[0])
-                    pairs_df['Skill B'] = pairs_df['Skill Pair'].apply(lambda x: x[1])
-                    pairs_df = pairs_df[['Skill A', 'Skill B', 'Co-occurrences']]
-                    
-                    st.markdown("**Top 15 Skill Pairs That Appear Together as Weaknesses:**")
-                    st.dataframe(pairs_df, hide_index=True, use_container_width=True)
-                    
-                    st.markdown("*Consider bundling training for these skill pairs.*")
-                else:
-                    st.info("Not enough skill pair data for co-occurrence analysis.")
-            else:
-                st.info("Users need at least 2 weak skills for co-occurrence analysis.")
-        else:
-            st.info("No user data available for co-occurrence analysis.")
         
     
     # ─────────────────────────────────────────────────────────────────
