@@ -1265,7 +1265,7 @@ def main():
         skills_jwt = st.session_state.get('jwt_token')
         
         if not skills_jwt:
-            st.info("💡 JWT token required for content recommendations. Re-fetch data if needed.")
+            st.info("JWT token required for content recommendations. Re-fetch data if needed.")
         elif len(attempts_df) == 0:
             st.warning("No user data available for recommendations.")
         else:
@@ -1278,8 +1278,8 @@ def main():
             """, unsafe_allow_html=True)
             
             # Fetch recommendations for all users
-            if st.button("🔍 Generate Recommendations", use_container_width=True):
-                with st.spinner("🔄 Fetching recommendations from Skills API..."):
+            if st.button("Generate Recommendations", use_container_width=True):
+                with st.spinner("Fetching recommendations from Skills API..."):
                     from collections import Counter
                     import json
                     
@@ -1361,14 +1361,14 @@ def main():
                 course_counts = recs_df.groupby(['parent_key', 'parent_title']).agg(
                     total_matches=('skill', 'count'),
                     unique_users=('user', 'nunique'),
-                    skills_matched=('skill', lambda x: len(set(x)))
+                    skills_list=('skill', lambda x: ', '.join(sorted(set(x))[:5]))  # First 5 unique skills
                 ).reset_index()
                 course_counts = course_counts.sort_values('total_matches', ascending=False)
                 course_counts['% of Cohort'] = (course_counts['unique_users'] / len(attempts_df) * 100).round(1)
                 
                 # Rename for display
-                course_display = course_counts[['parent_title', 'parent_key', 'total_matches', 'unique_users', '% of Cohort', 'skills_matched']].head(15)
-                course_display.columns = ['Course/Program', 'Key', 'Total Matches', 'Users', '% of Cohort', 'Skills Matched']
+                course_display = course_counts[['parent_title', 'parent_key', 'total_matches', 'unique_users', '% of Cohort', 'skills_list']].head(15)
+                course_display.columns = ['Course/Program', 'Key', 'Total Matches', 'Users', '% of Cohort', 'Skills Addressed']
                 
                 st.dataframe(course_display, hide_index=True, use_container_width=True)
                 
