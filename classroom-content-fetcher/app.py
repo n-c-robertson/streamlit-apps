@@ -309,22 +309,20 @@ def content_to_pdf_bytes(content: dict, program_key: str) -> bytes:
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
-    # Header
     pdf.set_font("Helvetica", "B", 14)
     pdf.cell(0, 10, f"Classroom Content Export: {program_key}", ln=True)
     pdf.ln(4)
 
-    pdf.set_font("Helvetica", size=9)
+    pdf.set_font("Courier", size=8)
 
     content_str = json.dumps(content, indent=2, ensure_ascii=False)
-
-    # FPDF is latin-1 only → replace unsupported chars safely
     safe_text = content_str.encode("latin-1", "replace").decode("latin-1")
 
     pdf.multi_cell(0, 4.5, safe_text)
 
-    # IMPORTANT FIX
-    return pdf.output(dest="S").encode("latin-1")
+    # ✅ fpdf2 >= 2.2
+    return bytes(pdf.output())
+
 
 
 
