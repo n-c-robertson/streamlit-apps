@@ -1,3 +1,4 @@
+import streamlit as st
 # API Configuration Settings
 # These URLs can be modified for different environments (dev/staging/prod)
 
