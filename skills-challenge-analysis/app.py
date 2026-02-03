@@ -1,6 +1,7 @@
 """
 Skills Challenge Analysis - Streamlit App
-Analyzes Workera assessment data against a taxonomy to identify skill gaps and coverage.
+Analyzes Workera assessment data by mapping skills to the Udacity taxonomy (domain > subject > skill)
+via the Udacity Skills API, then identifies skill gaps and coverage. No taxonomy file upload required.
 """
 
 import streamlit as st
@@ -19,8 +20,17 @@ from settings import (
     WORKERA_DOMAINS_URL,
     WORKERA_BENCHMARKS_URL,
     WORKERA_SIGNALS_URL,
+    WORKERA_SCORES_URL,
+    WORKERA_SCORES_DETAIL_URL,
     UDACITY_WORKERA_API_KEYS_URL,
     SKILLS_SEARCH_URL,
+    OPENAI_API_KEY,
+)
+from agent import run_conversation
+from udacity_skills_mapping import (
+    batch_convert_skills_to_udacity,
+    batch_get_skill_hierarchies,
+    build_taxonomy_from_hierarchies,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -148,12 +158,13 @@ st.markdown("""
 # API Functions
 # ─────────────────────────────────────────────────────────────────────────────
 
-def fetch_paginated_results(url: str, headers: dict) -> list:
+def fetch_paginated_results(url: str, headers: dict, params: dict | None = None) -> list:
     """Fetch all paginated results from a Workera API endpoint."""
     all_results = []
+    params = params or {}
     
     while url:
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, params=params)
         if response.status_code != 200:
             raise Exception(f"API Error: {response.status_code} - {response.text}")
         
@@ -164,6 +175,7 @@ def fetch_paginated_results(url: str, headers: dict) -> list:
         
         if data.get('has_more'):
             url = data.get('next_page')
+            params = {}  # next_page is full URL, don't re-apply limit
         else:
             url = None
     
@@ -196,7 +208,7 @@ def fetch_benchmarks(api_key: str) -> list:
 
 
 def fetch_signals(api_key: str) -> pd.DataFrame:
-    """Fetch CAT assessment signals from the Workera API."""
+    """Fetch CAT assessment signals from the Workera API (legacy)."""
     url = WORKERA_SIGNALS_URL
     headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
     
@@ -221,6 +233,99 @@ def fetch_signals(api_key: str) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
+def fetch_scores(api_key: str) -> list:
+    """Fetch high-level scores from the Workera API (no skill details)."""
+    url = WORKERA_SCORES_URL
+    headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
+    params = {"limit": 100}
+    return fetch_paginated_results(url, headers, params=params)
+
+
+def fetch_score_details(api_key: str, score_ids: list, progress_callback=None) -> list:
+    """
+    Fetch detailed score for each id (includes results.skill_ratings).
+    progress_callback(current, total) is called after each request if provided.
+    """
+    headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
+    details = []
+    for i, sid in enumerate(score_ids):
+        url = WORKERA_SCORES_DETAIL_URL.format(id=sid)
+        try:
+            resp = requests.get(url, headers=headers, timeout=30)
+            if resp.status_code == 200:
+                details.append(resp.json())
+            # Rate limit: back off if header indicates limit reached
+            remaining = resp.headers.get("x-ratelimit-remaining")
+            if remaining is not None and int(remaining) == 0:
+                import time
+                time.sleep(60)
+        except Exception:
+            pass
+        if progress_callback and (i + 1) % 10 == 0:
+            progress_callback(i + 1, len(score_ids))
+    if progress_callback:
+        progress_callback(len(score_ids), len(score_ids))
+    return details
+
+
+def _skill_ratings_to_lists(skill_ratings: list) -> tuple[list, list]:
+    """Convert results.skill_ratings into strong_skills and needs_improvement_skills name lists."""
+    strong = []
+    needs = []
+    for s in skill_ratings or []:
+        name = s.get("name")
+        if not name:
+            continue
+        level = (s.get("proficiency_level") or "").lower()
+        if level == "strong":
+            strong.append(name)
+        elif level == "needs_improvement":
+            needs.append(name)
+    return strong, needs
+
+
+def scores_to_signals_df(scores: list, domains_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Build a signals-shaped DataFrame from scores list (no skill details yet).
+    Merges with domains_df for title and benchmark columns. strong_skills/needs_improvement_skills are empty.
+    """
+    if not scores:
+        return pd.DataFrame(columns=[
+            "identifier", "domain_identifier", "user_identifier", "email", "score",
+            "strong_skills", "needs_improvement_skills", "created_at", "updated_at",
+            "domain_id", "title", "benchmark_enterprise_avg", "benchmark_enterprise_75_perc",
+        ])
+    records = []
+    for s in scores:
+        user = s.get("user") or {}
+        domain = s.get("domain") or {}
+        records.append({
+            "identifier": s.get("identifier"),
+            "domain_identifier": domain.get("identifier"),
+            "domain_name": domain.get("name"),
+            "user_identifier": user.get("identifier"),
+            "email": user.get("email"),
+            "score": s.get("score"),
+            "strong_skills": [],
+            "needs_improvement_skills": [],
+            "created_at": s.get("created_at"),
+            "updated_at": s.get("updated_at"),
+        })
+    df = pd.DataFrame(records)
+    if not domains_df.empty:
+        df = df.merge(
+            domains_df[["domain_id", "title", "benchmark_enterprise_avg", "benchmark_enterprise_75_perc"]],
+            left_on="domain_identifier",
+            right_on="domain_id",
+            how="left",
+        )
+    if "title" not in df.columns:
+        df["title"] = df.get("domain_name", "")
+    else:
+        df["title"] = df["title"].fillna(df.get("domain_name", ""))
+    return df
+
+
 def add_benchmark_scores(domains_df: pd.DataFrame, benchmarks: list) -> pd.DataFrame:
     """Add benchmark scores to domains DataFrame."""
     benchmark_lookup = {b['domain_identifier']: b for b in benchmarks}
@@ -237,23 +342,17 @@ def add_benchmark_scores(domains_df: pd.DataFrame, benchmarks: list) -> pd.DataF
 
 @st.cache_data(ttl=300)
 def fetch_all_api_data(api_key: str):
-    """Fetch all data from Workera API (cached for 5 minutes)."""
+    """Fetch all data from Workera API (cached for 5 minutes). Uses scores + scores/{id} flow."""
     domains_df = fetch_domains(api_key)
     benchmarks_raw = fetch_benchmarks(api_key)
     domains_df = add_benchmark_scores(domains_df, benchmarks_raw)
-    signals_df = fetch_signals(api_key)
+    scores = fetch_scores(api_key)
+    signals_df = scores_to_signals_df(scores, domains_df)
     
-    signals_df = signals_df.merge(
-        domains_df[['domain_id', 'title', 'benchmark_enterprise_avg', 'benchmark_enterprise_75_perc']],
-        left_on='domain_identifier',
-        right_on='domain_id',
-        how='left'
-    )
-    
-    # Store raw benchmarks for debugging
+    # Store raw benchmarks and scores list for later detail fetches
     benchmarks_df = pd.DataFrame(benchmarks_raw) if benchmarks_raw else pd.DataFrame()
     
-    return domains_df, signals_df, benchmarks_df
+    return domains_df, signals_df, benchmarks_df, scores
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -351,9 +450,14 @@ def listify(x):
     return []
 
 
-def explode_skills(df, column, taxonomy_skills):
-    """Explode skills column and merge with taxonomy."""
-    frame = df[['workera_user_email', column]].explode(column).rename(columns={column: 'Skill'})
+def explode_skills(df, column, taxonomy_skills, raw_to_udacity=None):
+    """Explode skills column and merge with taxonomy. If raw_to_udacity is provided, map raw skill -> Udacity skill first."""
+    frame = df[['workera_user_email', column]].explode(column).rename(columns={column: 'raw_skill'})
+    if raw_to_udacity is not None:
+        frame['Skill'] = frame['raw_skill'].map(raw_to_udacity)
+        frame = frame.dropna(subset=['Skill'])
+    else:
+        frame = frame.rename(columns={'raw_skill': 'Skill'})
     return pd.merge(frame, taxonomy_skills, on='Skill', how='left').dropna(subset=['Topic'])
 
 
@@ -570,7 +674,7 @@ def main():
             help="Enter the Workera company ID (e.g., 2122)"
         )
         
-        fetch_button = st.button("🔄 Fetch Data from API", use_container_width=True)
+        fetch_button = st.button("Fetch Data from API", use_container_width=True)
         
         # Section 2: Run Analysis (only shown after data is fetched)
         if st.session_state.get('api_fetched'):
@@ -588,27 +692,19 @@ def main():
                 help="Filter data to a specific assessment"
             )
             
-            taxonomy_file = st.file_uploader(
-                "📋 Taxonomy File (CSV)",
-                type=['csv'],
-                help="Upload the taxonomy file containing Skill, Topic, and Subdomain columns",
-                key="taxonomy_uploader"
-            )
-            
-            run_analysis = st.button("🚀 Run Analysis", use_container_width=True, type="primary")
+            run_analysis = st.button("Run Analysis", use_container_width=True, type="primary")
         else:
             selected_assessment = None
-            taxonomy_file = None
             run_analysis = False
-    
+        
     # Main content area - check for JWT and company ID first
     if not jwt_token or not company_id:
-        st.info("👈 Enter your JWT token and Company ID in the sidebar, then click 'Fetch Data from API'.")
+        st.info("Enter your JWT token and Company ID in the sidebar, then click 'Fetch Data from API'.")
         return
     
     # Fetch data when button is clicked
     if fetch_button:
-        with st.spinner("🔄 Fetching Workera API key and data..."):
+        with st.spinner("Fetching Workera API key and data..."):
             try:
                 # Clean inputs - strip whitespace and any non-ASCII characters
                 clean_jwt = jwt_token.strip()
@@ -622,11 +718,12 @@ def main():
                 st.session_state['workera_api_key'] = api_key
                 st.session_state['jwt_token'] = clean_jwt  # Store for Skills API calls
                 
-                # Now fetch the data using the API key
-                domains_df, signals_df, benchmarks_df = fetch_all_api_data(api_key)
+                # Now fetch the data using the API key (scores-based flow)
+                domains_df, signals_df, benchmarks_df, scores = fetch_all_api_data(api_key)
                 st.session_state['domains_df'] = domains_df
                 st.session_state['signals_df'] = signals_df
                 st.session_state['benchmarks_df'] = benchmarks_df
+                st.session_state['scores'] = scores
                 st.session_state['api_fetched'] = True
                 # Clear any previous assessment selection when new data is fetched
                 if 'selected_assessment' in st.session_state:
@@ -653,11 +750,6 @@ def main():
         st.info("👈 Select an assessment from the sidebar to continue.")
         return
     
-    # Check if taxonomy file is uploaded
-    if taxonomy_file is None:
-        st.info("👈 Upload a taxonomy file for the selected assessment.")
-        return
-    
     if not run_analysis and 'analysis_run' not in st.session_state:
         return
     
@@ -669,17 +761,42 @@ def main():
     
     with st.spinner("🔄 Processing data..."):
         try:
-            # Load taxonomy
-            taxonomy_df = pd.read_csv(taxonomy_file)
-            taxonomy_df_ffill = taxonomy_df.ffill()
-            taxonomy_skills = taxonomy_df_ffill[['Skill', 'Topic', 'Subdomain']].dropna()
-            
-            # Filter signals for selected assessment
+            # Filter scores/signals for selected assessment
             filtered_signals = signals_df[signals_df['title'] == selected_assessment].copy()
             
             if len(filtered_signals) == 0:
                 st.warning(f"No data found for assessment: {selected_assessment}")
                 return
+            
+            # Fetch score details (scores/{id}) to get skill_ratings, then reshape to strong_skills / needs_improvement_skills
+            score_ids = filtered_signals['identifier'].dropna().astype(str).tolist()
+            if not score_ids:
+                st.warning("No score identifiers to fetch details for.")
+                return
+            api_key = st.session_state.get('workera_api_key')
+            if not api_key:
+                st.error("Workera API key not found. Re-fetch data from the API.")
+                return
+            progress_placeholder = st.empty()
+            def _progress(current, total):
+                if total:
+                    progress_placeholder.progress(min(1.0, current / total), text=f"Fetching score details {current}/{total}...")
+            details = fetch_score_details(api_key, score_ids, progress_callback=_progress)
+            progress_placeholder.empty()
+            detail_lookup = {}
+            for d in details:
+                sid = d.get('identifier')
+                if sid is None:
+                    continue
+                ratings = (d.get('results') or {}).get('skill_ratings') or []
+                strong, needs = _skill_ratings_to_lists(ratings)
+                detail_lookup[str(sid)] = (strong, needs)
+            filtered_signals['strong_skills'] = filtered_signals['identifier'].astype(str).map(
+                lambda id: detail_lookup.get(id, ([], []))[0]
+            )
+            filtered_signals['needs_improvement_skills'] = filtered_signals['identifier'].astype(str).map(
+                lambda id: detail_lookup.get(id, ([], []))[1]
+            )
             
             # Prepare the attempts dataframe
             attempts_df = filtered_signals.copy()
@@ -694,8 +811,12 @@ def main():
                 attempts_df = attempts_df.sort_values('updated_at').groupby('workera_user_email').first().reset_index()
             
             # Ensure skills are lists
-            attempts_df['needs_improvement_skills'] = attempts_df['needs_improvement_skills'].apply(listify)
-            attempts_df['strong_skills'] = attempts_df['strong_skills'].apply(listify)
+            attempts_df['needs_improvement_skills'] = attempts_df['needs_improvement_skills'].apply(
+                lambda x: x if isinstance(x, list) else (x if x is not None else [])
+            )
+            attempts_df['strong_skills'] = attempts_df['strong_skills'].apply(
+                lambda x: x if isinstance(x, list) else (x if x is not None else [])
+            )
             
             # Add benchmark columns
             if 'benchmark_enterprise_avg' in attempts_df.columns:
@@ -703,9 +824,34 @@ def main():
             if 'benchmark_enterprise_75_perc' in attempts_df.columns:
                 attempts_df['enterprise_percentile_75_score'] = attempts_df['benchmark_enterprise_75_perc']
             
-            # Create exploded dataframes
-            strong_df = explode_skills(attempts_df, 'strong_skills', taxonomy_skills)
-            weak_df = explode_skills(attempts_df, 'needs_improvement_skills', taxonomy_skills)
+            # Build taxonomy from Udacity Skills API: raw skill -> Udacity skill -> subject/domain
+            jwt_token = st.session_state.get('jwt_token')
+            if not jwt_token:
+                st.error("JWT token is required to map skills to the Udacity taxonomy. Re-fetch data from the API.")
+                return
+            all_raw_skills = []
+            for _, row in attempts_df.iterrows():
+                all_raw_skills.extend(row.get('strong_skills') or [])
+                all_raw_skills.extend(row.get('needs_improvement_skills') or [])
+            unique_raw = list(dict.fromkeys(s for s in all_raw_skills if s))
+            raw_to_udacity = batch_convert_skills_to_udacity(unique_raw, jwt_token)
+            unique_udacity = list(dict.fromkeys(v for v in raw_to_udacity.values() if v))
+            hierarchies = batch_get_skill_hierarchies(unique_udacity, jwt_token)
+            taxonomy_rows = build_taxonomy_from_hierarchies(hierarchies)
+            taxonomy_skills = pd.DataFrame(taxonomy_rows)
+            if taxonomy_skills.empty:
+                taxonomy_skills = pd.DataFrame(columns=['Skill', 'Topic', 'Subdomain'])
+            
+            # Create exploded dataframes (map raw -> Udacity skill, then merge with taxonomy)
+            strong_df = explode_skills(attempts_df, 'strong_skills', taxonomy_skills, raw_to_udacity=raw_to_udacity)
+            weak_df = explode_skills(attempts_df, 'needs_improvement_skills', taxonomy_skills, raw_to_udacity=raw_to_udacity)
+            
+            # Store in session state for AI assistant
+            st.session_state['current_attempts_df'] = attempts_df
+            st.session_state['current_strong_df'] = strong_df
+            st.session_state['current_weak_df'] = weak_df
+            st.session_state['current_taxonomy'] = taxonomy_skills
+            st.session_state['current_assessment'] = selected_assessment
             
         except Exception as e:
             st.error(f"Error processing data: {str(e)}")
@@ -1444,6 +1590,81 @@ def main():
                         file_name=f"{selected_assessment.replace(' ', '_')}_learner_recommendations.csv",
                         mime="text/csv"
                     )
+    
+    # ─────────────────────────────────────────────────────────────────────────────
+    # AI Assistant Chat Interface (using Streamlit chat components)
+    # ─────────────────────────────────────────────────────────────────────────────
+    with st.expander("AI Assistant", expanded=False):
+        if not OPENAI_API_KEY:
+            st.warning("Add your OpenAI API key to settings.py to enable the AI assistant.")
+        else:
+            # Initialize chat history with welcome message
+            if 'chat_history' not in st.session_state:
+                st.session_state['chat_history'] = [
+                    {
+                        'role': 'assistant',
+                        'content': "Hi! I can help you analyze this skills assessment data. Ask me things like: *How would you summarize insights for the client?*, *What should this organization learn next?*, or *Create a narrative of strengths and gaps*."
+                    }
+                ]
+            
+            # Clear chat button
+            if st.button("Clear Chat", key="clear_chat"):
+                st.session_state['chat_history'] = [
+                    {
+                        'role': 'assistant',
+                        'content': "Hi! I can help you analyze this skills assessment data. Ask me things like: *How would you summarize insights for the client?*, *What should this organization learn next?*, or *Create a narrative of strengths and gaps*."
+                    }
+                ]
+                st.rerun()
+            
+            # Display chat messages
+            chat_container = st.container(height=450)
+            with chat_container:
+                for msg in st.session_state['chat_history']:
+                    with st.chat_message(msg['role']):
+                        st.markdown(msg['content'])
+            
+            # Chat input
+            if prompt := st.chat_input("Ask about your data...", key="chat_input"):
+                # Add user message to history
+                st.session_state['chat_history'].append({
+                    'role': 'user',
+                    'content': prompt
+                })
+                
+                # Display user message immediately
+                with chat_container:
+                    with st.chat_message("user"):
+                        st.markdown(prompt)
+                
+                # Prepare session data for agent
+                session_data = {
+                    'attempts_df': st.session_state.get('current_attempts_df'),
+                    'weak_df': st.session_state.get('current_weak_df'),
+                    'strong_df': st.session_state.get('current_strong_df'),
+                    'taxonomy_skills': st.session_state.get('current_taxonomy'),
+                    'selected_assessment': st.session_state.get('current_assessment'),
+                    'all_recommendations': st.session_state.get('all_recommendations', [])
+                }
+                
+                # Get AI response with streaming display
+                with chat_container:
+                    with st.chat_message("assistant"):
+                        with st.spinner("Thinking..."):
+                            response = run_conversation(
+                                prompt,
+                                session_data,
+                                st.session_state['chat_history'][:-1]
+                            )
+                        st.markdown(response)
+                
+                # Add assistant response to history
+                st.session_state['chat_history'].append({
+                    'role': 'assistant',
+                    'content': response
+                })
+                
+                st.rerun()
 
 
 if __name__ == "__main__":
