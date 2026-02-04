@@ -7,6 +7,8 @@ domain (ancestor below root). Used to build domain > subject > skill views
 without a taxonomy CSV.
 """
 
+from __future__ import annotations
+
 import requests
 from settings import (
     SKILLS_SEARCH_SCOPED_URL,
@@ -40,7 +42,7 @@ def convert_skill_to_udacity_skill(skill_description: str, jwt_token: str, scope
     """
     payload = {
         "search": [skill_description],
-        "searchField": "knowledge_component_desc",
+        "searchField": "knowledge_component_names",
         "filter": {},
         "limit": 1,
         "deduplicate": False,
@@ -78,6 +80,34 @@ def convert_skill_to_udacity_skill(skill_description: str, jwt_token: str, scope
             best_score = score
             best_name = name
     return best_name
+
+
+def search_udacity_skills(query: str, jwt_token: str, limit: int = 20) -> list[dict]:
+    """
+    Search Udacity taxonomy for skills (Udaciskill) by name for type-ahead.
+    Returns list of {"name": displayName, "uri": uri}.
+    """
+    if not (query or query.strip()):
+        return []
+    q = query.strip().replace('"', '\\"').replace("\n", " ")
+    gql = (
+        'query { topics(input: { typeUri: "model:Udaciskill", nameSearch: "%s", limit: %d, offset: 0 }) { displayName uri } }'
+        % (q, limit)
+    )
+    try:
+        resp = requests.post(
+            UTAXONOMY_GRAPHQL_URL,
+            headers=_headers(jwt_token),
+            json={"query": gql},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+    except Exception:
+        return []
+    topics = (data.get("data") or {}).get("topics") or []
+    return [{"name": t.get("displayName") or "", "uri": t.get("uri") or ""} for t in topics if t.get("displayName")]
 
 
 def get_skill_hierarchy(skill_name: str, jwt_token: str) -> dict | None:
@@ -213,7 +243,7 @@ def batch_get_skill_hierarchies(udacity_skill_names: list[str], jwt_token: str) 
 
 def build_taxonomy_from_hierarchies(hierarchies: dict[str, dict]) -> list[dict]:
     """
-    Build a list of taxonomy rows compatible with the app: Skill, Topic (subject), Subdomain (domain).
+    Build taxonomy rows: Skill (Udacity), Subject, Domain. Workera skill is added per-row in exploded data.
     """
     rows = []
     for skill_name, h in hierarchies.items():
@@ -222,7 +252,7 @@ def build_taxonomy_from_hierarchies(hierarchies: dict[str, dict]) -> list[dict]:
         if subject or domain:
             rows.append({
                 "Skill": skill_name,
-                "Topic": subject,
-                "Subdomain": domain,
+                "Subject": subject,
+                "Domain": domain,
             })
     return rows

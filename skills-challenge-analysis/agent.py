@@ -252,8 +252,8 @@ def execute_tool(tool_name: str, tool_args: dict, session_data: dict) -> str:
         if weak_df is None and strong_df is None:
             return to_json({"error": "No skill data loaded"})
         
-        weak_counts = weak_df.Subdomain.value_counts().to_dict() if weak_df is not None and len(weak_df) > 0 else {}
-        strong_counts = strong_df.Subdomain.value_counts().to_dict() if strong_df is not None and len(strong_df) > 0 else {}
+        weak_counts = weak_df.Domain.value_counts().to_dict() if weak_df is not None and len(weak_df) > 0 else {}
+        strong_counts = strong_df.Domain.value_counts().to_dict() if strong_df is not None and len(strong_df) > 0 else {}
         
         all_subdomains = set(list(weak_counts.keys()) + list(strong_counts.keys()))
         coverage = []
@@ -278,8 +278,8 @@ def execute_tool(tool_name: str, tool_args: dict, session_data: dict) -> str:
         if weak_df is None and strong_df is None:
             return to_json({"error": "No skill data loaded"})
         
-        weak_counts = weak_df.groupby(['Subdomain', 'Topic']).size().to_dict() if weak_df is not None and len(weak_df) > 0 else {}
-        strong_counts = strong_df.groupby(['Subdomain', 'Topic']).size().to_dict() if strong_df is not None and len(strong_df) > 0 else {}
+        weak_counts = weak_df.groupby(['Domain', 'Subject']).size().to_dict() if weak_df is not None and len(weak_df) > 0 else {}
+        strong_counts = strong_df.groupby(['Domain', 'Subject']).size().to_dict() if strong_df is not None and len(strong_df) > 0 else {}
         
         all_topics = set(list(weak_counts.keys()) + list(strong_counts.keys()))
         coverage = []
@@ -306,15 +306,15 @@ def execute_tool(tool_name: str, tool_args: dict, session_data: dict) -> str:
             return to_json({"error": "No weak skills data"})
         
         limit = tool_args.get('limit', 20)
-        skill_gaps = weak_df.groupby(['Subdomain', 'Topic', 'Skill']).size().reset_index(name='count')
+        skill_gaps = weak_df.groupby(['Domain', 'Subject', 'Skill']).size().reset_index(name='count')
         skill_gaps = skill_gaps.sort_values('count', ascending=False).head(limit)
         
         gaps = []
         for _, row in skill_gaps.iterrows():
             gaps.append({
                 "skill": row['Skill'],
-                "topic": row['Topic'],
-                "subdomain": row['Subdomain'],
+                "topic": row['Subject'],
+                "subdomain": row['Domain'],
                 "users_affected": int(row['count']),
                 "pct_of_cohort": round(row['count'] / len(attempts_df) * 100, 1) if attempts_df is not None else 0
             })
@@ -329,15 +329,15 @@ def execute_tool(tool_name: str, tool_args: dict, session_data: dict) -> str:
             return to_json({"error": "No strong skills data"})
         
         limit = tool_args.get('limit', 20)
-        skill_strengths = strong_df.groupby(['Subdomain', 'Topic', 'Skill']).size().reset_index(name='count')
+        skill_strengths = strong_df.groupby(['Domain', 'Subject', 'Skill']).size().reset_index(name='count')
         skill_strengths = skill_strengths.sort_values('count', ascending=False).head(limit)
         
         strengths = []
         for _, row in skill_strengths.iterrows():
             strengths.append({
                 "skill": row['Skill'],
-                "topic": row['Topic'],
-                "subdomain": row['Subdomain'],
+                "topic": row['Subject'],
+                "subdomain": row['Domain'],
                 "users_with_strength": int(row['count']),
                 "pct_of_cohort": round(row['count'] / len(attempts_df) * 100, 1) if attempts_df is not None else 0
             })
@@ -549,8 +549,8 @@ def execute_tool(tool_name: str, tool_args: dict, session_data: dict) -> str:
             return to_json({"error": "No skill data loaded"})
         
         # Get skills in this subdomain
-        weak_in_sd = weak_df[weak_df['Subdomain'] == subdomain] if weak_df is not None else pd.DataFrame()
-        strong_in_sd = strong_df[strong_df['Subdomain'] == subdomain] if strong_df is not None else pd.DataFrame()
+        weak_in_sd = weak_df[weak_df['Domain'] == subdomain] if weak_df is not None else pd.DataFrame()
+        strong_in_sd = strong_df[strong_df['Domain'] == subdomain] if strong_df is not None else pd.DataFrame()
         
         weak_skill_counts = weak_in_sd.groupby('Skill').size().to_dict() if len(weak_in_sd) > 0 else {}
         strong_skill_counts = strong_in_sd.groupby('Skill').size().to_dict() if len(strong_in_sd) > 0 else {}
@@ -588,15 +588,15 @@ def execute_tool(tool_name: str, tool_args: dict, session_data: dict) -> str:
         total_users = len(attempts_df) if attempts_df is not None else 1
         min_users = total_users * threshold / 100
         
-        skill_gaps = weak_df.groupby(['Subdomain', 'Topic', 'Skill']).size().reset_index(name='count')
+        skill_gaps = weak_df.groupby(['Domain', 'Subject', 'Skill']).size().reset_index(name='count')
         critical = skill_gaps[skill_gaps['count'] >= min_users].sort_values('count', ascending=False)
         
         gaps = []
         for _, row in critical.iterrows():
             gaps.append({
                 "skill": row['Skill'],
-                "topic": row['Topic'],
-                "subdomain": row['Subdomain'],
+                "topic": row['Subject'],
+                "subdomain": row['Domain'],
                 "users_affected": int(row['count']),
                 "pct_of_cohort": round(row['count'] / total_users * 100, 1)
             })

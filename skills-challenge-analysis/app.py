@@ -451,14 +451,17 @@ def listify(x):
 
 
 def explode_skills(df, column, taxonomy_skills, raw_to_udacity=None):
-    """Explode skills column and merge with taxonomy. If raw_to_udacity is provided, map raw skill -> Udacity skill first."""
+    """Explode skills column and merge with taxonomy. Output: workera_user_email, Workera skill, Skill, Subject, Domain."""
     frame = df[['workera_user_email', column]].explode(column).rename(columns={column: 'raw_skill'})
     if raw_to_udacity is not None:
         frame['Skill'] = frame['raw_skill'].map(raw_to_udacity)
         frame = frame.dropna(subset=['Skill'])
     else:
-        frame = frame.rename(columns={'raw_skill': 'Skill'})
-    return pd.merge(frame, taxonomy_skills, on='Skill', how='left').dropna(subset=['Topic'])
+        frame['Skill'] = frame['raw_skill']
+    merged = pd.merge(frame, taxonomy_skills, on='Skill', how='left')
+    merged = merged.dropna(subset=['Subject'])
+    merged = merged.rename(columns={'raw_skill': 'Workera skill'})
+    return merged
 
 
 def render_metric_card(value, label):
@@ -471,171 +474,77 @@ def render_metric_card(value, label):
     """
 
 
-def create_subdomain_topic_heatmap(strong_df, weak_df, subdomain, taxonomy_skills):
-    """
-    Create a heatmap for a specific subdomain showing topic proficiency per user.
-    Matches the exact style from the notebook.
-    """
-    # Calculate user-level topic scores
-    strong_agg = strong_df.groupby(['Subdomain', 'Topic', 'workera_user_email']).size().reset_index()
-    strong_agg.columns = ['Subdomain', 'Topic', 'workera_user_email', 'strong_count']
-    
-    weak_agg = weak_df.groupby(['Subdomain', 'Topic', 'workera_user_email']).size().reset_index()
-    weak_agg.columns = ['Subdomain', 'Topic', 'workera_user_email', 'weak_count']
-    
-    merged = pd.merge(strong_agg, weak_agg, on=['Subdomain', 'Topic', 'workera_user_email'], how='outer').fillna(0)
+def create_domain_subject_heatmap(strong_df, weak_df, domain, taxonomy_skills):
+    """Heatmap for a domain: Subject proficiency per user (Domain → Subject)."""
+    strong_agg = strong_df.groupby(['Domain', 'Subject', 'workera_user_email']).size().reset_index()
+    strong_agg.columns = ['Domain', 'Subject', 'workera_user_email', 'strong_count']
+    weak_agg = weak_df.groupby(['Domain', 'Subject', 'workera_user_email']).size().reset_index()
+    weak_agg.columns = ['Domain', 'Subject', 'workera_user_email', 'weak_count']
+    merged = pd.merge(strong_agg, weak_agg, on=['Domain', 'Subject', 'workera_user_email'], how='outer').fillna(0)
     denom = merged['strong_count'] + merged['weak_count']
     merged['ratio_strong'] = np.where(denom == 0, np.nan, merged['strong_count'] / denom)
-    
-    # Filter for the specific subdomain
-    merged = merged[merged['Subdomain'] == subdomain]
-    
+    merged = merged[merged['Domain'] == domain]
     if len(merged) == 0:
         return None
-    
-    # Turn into a pivot heatmap
-    heatmap_df = merged.pivot_table(
-        index="Topic",
-        columns="workera_user_email",
-        values="ratio_strong"
-    )
-    
+    heatmap_df = merged.pivot_table(index="Subject", columns="workera_user_email", values="ratio_strong")
     if heatmap_df.empty:
         return None
-    
-    # Re-sort the index based on the overall topic score
     topic_order = heatmap_df.sum(axis=1).sort_values(ascending=False).index
     heatmap_df = heatmap_df.loc[topic_order]
-    
-    # Re-sort learners based on overall score
     user_order = heatmap_df.mean(axis=0).sort_values(ascending=False).index
     heatmap_df = heatmap_df[user_order]
-    
-    # Create the heatmap with exact notebook styling
     fig, ax = plt.subplots(figsize=(16, max(5, len(heatmap_df) * 0.5)), dpi=150)
-    
-    # Custom color gradient matching notebook
-    colors = [
-        "white",
-        "lightgrey",
-        "#c0c2cf",
-        "#beb2d1",
-        "#bca2d3",
-        "#ba92d5",
-        "#b882d7",
-        "#9B00F5",
-    ]
-    
+    colors = ["white", "lightgrey", "#c0c2cf", "#beb2d1", "#bca2d3", "#ba92d5", "#b882d7", "#9B00F5"]
     cmap = LinearSegmentedColormap.from_list('GrayToPurple', colors, N=256)
-    cmap.set_bad(color='lightgrey')  # Grey for untested (NaN) skills
-    
-    sns.heatmap(
-        heatmap_df,
-        cmap=cmap,
-        vmin=0, vmax=1,
-        linewidths=0.1, linecolor='black',
-        cbar_kws={'label': 'Strong Skill Ratio'},
-        xticklabels=False,
-        yticklabels=True,
-        ax=ax
-    )
-    
-    # Overlay cross-hatching for NaNs
+    cmap.set_bad(color='lightgrey')
+    sns.heatmap(heatmap_df, cmap=cmap, vmin=0, vmax=1, linewidths=0.1, linecolor='black',
+                cbar_kws={'label': 'Strong Skill Ratio'}, xticklabels=False, yticklabels=True, ax=ax)
     mask = heatmap_df.isna().to_numpy()
     for i in range(mask.shape[0]):
         for j in range(mask.shape[1]):
             if mask[i, j]:
-                ax.add_patch(Rectangle(
-                    (j, i), 1, 1,
-                    fill=False,
-                    hatch='///',
-                    edgecolor='darkgrey',
-                    linewidth=0
-                ))
-    
-    ax.set_ylabel("Topic")
+                ax.add_patch(Rectangle((j, i), 1, 1, fill=False, hatch='///', edgecolor='darkgrey', linewidth=0))
+    ax.set_ylabel("Subject")
     ax.set_xlabel("User")
-    ax.set_title(f"Strong Skill Ratio Heatmap - {subdomain}")
-    
+    ax.set_title(f"Strong Skill Ratio Heatmap - {domain}")
     plt.tight_layout()
     return fig
 
 
-def create_subdomain_skill_heatmap(strong_df, weak_df, subdomain, taxonomy_skills):
-    """
-    Create a heatmap for a specific subdomain showing skill-level proficiency per user.
-    Matches the exact style from the notebook.
-    """
-    # Calculate user-level skill scores
-    strong_agg = strong_df.groupby(['Subdomain', 'Skill', 'workera_user_email']).size().reset_index()
-    strong_agg.columns = ['Subdomain', 'Skill', 'workera_user_email', 'strong_count']
-    
-    weak_agg = weak_df.groupby(['Subdomain', 'Skill', 'workera_user_email']).size().reset_index()
-    weak_agg.columns = ['Subdomain', 'Skill', 'workera_user_email', 'weak_count']
-    
-    merged = pd.merge(strong_agg, weak_agg, on=['Subdomain', 'Skill', 'workera_user_email'], how='outer').fillna(0)
+def create_domain_workera_skill_heatmap(strong_df, weak_df, domain, taxonomy_skills):
+    """Heatmap for a domain: Workera skill proficiency per user (Domain → Workera skill)."""
+    strong_agg = strong_df.groupby(['Domain', 'Workera skill', 'workera_user_email']).size().reset_index()
+    strong_agg.columns = ['Domain', 'Workera skill', 'workera_user_email', 'strong_count']
+    weak_agg = weak_df.groupby(['Domain', 'Workera skill', 'workera_user_email']).size().reset_index()
+    weak_agg.columns = ['Domain', 'Workera skill', 'workera_user_email', 'weak_count']
+    merged = pd.merge(strong_agg, weak_agg, on=['Domain', 'Workera skill', 'workera_user_email'], how='outer').fillna(0)
     denom = merged['strong_count'] + merged['weak_count']
     merged['ratio_strong'] = np.where(denom == 0, np.nan, merged['strong_count'] / denom)
-    
-    # Filter for the specific subdomain
-    merged = merged[merged['Subdomain'] == subdomain]
+    merged = merged[merged['Domain'] == domain]
     
     if len(merged) == 0:
         return None
     
-    # Turn into a pivot heatmap
-    heatmap_df = merged.pivot_table(
-        index="Skill",
-        columns="workera_user_email",
-        values="ratio_strong"
-    )
-    
+    heatmap_df = merged.pivot_table(index="Workera skill", columns="workera_user_email", values="ratio_strong")
     if heatmap_df.empty:
         return None
-    
-    # Re-sort the index based on the overall skill score
     skill_order = heatmap_df.sum(axis=1).sort_values(ascending=False).index
     heatmap_df = heatmap_df.loc[skill_order]
-    
-    # Re-sort learners based on overall score
     user_order = heatmap_df.mean(axis=0).sort_values(ascending=False).index
     heatmap_df = heatmap_df[user_order]
-    
-    # Create the heatmap with exact notebook styling
     fig, ax = plt.subplots(figsize=(16, max(5, len(heatmap_df) * 0.4)), dpi=150)
-    
-    # Simpler color gradient for skill-level (from notebook)
     cmap = LinearSegmentedColormap.from_list('GrayToBlue', ['white', 'lightgrey', '#9B00F5'])
     cmap.set_bad(color='lightgrey')
-    
-    sns.heatmap(
-        heatmap_df,
-        cmap=cmap,
-        vmin=0, vmax=1,
-        linewidths=0.1, linecolor='black',
-        cbar_kws={'label': 'Strong Skill Ratio'},
-        xticklabels=False,
-        yticklabels=True,
-        ax=ax
-    )
-    
-    # Overlay cross-hatching for NaNs
+    sns.heatmap(heatmap_df, cmap=cmap, vmin=0, vmax=1, linewidths=0.1, linecolor='black',
+                cbar_kws={'label': 'Strong Skill Ratio'}, xticklabels=False, yticklabels=True, ax=ax)
     mask = heatmap_df.isna().to_numpy()
     for i in range(mask.shape[0]):
         for j in range(mask.shape[1]):
             if mask[i, j]:
-                ax.add_patch(Rectangle(
-                    (j, i), 1, 1,
-                    fill=False,
-                    hatch='///',
-                    edgecolor='darkgrey',
-                    linewidth=0
-                ))
-    
-    ax.set_ylabel("Skill")
+                ax.add_patch(Rectangle((j, i), 1, 1, fill=False, hatch='///', edgecolor='darkgrey', linewidth=0))
+    ax.set_ylabel("Workera skill")
     ax.set_xlabel("User")
-    ax.set_title(f"Strong Skill Ratio Heatmap - {subdomain}")
-    
+    ax.set_title(f"Strong Skill Ratio Heatmap - {domain}")
     plt.tight_layout()
     return fig
 
@@ -840,18 +749,20 @@ def main():
             taxonomy_rows = build_taxonomy_from_hierarchies(hierarchies)
             taxonomy_skills = pd.DataFrame(taxonomy_rows)
             if taxonomy_skills.empty:
-                taxonomy_skills = pd.DataFrame(columns=['Skill', 'Topic', 'Subdomain'])
+                taxonomy_skills = pd.DataFrame(columns=['Skill', 'Subject', 'Domain'])
             
             # Create exploded dataframes (map raw -> Udacity skill, then merge with taxonomy)
             strong_df = explode_skills(attempts_df, 'strong_skills', taxonomy_skills, raw_to_udacity=raw_to_udacity)
             weak_df = explode_skills(attempts_df, 'needs_improvement_skills', taxonomy_skills, raw_to_udacity=raw_to_udacity)
             
-            # Store in session state for AI assistant
+            # Store in session state for AI assistant and mapping display
             st.session_state['current_attempts_df'] = attempts_df
             st.session_state['current_strong_df'] = strong_df
             st.session_state['current_weak_df'] = weak_df
             st.session_state['current_taxonomy'] = taxonomy_skills
             st.session_state['current_assessment'] = selected_assessment
+            st.session_state['mapping_raw_to_udacity'] = raw_to_udacity
+            st.session_state['mapping_hierarchies'] = hierarchies
             
         except Exception as e:
             st.error(f"Error processing data: {str(e)}")
@@ -859,6 +770,33 @@ def main():
             st.code(traceback.format_exc())
             return
     
+    # Mapping expander (Workera → Udacity → Subject / Domain), default collapsed
+    raw_to_udacity = st.session_state.get('mapping_raw_to_udacity') or {}
+    hierarchies = st.session_state.get('mapping_hierarchies') or {}
+    mapping_rows = []
+    for raw in sorted(raw_to_udacity.keys()):
+        udacity = raw_to_udacity.get(raw)
+        subject = "—"
+        domain = "—"
+        if udacity and udacity in hierarchies:
+            h = hierarchies[udacity]
+            subject = h.get('subject_name') or "—"
+            domain = h.get('domain_name') or "—"
+        mapping_rows.append({
+            "Workera skill": raw,
+            "Udacity skill": udacity if udacity else "—",
+            "Subject": subject,
+            "Domain": domain,
+        })
+    mapping_df = pd.DataFrame(mapping_rows)
+
+    with st.expander("🗺️ Workera → Udacity skill mapping (subject & domain)", expanded=False):
+        if len(mapping_df) > 0:
+            st.caption("Each Workera skill is mapped to an Udacity skill via the Skills Search API; subject and domain come from the Udacity taxonomy.")
+            st.dataframe(mapping_df, hide_index=True, use_container_width=True)
+        else:
+            st.info("No mapping data yet. Run analysis to see Workera skill → Udacity skill → subject & domain.")
+
     # Display selected assessment
     st.markdown(f"""
     <div style="background: linear-gradient(135deg, rgba(155, 0, 245, 0.15) 0%, rgba(155, 0, 245, 0.05) 100%); 
@@ -907,93 +845,79 @@ def main():
     # ─────────────────────────────────────────────────────────────────
     with st.expander("Coverage Summary Tables", expanded=True):
         
-        # Subdomain Coverage
-        st.markdown("#### Subdomain Coverage")
+        # Domain Coverage
+        st.markdown("#### Domain Coverage")
         
         if len(weak_df) > 0 or len(strong_df) > 0:
-            weak_subdomain_counts = weak_df.Subdomain.value_counts().reset_index() if len(weak_df) > 0 else pd.DataFrame(columns=['Subdomain', 'count'])
-            weak_subdomain_counts.columns = ['Subdomain', 'weak_skill_count']
-            
-            strong_subdomain_counts = strong_df.Subdomain.value_counts().reset_index() if len(strong_df) > 0 else pd.DataFrame(columns=['Subdomain', 'count'])
-            strong_subdomain_counts.columns = ['Subdomain', 'strong_skill_count']
-            
-            subdomain_summary = pd.merge(weak_subdomain_counts, strong_subdomain_counts, on='Subdomain', how='outer').fillna(0)
-            subdomain_summary['subdomain_coverage_%'] = (
-                subdomain_summary['strong_skill_count'] / 
-                (subdomain_summary['strong_skill_count'] + subdomain_summary['weak_skill_count']) * 100
+            weak_domain_counts = weak_df.Domain.value_counts().reset_index() if len(weak_df) > 0 else pd.DataFrame(columns=['Domain', 'count'])
+            weak_domain_counts.columns = ['Domain', 'weak_skill_count']
+            strong_domain_counts = strong_df.Domain.value_counts().reset_index() if len(strong_df) > 0 else pd.DataFrame(columns=['Domain', 'count'])
+            strong_domain_counts.columns = ['Domain', 'strong_skill_count']
+            domain_summary = pd.merge(weak_domain_counts, strong_domain_counts, on='Domain', how='outer').fillna(0)
+            domain_summary['domain_coverage_%'] = (
+                domain_summary['strong_skill_count'] /
+                (domain_summary['strong_skill_count'] + domain_summary['weak_skill_count']) * 100
             ).round(1)
-            subdomain_summary = subdomain_summary[['Subdomain', 'weak_skill_count', 'strong_skill_count', 'subdomain_coverage_%']]
-            subdomain_summary = subdomain_summary.sort_values(by='subdomain_coverage_%', ascending=False)
-            
-            st.dataframe(subdomain_summary, hide_index=True, use_container_width=True)
+            domain_summary = domain_summary[['Domain', 'weak_skill_count', 'strong_skill_count', 'domain_coverage_%']]
+            domain_summary = domain_summary.sort_values(by='domain_coverage_%', ascending=False)
+            st.dataframe(domain_summary, hide_index=True, use_container_width=True)
         else:
-            st.warning("No skill data available for subdomain coverage analysis.")
+            st.warning("No skill data available for domain coverage analysis.")
         
         st.markdown("---")
         
-        # Topic Coverage
-        st.markdown("#### Topic Coverage")
+        # Subject Coverage
+        st.markdown("#### Subject Coverage")
         
         if len(weak_df) > 0 or len(strong_df) > 0:
-            weak_topic_counts = weak_df.Topic.value_counts().reset_index() if len(weak_df) > 0 else pd.DataFrame(columns=['Topic', 'count'])
-            weak_topic_counts.columns = ['Topic', 'weak_skill_count']
-            
-            strong_topic_counts = strong_df.Topic.value_counts().reset_index() if len(strong_df) > 0 else pd.DataFrame(columns=['Topic', 'count'])
-            strong_topic_counts.columns = ['Topic', 'strong_skill_count']
-            
-            topic_summary = pd.merge(weak_topic_counts, strong_topic_counts, on='Topic', how='outer').fillna(0)
-            topic_summary['topic_coverage_%'] = (
-                topic_summary['strong_skill_count'] / 
-                (topic_summary['strong_skill_count'] + topic_summary['weak_skill_count']) * 100
+            weak_subject_counts = weak_df.Subject.value_counts().reset_index() if len(weak_df) > 0 else pd.DataFrame(columns=['Subject', 'count'])
+            weak_subject_counts.columns = ['Subject', 'weak_skill_count']
+            strong_subject_counts = strong_df.Subject.value_counts().reset_index() if len(strong_df) > 0 else pd.DataFrame(columns=['Subject', 'count'])
+            strong_subject_counts.columns = ['Subject', 'strong_skill_count']
+            subject_summary = pd.merge(weak_subject_counts, strong_subject_counts, on='Subject', how='outer').fillna(0)
+            subject_summary['subject_coverage_%'] = (
+                subject_summary['strong_skill_count'] /
+                (subject_summary['strong_skill_count'] + subject_summary['weak_skill_count']) * 100
             ).round(1)
-            topic_summary = pd.merge(topic_summary, taxonomy_skills[['Topic', 'Subdomain']].drop_duplicates(), on='Topic', how='left')
-            topic_summary = topic_summary[['Subdomain', 'Topic', 'weak_skill_count', 'strong_skill_count', 'topic_coverage_%']]
-            topic_summary = topic_summary.sort_values(by=['Subdomain', 'topic_coverage_%'], ascending=[True, False])
-            
-            st.dataframe(topic_summary, hide_index=True, use_container_width=True)
+            subject_summary = pd.merge(subject_summary, taxonomy_skills[['Subject', 'Domain']].drop_duplicates(), on='Subject', how='left')
+            subject_summary = subject_summary[['Domain', 'Subject', 'weak_skill_count', 'strong_skill_count', 'subject_coverage_%']]
+            subject_summary = subject_summary.sort_values(by=['Domain', 'subject_coverage_%'], ascending=[True, False])
+            st.dataframe(subject_summary, hide_index=True, use_container_width=True)
         else:
-            st.warning("No skill data available for topic coverage analysis.")
+            st.warning("No skill data available for subject coverage analysis.")
     
     # ─────────────────────────────────────────────────────────────────
-    # Subdomain-Topic Heatmaps (matching notebook exactly)
+    # Domain-Subject Heatmaps
     # ─────────────────────────────────────────────────────────────────
-    with st.expander("🔥 Subdomain-Topic Heatmaps", expanded=False):
+    with st.expander("🔥 Domain-Subject Heatmaps", expanded=False):
         if len(strong_df) > 0 or len(weak_df) > 0:
-            subdomains = taxonomy_skills['Subdomain'].unique()
-            
-            for subdomain in subdomains:
-                st.markdown(f"**{subdomain}**")
-                
-                fig = create_subdomain_topic_heatmap(strong_df, weak_df, subdomain, taxonomy_skills)
-                
+            domains = taxonomy_skills['Domain'].unique()
+            for domain in domains:
+                st.markdown(f"**{domain}**")
+                fig = create_domain_subject_heatmap(strong_df, weak_df, domain, taxonomy_skills)
                 if fig is not None:
                     st.pyplot(fig)
                     plt.close(fig)
                 else:
-                    st.info(f"No data available for {subdomain}")
-                
+                    st.info(f"No data available for {domain}")
                 st.markdown("---")
         else:
             st.warning("No skill data available for heatmap analysis.")
     
     # ─────────────────────────────────────────────────────────────────
-    # Subdomain-Skill Heatmaps (matching notebook exactly)
+    # Domain-Workera Skill Heatmaps
     # ─────────────────────────────────────────────────────────────────
-    with st.expander("🔬 Subdomain-Skill Heatmaps", expanded=False):
+    with st.expander("🔬 Domain-Workera Skill Heatmaps", expanded=False):
         if len(strong_df) > 0 or len(weak_df) > 0:
-            subdomains = taxonomy_skills['Subdomain'].unique()
-            
-            for subdomain in subdomains:
-                st.markdown(f"**{subdomain}**")
-                
-                fig = create_subdomain_skill_heatmap(strong_df, weak_df, subdomain, taxonomy_skills)
-                
+            domains = taxonomy_skills['Domain'].unique()
+            for domain in domains:
+                st.markdown(f"**{domain}**")
+                fig = create_domain_workera_skill_heatmap(strong_df, weak_df, domain, taxonomy_skills)
                 if fig is not None:
                     st.pyplot(fig)
                     plt.close(fig)
                 else:
-                    st.info(f"No data available for {subdomain}")
-                
+                    st.info(f"No data available for {domain}")
                 st.markdown("---")
         else:
             st.warning("No skill data available for skill-level heatmap analysis.")
@@ -1090,123 +1014,74 @@ def main():
         # ─────────────────────────────────────────────────────────────
         # 2. Topic Coverage Radar/Spider Chart
         # ─────────────────────────────────────────────────────────────
-        st.markdown("#### Topic Coverage Radar")
-        st.markdown("*Quick view of organizational strengths vs. gaps across all topics. Each shape represents a subdomain.*")
+        st.markdown("#### Udacity Skill Coverage Radar")
+        st.markdown("*Quick view of organizational strengths vs. gaps across Udacity skills. Each shape represents a domain.*")
         
         if len(weak_df) > 0 or len(strong_df) > 0:
-            # Calculate coverage per topic with subdomain info
             all_skills_combined = pd.concat([weak_df, strong_df]) if len(weak_df) > 0 and len(strong_df) > 0 else (weak_df if len(weak_df) > 0 else strong_df)
-            topic_subdomain_map = all_skills_combined.groupby('Topic')['Subdomain'].first().to_dict()
-            
-            weak_counts = weak_df.Topic.value_counts() if len(weak_df) > 0 else pd.Series()
-            strong_counts = strong_df.Topic.value_counts() if len(strong_df) > 0 else pd.Series()
-            
-            all_topics = list(set(weak_counts.index.tolist() + strong_counts.index.tolist()))
-            
+            skill_domain_map = all_skills_combined.groupby('Skill')['Domain'].first().to_dict()
+            weak_counts = weak_df.Skill.value_counts() if len(weak_df) > 0 else pd.Series()
+            strong_counts = strong_df.Skill.value_counts() if len(strong_df) > 0 else pd.Series()
+            all_skill_names = list(set(weak_counts.index.tolist() + strong_counts.index.tolist()))
             radar_data = []
-            for topic in all_topics:
-                weak = weak_counts.get(topic, 0)
-                strong = strong_counts.get(topic, 0)
+            for skill in all_skill_names:
+                weak = weak_counts.get(skill, 0)
+                strong = strong_counts.get(skill, 0)
                 coverage = strong / (strong + weak) if (strong + weak) > 0 else 0
-                subdomain = topic_subdomain_map.get(topic, 'Unknown')
-                radar_data.append({'Topic': topic, 'Coverage': coverage, 'Subdomain': subdomain})
-            
+                domain = skill_domain_map.get(skill, 'Unknown')
+                radar_data.append({'Skill': skill, 'Coverage': coverage, 'Domain': domain})
             radar_df = pd.DataFrame(radar_data)
-            
-            # Sort by Subdomain first, then by Coverage within each subdomain
-            # This groups topics by subdomain so each subdomain's shape is contiguous
-            radar_df = radar_df.sort_values(['Subdomain', 'Coverage'], ascending=[True, False])
-            
-            # Limit to top 18 topics for readability (but keep subdomain grouping)
+            radar_df = radar_df.sort_values(['Domain', 'Coverage'], ascending=[True, False])
             if len(radar_df) > 18:
-                # Keep at least some topics from each subdomain
-                radar_df = radar_df.groupby('Subdomain').head(6).reset_index(drop=True)
+                radar_df = radar_df.groupby('Domain').head(6).reset_index(drop=True)
                 if len(radar_df) > 18:
                     radar_df = radar_df.head(18)
-            
-            if len(radar_df) >= 3:  # Need at least 3 points for radar
-                # Define subdomain colors (same as sunburst)
+            if len(radar_df) >= 3:
                 color_palette = [
                     '#9B00F5', '#00f59b', '#f5a000', '#00a0f5', '#f50050',
                     '#50f500', '#f500f5', '#00f5f5', '#f5f500', '#5000f5',
                     '#f55000', '#00f550'
                 ]
-                unique_subdomains = radar_df['Subdomain'].unique()
-                subdomain_color_map = {sd: color_palette[i % len(color_palette)] for i, sd in enumerate(unique_subdomains)}
-                
-                # Get all topics ordered by subdomain (topics from same subdomain are adjacent)
-                all_topic_names = radar_df['Topic'].tolist()
-                
+                unique_domains = radar_df['Domain'].unique()
+                domain_color_map = {d: color_palette[i % len(color_palette)] for i, d in enumerate(unique_domains)}
+                all_skill_labels = radar_df['Skill'].tolist()
                 fig_radar = go.Figure()
-                
-                # Create a separate trace (shape) for each subdomain
-                for subdomain in unique_subdomains:
-                    subdomain_data = radar_df[radar_df['Subdomain'] == subdomain]
-                    color = subdomain_color_map[subdomain]
-                    
-                    # For each subdomain, we need values for ALL topics (0 for topics not in this subdomain)
-                    # Since topics are now ordered by subdomain, each subdomain's non-zero values are contiguous
-                    values_for_subdomain = []
-                    for topic in all_topic_names:
-                        topic_row = subdomain_data[subdomain_data['Topic'] == topic]
-                        if len(topic_row) > 0:
-                            values_for_subdomain.append(topic_row['Coverage'].values[0])
-                        else:
-                            values_for_subdomain.append(0)
-                    
-                    # Parse hex color for rgba
+                for domain in unique_domains:
+                    domain_data = radar_df[radar_df['Domain'] == domain]
+                    color = domain_color_map[domain]
+                    values_for_domain = []
+                    for skill in all_skill_labels:
+                        row = domain_data[domain_data['Skill'] == skill]
+                        values_for_domain.append(row['Coverage'].values[0] if len(row) > 0 else 0)
                     hex_color = color.lstrip('#')
                     r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-                    
                     fig_radar.add_trace(go.Scatterpolar(
-                        r=values_for_subdomain,
-                        theta=all_topic_names,
+                        r=values_for_domain,
+                        theta=all_skill_labels,
                         fill='toself',
                         fillcolor=f'rgba({r}, {g}, {b}, 0.25)',
                         line=dict(color=color, width=2),
                         marker=dict(size=8, color=color),
-                        name=subdomain[:30] + ('...' if len(subdomain) > 30 else ''),
-                        hovertemplate='<b>%{theta}</b><br>Subdomain: ' + subdomain + '<br>Coverage: %{r:.0%}<extra></extra>'
+                        name=domain[:30] + ('...' if len(domain) > 30 else ''),
+                        hovertemplate='<b>%{theta}</b><br>Domain: ' + domain + '<br>Coverage: %{r:.0%}<extra></extra>'
                     ))
-                
                 fig_radar.update_layout(
                     polar=dict(
-                        radialaxis=dict(
-                            visible=True,
-                            range=[0, 1],
-                            tickformat='.0%',
-                            gridcolor='rgba(255,255,255,0.2)',
-                            linecolor='rgba(255,255,255,0.2)'
-                        ),
-                        angularaxis=dict(
-                            gridcolor='rgba(255,255,255,0.2)',
-                            linecolor='rgba(255,255,255,0.2)'
-                        ),
+                        radialaxis=dict(visible=True, range=[0, 1], tickformat='.0%', gridcolor='rgba(255,255,255,0.2)', linecolor='rgba(255,255,255,0.2)'),
+                        angularaxis=dict(gridcolor='rgba(255,255,255,0.2)', linecolor='rgba(255,255,255,0.2)'),
                         bgcolor='rgba(0,0,0,0)'
                     ),
                     showlegend=True,
-                    legend=dict(
-                        orientation='h',
-                        yanchor='bottom',
-                        y=-0.2,
-                        xanchor='center',
-                        x=0.5,
-                        font=dict(size=10)
-                    ),
+                    legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='center', x=0.5, font=dict(size=10)),
                     height=600,
                     margin=dict(t=50, l=80, r=80, b=100),
                     paper_bgcolor='rgba(0,0,0,0)',
                     font=dict(color='#f0f0f5', size=10),
-                    title=dict(
-                        text='Topic Coverage by Subdomain (0% = All Weak, 100% = All Strong)',
-                        font=dict(size=14, color='#f0f0f5'),
-                        x=0.5
-                    )
+                    title=dict(text='Udacity Skill Coverage by Domain (0% = All Weak, 100% = All Strong)', font=dict(size=14, color='#f0f0f5'), x=0.5)
                 )
-                
                 st.plotly_chart(fig_radar, use_container_width=True)
             else:
-                st.info("Need at least 3 topics for radar chart.")
+                st.info("Need at least 3 Udacity skills for radar chart.")
         else:
             st.info("No skill data available for radar chart.")
         
@@ -1216,192 +1091,147 @@ def main():
         # 4. Skills Sunburst Chart
         # ─────────────────────────────────────────────────────────────
         st.markdown("#### Skills Hierarchy Sunburst")
-        st.markdown("*Hierarchical view: Domain → Subdomain → Topic → Skill. Saturation indicates strength (vivid = stronger, gray = weaker).*")
+        st.markdown("*Hierarchical view: Domain → Subject → Skill → Workera skill. Saturation indicates strength (vivid = stronger, gray = weaker).*")
         
         if len(weak_df) > 0 or len(strong_df) > 0:
-            # Build hierarchical data with scores
             all_skills_data = []
-            
-            # Combine strong and weak skill data
             for _, row in strong_df.iterrows():
                 all_skills_data.append({
+                    'Domain': row['Domain'],
+                    'Subject': row['Subject'],
                     'Skill': row['Skill'],
-                    'Topic': row['Topic'],
-                    'Subdomain': row['Subdomain'],
+                    'Workera skill': row['Workera skill'],
                     'is_strong': 1
                 })
-            
             for _, row in weak_df.iterrows():
                 all_skills_data.append({
+                    'Domain': row['Domain'],
+                    'Subject': row['Subject'],
                     'Skill': row['Skill'],
-                    'Topic': row['Topic'],
-                    'Subdomain': row['Subdomain'],
+                    'Workera skill': row['Workera skill'],
                     'is_strong': 0
                 })
-            
             if all_skills_data:
                 skills_hierarchy_df = pd.DataFrame(all_skills_data)
-                
-                # Calculate average score per skill
-                skill_scores = skills_hierarchy_df.groupby(['Subdomain', 'Topic', 'Skill']).agg(
+                skill_scores = skills_hierarchy_df.groupby(['Domain', 'Subject', 'Skill', 'Workera skill']).agg(
                     score=('is_strong', 'mean'),
                     count=('is_strong', 'count')
                 ).reset_index()
-                
-                # Add Domain column for the hierarchy
-                skill_scores['Domain'] = selected_assessment
-                
-                # Define colors for subdomains
                 color_palette = [
                     '#9B00F5', '#00f59b', '#f5a000', '#00a0f5', '#f50050',
                     '#50f500', '#f500f5', '#00f5f5', '#f5f500', '#5000f5',
                     '#f55000', '#00f550'
                 ]
-                unique_subdomains = skill_scores['Subdomain'].unique()
-                subdomain_color_map = {sd: color_palette[i % len(color_palette)] for i, sd in enumerate(unique_subdomains)}
-                
-                # Map subdomain colors to each skill row
-                skill_scores['base_color'] = skill_scores['Subdomain'].map(subdomain_color_map)
-                
-                # Create RGBA color with opacity based on score
-                def score_to_rgba(row):
-                    hex_color = row['base_color'].lstrip('#')
-                    r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-                    opacity = max(0.3, row['score'])  # Min 30% for visibility
-                    return f'rgba({r}, {g}, {b}, {opacity})'
-                
-                skill_scores['color'] = skill_scores.apply(score_to_rgba, axis=1)
-                
-                # Create sunburst using plotly express
+                unique_domains = skill_scores['Domain'].unique()
+                domain_color_map = {d: color_palette[i % len(color_palette)] for i, d in enumerate(unique_domains)}
+                # Sanitize path columns so "/" in values (e.g. "AI / ML") doesn't break Plotly id parsing
+                sunburst_df = skill_scores.copy()
+                path_cols = ['Domain', 'Subject', 'Skill', 'Workera skill']
+                orig_domain_series = skill_scores['Domain'].copy()
+                for col in path_cols:
+                    sunburst_df[col] = sunburst_df[col].astype(str).str.replace('/', '|', regex=False)
+                sanitized_to_original_domain = dict(zip(sunburst_df['Domain'], orig_domain_series))
                 fig_sunburst = px.sunburst(
-                    skill_scores,
-                    path=['Domain', 'Subdomain', 'Topic', 'Skill'],
+                    sunburst_df,
+                    path=['Domain', 'Subject', 'Skill', 'Workera skill'],
                     values='count',
-                    color='Subdomain',
-                    color_discrete_map=subdomain_color_map
                 )
-                
-                # Build color array and custom data for hover with aggregated scores
-                def build_colors_and_hover(fig, skill_scores, subdomain_color_map):
-                    import colorsys
-                    
-                    def hex_to_hsl(hex_color):
-                        """Convert hex to HSL."""
+                def build_colors_and_hover(fig, sunburst_df, domain_color_map, sanitized_to_original_domain):
+                    """Color = parent (Domain) hue; lower score blends toward gray (score 0 = gray, score 1 = full color). Parent score = aggregate of children. sunburst_df must be the sanitized copy used for the figure."""
+                    GRAY = (128, 128, 128)
+                    def hex_to_rgb(hex_color):
                         hex_color = hex_color.lstrip('#')
-                        r, g, b = tuple(int(hex_color[i:i+2], 16) / 255.0 for i in (0, 2, 4))
-                        h, l, s = colorsys.rgb_to_hls(r, g, b)
-                        return h, s, l
-                    
-                    def hsl_to_rgb(h, s, l):
-                        """Convert HSL to RGB (0-255)."""
-                        r, g, b = colorsys.hls_to_rgb(h, l, s)
-                        return int(r * 255), int(g * 255), int(b * 255)
-                    
-                    def get_color_with_saturation(hex_color, score):
-                        """Adjust saturation based on score. Low score = grayish, high score = vivid."""
-                        h, s, l = hex_to_hsl(hex_color)
-                        # Scale saturation: min 10% saturation for weak, up to full saturation for strong
-                        adjusted_s = 0.1 + (score * 0.9)  # Range: 0.1 to 1.0
-                        r, g, b = hsl_to_rgb(h, adjusted_s, l)
-                        return f'rgb({r}, {g}, {b})'
-                    
+                        return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+                    def blend_toward_gray(hex_color, score):
+                        r, g, b = hex_to_rgb(hex_color)
+                        t = max(0, min(1, score))
+                        nr = int((1 - t) * GRAY[0] + t * r)
+                        ng = int((1 - t) * GRAY[1] + t * g)
+                        nb = int((1 - t) * GRAY[2] + t * b)
+                        return f'rgb({nr}, {ng}, {nb})'
                     ids = fig.data[0].ids
                     colors = []
                     hover_scores = []
                     hover_counts = []
-                    
                     for id_val in ids:
                         if id_val is None:
                             colors.append('rgb(128, 128, 128)')
                             hover_scores.append(0)
                             hover_counts.append(0)
                             continue
-                            
                         parts = id_val.split('/')
-                        
+                        domain = parts[0] if parts else None
+                        domain_orig = sanitized_to_original_domain.get(domain, domain)
+                        hex_color = domain_color_map.get(domain_orig, '#9B00F5') if domain else '#9B00F5'
                         if len(parts) == 1:
-                            # Domain level - gray with brightness based on score
-                            avg_score = skill_scores['score'].mean()
-                            total_count = skill_scores['count'].sum()
-                            gray_val = int(80 + (avg_score * 48))  # Range 80-128
-                            colors.append(f'rgb({gray_val}, {gray_val}, {gray_val})')
-                            hover_scores.append(avg_score)
-                            hover_counts.append(total_count)
+                            subset = sunburst_df[sunburst_df['Domain'] == domain]
                         elif len(parts) == 2:
-                            # Subdomain level
-                            subdomain = parts[1]
-                            subset = skill_scores[skill_scores['Subdomain'] == subdomain]
-                            avg_score = subset['score'].mean() if len(subset) > 0 else 0.5
-                            total_count = subset['count'].sum() if len(subset) > 0 else 0
-                            hex_color = subdomain_color_map.get(subdomain, '#9B00F5')
-                            colors.append(get_color_with_saturation(hex_color, avg_score))
-                            hover_scores.append(avg_score)
-                            hover_counts.append(total_count)
+                            subset = sunburst_df[(sunburst_df['Domain'] == parts[0]) & (sunburst_df['Subject'] == parts[1])]
                         elif len(parts) == 3:
-                            # Topic level
-                            subdomain = parts[1]
-                            topic = parts[2]
-                            subset = skill_scores[(skill_scores['Subdomain'] == subdomain) & (skill_scores['Topic'] == topic)]
-                            avg_score = subset['score'].mean() if len(subset) > 0 else 0.5
-                            total_count = subset['count'].sum() if len(subset) > 0 else 0
-                            hex_color = subdomain_color_map.get(subdomain, '#9B00F5')
-                            colors.append(get_color_with_saturation(hex_color, avg_score))
-                            hover_scores.append(avg_score)
-                            hover_counts.append(total_count)
+                            subset = sunburst_df[(sunburst_df['Domain'] == parts[0]) & (sunburst_df['Subject'] == parts[1]) & (sunburst_df['Skill'] == parts[2])]
                         elif len(parts) == 4:
-                            # Skill level
-                            subdomain = parts[1]
-                            topic = parts[2]
-                            skill = parts[3]
-                            subset = skill_scores[(skill_scores['Subdomain'] == subdomain) & 
-                                                  (skill_scores['Topic'] == topic) & 
-                                                  (skill_scores['Skill'] == skill)]
-                            avg_score = subset['score'].mean() if len(subset) > 0 else 0.5
-                            total_count = subset['count'].sum() if len(subset) > 0 else 0
-                            hex_color = subdomain_color_map.get(subdomain, '#9B00F5')
-                            colors.append(get_color_with_saturation(hex_color, avg_score))
-                            hover_scores.append(avg_score)
-                            hover_counts.append(total_count)
+                            subset = sunburst_df[(sunburst_df['Domain'] == parts[0]) & (sunburst_df['Subject'] == parts[1]) & (sunburst_df['Skill'] == parts[2]) & (sunburst_df['Workera skill'] == parts[3])]
                         else:
                             colors.append('rgb(128, 128, 128)')
                             hover_scores.append(0)
                             hover_counts.append(0)
-                    
+                            continue
+                        total_count = subset['count'].sum() if len(subset) > 0 else 0
+                        if total_count > 0:
+                            agg_score = (subset['score'] * subset['count']).sum() / total_count
+                        else:
+                            agg_score = 0
+                        colors.append(blend_toward_gray(hex_color, agg_score))
+                        hover_scores.append(agg_score)
+                        hover_counts.append(total_count)
                     return colors, hover_scores, hover_counts
-                
-                # Apply custom colors and hover data
-                custom_colors, hover_scores, hover_counts = build_colors_and_hover(fig_sunburst, skill_scores, subdomain_color_map)
-                
+                custom_colors, hover_scores, hover_counts = build_colors_and_hover(fig_sunburst, sunburst_df, domain_color_map, sanitized_to_original_domain)
                 fig_sunburst.update_traces(
                     marker=dict(colors=custom_colors, line=dict(color='white', width=0.5)),
                     customdata=list(zip(hover_scores, hover_counts)),
-                    hovertemplate='<b>%{label}</b><br>' +
-                                  'Strength: %{customdata[0]:.0%}<br>' +
-                                  'Skill Signals: %{customdata[1]}<br>' +
-                                  '<extra></extra>'
+                    hovertemplate='<b>%{label}</b><br>Strength: %{customdata[0]:.0%}<br>Skill Signals: %{customdata[1]}<br><extra></extra>',
+                    leaf=dict(opacity=1),
                 )
-                
-                fig_sunburst.update_layout(
-                    margin=dict(t=10, l=0, r=0, b=10),
-                    height=650,
-                    paper_bgcolor='rgba(0,0,0,0)',
-                    font=dict(color='#f0f0f5', size=10)
-                )
-                
+                fig_sunburst.update_layout(margin=dict(t=10, l=0, r=0, b=10), height=650, paper_bgcolor='rgba(0,0,0,0)', font=dict(color='#f0f0f5', size=10))
                 st.plotly_chart(fig_sunburst, use_container_width=True)
-                
-                # Legend for subdomain colors
-                st.markdown("**Subdomain Colors** *(saturation = strength)*:")
-                legend_cols = st.columns(min(4, len(unique_subdomains)))
-                for i, sd in enumerate(unique_subdomains):
+                st.markdown("**Domain Colors** *(gray = weak, vivid = strong; parent score = aggregate of children)*:")
+                legend_cols = st.columns(min(4, len(unique_domains)))
+                for i, d in enumerate(unique_domains):
                     with legend_cols[i % 4]:
-                        display_name = f'{sd[:30]}...' if len(sd) > 30 else sd
-                        st.markdown(f'<span style="color:{subdomain_color_map[sd]}; font-size: 20px;">●</span> {display_name}', unsafe_allow_html=True)
+                        display_name = f'{d[:30]}...' if len(d) > 30 else d
+                        st.markdown(f'<span style="color:{domain_color_map[d]}; font-size: 20px;">●</span> {display_name}', unsafe_allow_html=True)
             else:
                 st.info("No skill data available for sunburst chart.")
         else:
             st.info("No skill data available for sunburst chart.")
         
+    
+    # ─────────────────────────────────────────────────────────────────
+    # Full taxonomy CSV: Domain / Subject / Skill / Workera skill + weak & strong counts
+    # ─────────────────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown('<div class="section-header">Full taxonomy (Udacity + Workera) with weak/strong counts</div>', unsafe_allow_html=True)
+    st.caption("One row per Workera skill with full hierarchy (Domain → Subject → Skill → Workera skill) and the number of strong and weak measurements.")
+    if len(weak_df) > 0 or len(strong_df) > 0:
+        weak_agg = weak_df.groupby(['Domain', 'Subject', 'Skill', 'Workera skill']).size().reset_index(name='weak_count')
+        strong_agg = strong_df.groupby(['Domain', 'Subject', 'Skill', 'Workera skill']).size().reset_index(name='strong_count')
+        taxonomy_counts = weak_agg.merge(strong_agg, on=['Domain', 'Subject', 'Skill', 'Workera skill'], how='outer').fillna(0)
+        taxonomy_counts['weak_count'] = taxonomy_counts['weak_count'].astype(int)
+        taxonomy_counts['strong_count'] = taxonomy_counts['strong_count'].astype(int)
+        taxonomy_counts = taxonomy_counts.sort_values(['Domain', 'Subject', 'Skill', 'Workera skill'])
+        st.dataframe(taxonomy_counts, hide_index=True, use_container_width=True)
+        csv_taxonomy = taxonomy_counts.to_csv(index=False)
+        st.download_button(
+            label="Download full taxonomy as CSV",
+            data=csv_taxonomy,
+            file_name=f"{selected_assessment.replace(' ', '_')}_taxonomy_weak_strong_counts.csv",
+            mime="text/csv",
+            key="download_taxonomy_csv"
+        )
+    else:
+        st.info("No skill data available. Run analysis to see the full taxonomy with weak/strong counts.")
+    
+    st.markdown("---")
     
     # ─────────────────────────────────────────────────────────────────
     # Content Recommendations (via Skills Search API)
