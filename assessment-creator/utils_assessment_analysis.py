@@ -932,20 +932,12 @@ def plot_question_analysis(results_df):
     
     st.pyplot(fig)
     
-    # Add question details table
+    # Add question details table (underlying data for the chart)
     display_df = stats_df[['question_id', 'difficulty', 'discrimination', 'skill_title', 'difficulty_level', 'n_attempts', 'question_content', 'question_choices']].copy()
     display_df.columns = ['Question ID', 'Success Rate', 'Discrimination', 'Skill', 'Difficulty Level', 'Attempts', 'Question Content', 'Question Choices']
     display_df = display_df.sort_values('Discrimination', ascending=False)
-    
-    # Convert to CSV and create download button
-    csv = display_df.to_csv(index=False)
-    st.download_button(
-        label="Download Question Details CSV",
-        data=csv,
-        file_name=f"question_details.csv",
-        mime="text/csv",
-        use_container_width=False
-    )
+    st.caption("Question performance data")
+    st.dataframe(display_df, use_container_width=True)
 
 def plot_total_score_histogram(results_df):
     """
@@ -1021,6 +1013,13 @@ def plot_total_score_histogram(results_df):
     plt.setp(legend.get_texts(), color='black')
     
     st.pyplot(fig)
+    
+    # Table: one row per user_id with overall assessment score
+    user_scores = results_df.groupby('userId')['totalScore'].first().reset_index()
+    user_scores.columns = ['User ID', 'Overall Score']
+    user_scores['Overall Score'] = (user_scores['Overall Score'] * 100).round(1).astype(str) + '%'
+    st.caption("Total score distribution data (one row per user)")
+    st.dataframe(user_scores, use_container_width=True)
 
 def plot_section_scores(results_df):
     """
@@ -1165,7 +1164,16 @@ def plot_section_scores(results_df):
     
     # Adjust layout to prevent label cutoff
     plt.tight_layout()
-    st.pyplot(fig) 
+    st.pyplot(fig)
+    
+    # Table: one row per user, one column per section, values are section scores
+    section_pivot = section_scores.pivot(index='userId', columns='sectionTitle', values='sectionScore')
+    section_pivot = section_pivot.round(3)
+    section_pivot = (section_pivot * 100).round(1)
+    section_pivot = section_pivot.reset_index()
+    section_pivot = section_pivot.rename(columns={'userId': 'User ID'})
+    st.caption("Section performance data (one row per user, one column per section)")
+    st.dataframe(section_pivot, use_container_width=True) 
 
 def plot_recommendation_charts(recommendations_df):
     """
