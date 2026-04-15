@@ -16,6 +16,7 @@ import sys
 import time
 import traceback
 from collections import Counter
+from functools import lru_cache
 import numpy as np
 import pandas as pd
 from openai import OpenAI
@@ -52,6 +53,7 @@ query ($assessmentId: ID!, $limit: Int!, $page: Int!) {
     attempts {
       id
       userId
+      createdAt
       status
       result
       report {
@@ -333,10 +335,48 @@ def fetch_attempts(assessment_id, limit=10):
 
     return all_attempts
 
+STUDENTS_USER_API = "https://students.udacity.com/api/user/users/{user_id}?projection=full"
+
+
+@lru_cache(maxsize=4096)
+def fetch_user_email(user_id: str) -> str:
+    """Resolve learner email via Students API; falls back to user_id on failure."""
+    if not user_id:
+        return ""
+    try:
+        url = STUDENTS_USER_API.format(user_id=user_id)
+        response = requests.get(url, headers=settings.production_headers(), timeout=30)
+        if response.status_code != 200:
+            return user_id
+        payload = response.json()
+        email = payload.get("email")
+        return email if email else user_id
+    except Exception:
+        return user_id
+
+
+def fetch_emails_for_user_ids(user_ids):
+    """Parallel fetch for unique user IDs; lru_cache avoids duplicate HTTP for repeated IDs."""
+    unique = list(dict.fromkeys(uid for uid in user_ids if uid))
+    if not unique:
+        return {}
+    out = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_uid = {executor.submit(fetch_user_email, uid): uid for uid in unique}
+        for future in concurrent.futures.as_completed(future_to_uid):
+            uid = future_to_uid[future]
+            try:
+                out[uid] = future.result()
+            except Exception:
+                out[uid] = uid
+    return out
+
+
 def flatten_attempt(attempt):
     flat = {
         "id": attempt.get("id"),
         "userId": attempt.get("userId"),
+        "createdAt": attempt.get("createdAt"),
         "status": attempt.get("status"),
         "result": attempt.get("result"),
         "totalScore": None,
@@ -1014,19 +1054,35 @@ def plot_total_score_histogram(results_df):
     
     st.pyplot(fig)
     
-    # Table: one row per user_id with overall assessment score
-    user_scores = results_df.groupby('userId')['totalScore'].first().reset_index()
-    user_scores.columns = ['User ID', 'Overall Score']
-    user_scores['Overall Score'] = (user_scores['Overall Score'] * 100).round(1).astype(str) + '%'
-    st.caption("Total score distribution data (one row per user)")
+    # Table: one row per attempt with attempt time, email, overall score
+    attempt_df = results_df.dropna(subset=['id'])
+    if attempt_df.empty:
+        return
+    attempt_rows = attempt_df.groupby('id', as_index=False).agg({
+        'createdAt': 'first',
+        'userId': 'first',
+        'totalScore': 'first',
+    })
+    with st.spinner("Loading learner emails..."):
+        email_map = fetch_emails_for_user_ids(attempt_rows['userId'].tolist())
+    attempt_rows['Email'] = attempt_rows['userId'].map(lambda u: email_map.get(u, u))
+    _ts = pd.to_datetime(attempt_rows['createdAt'], utc=True, errors='coerce')
+    attempt_rows['Attempt time'] = _ts.dt.strftime('%Y-%m-%d %H:%M:%S UTC')
+    attempt_rows.loc[_ts.isna(), 'Attempt time'] = ''
+    attempt_rows = attempt_rows.sort_values('createdAt', ascending=False, na_position='last')
+    attempt_rows['Overall Score'] = (attempt_rows['totalScore'] * 100).round(1).astype(str) + '%'
+    user_scores = attempt_rows[['Attempt time', 'Email', 'Overall Score']]
+    st.caption("Total score distribution data (one row per attempt)")
     st.dataframe(user_scores, use_container_width=True)
 
 def plot_section_scores(results_df):
     """
-    Creates analysis of section-level scores, ensuring one score per user per section.
+    Creates analysis of section-level scores, ensuring one score per attempt per section.
     """
-    # Get unique section scores per user per section
-    section_scores = results_df.groupby(['userId', 'sectionId', 'sectionTitle'])['sectionScore'].first().reset_index()
+    # Get unique section scores per attempt per section
+    section_scores = results_df.dropna(subset=['id', 'sectionId']).groupby(
+        ['id', 'createdAt', 'userId', 'sectionId', 'sectionTitle']
+    )['sectionScore'].first().reset_index()
     
     if len(section_scores) == 0:
         return
@@ -1166,14 +1222,32 @@ def plot_section_scores(results_df):
     plt.tight_layout()
     st.pyplot(fig)
     
-    # Table: one row per user, one column per section, values are section scores
-    section_pivot = section_scores.pivot(index='userId', columns='sectionTitle', values='sectionScore')
-    section_pivot = section_pivot.round(3)
-    section_pivot = (section_pivot * 100).round(1)
-    section_pivot = section_pivot.reset_index()
-    section_pivot = section_pivot.rename(columns={'userId': 'User ID'})
-    st.caption("Section performance data (one row per user, one column per section)")
-    st.dataframe(section_pivot, use_container_width=True) 
+    # Table: one row per attempt, attempt time and email first, then one column per section
+    with st.spinner("Loading learner emails..."):
+        email_map = fetch_emails_for_user_ids(section_scores['userId'].tolist())
+    per_attempt = section_scores.groupby('id', as_index=False).agg({
+        'createdAt': 'first',
+        'userId': 'first',
+    })
+    per_attempt['Email'] = per_attempt['userId'].map(lambda u: email_map.get(u, u))
+    _pts = pd.to_datetime(per_attempt['createdAt'], utc=True, errors='coerce')
+    per_attempt['Attempt time'] = _pts.dt.strftime('%Y-%m-%d %H:%M:%S UTC')
+    per_attempt.loc[_pts.isna(), 'Attempt time'] = ''
+    pivot_scores = section_scores.pivot_table(
+        index='id', columns='sectionTitle', values='sectionScore', aggfunc='first'
+    )
+    pivot_scores = pivot_scores.reset_index()
+    section_table = per_attempt.merge(pivot_scores, on='id', how='inner')
+    section_table = section_table.sort_values('createdAt', ascending=False, na_position='last')
+    section_table = section_table.drop(columns=['id', 'createdAt', 'userId'])
+    for col in section_table.columns:
+        if col in ('Attempt time', 'Email'):
+            continue
+        section_table[col] = (section_table[col] * 100).round(1)
+    ordered = ['Attempt time', 'Email'] + [c for c in section_table.columns if c not in ('Attempt time', 'Email')]
+    section_table = section_table[ordered]
+    st.caption("Section performance data (one row per attempt, one column per section)")
+    st.dataframe(section_table, use_container_width=True)
 
 def plot_recommendation_charts(recommendations_df):
     """
@@ -1339,7 +1413,8 @@ def create_lesson_recommendations_table(recommendations_df):
 
 def create_learner_recommendations_table(recommendations_df):
     """
-    Create downloadable table with one record per user and pivoted columns for lessons and programs.
+    Create downloadable table with one record per learner and pivoted columns for lessons and programs.
+    The first column is learner email (resolved via Students API) instead of user ID.
     """
     if recommendations_df.empty:
         return None
@@ -1407,8 +1482,13 @@ def create_learner_recommendations_table(recommendations_df):
     # Convert to DataFrame
     pivoted_df = pd.DataFrame(pivoted_data)
     
-    # Reorder columns to have user info first, then lesson recommendations, then program
-    base_columns = ['userId', 'totalScore', 'weakSkills']
+    with st.spinner("Loading learner emails..."):
+        email_map = fetch_emails_for_user_ids(pivoted_df['userId'].tolist())
+    pivoted_df['email'] = pivoted_df['userId'].map(lambda u: email_map.get(u, u))
+    pivoted_df = pivoted_df.drop(columns=['userId'])
+    
+    # Reorder columns to have learner info first, then lesson recommendations, then program
+    base_columns = ['email', 'totalScore', 'weakSkills']
     lesson_columns = []
     program_columns = []
     
@@ -1429,8 +1509,8 @@ def create_learner_recommendations_table(recommendations_df):
     # Rename columns for better display
     column_mapping = {}
     for col in pivoted_df.columns:
-        if col == 'userId':
-            column_mapping[col] = 'User ID'
+        if col == 'email':
+            column_mapping[col] = 'Email'
         elif col == 'totalScore':
             column_mapping[col] = 'Total Score'
         elif col == 'weakSkills':
