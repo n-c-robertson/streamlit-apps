@@ -17,6 +17,8 @@ Streamlit Community Cloud **App settings → Secrets**.
     form_id = "YOUR_FORM_ID"
     entry_payload = "entry.XXXXXXXX"
 
+    password = "YOUR_APP_PASSWORD"
+
 Omit the ``[google_form]`` section if you do not use Form backup. For a filled local dict
 mirror (gitignored), copy ``streamlit_secrets_dict.example.py`` to ``streamlit_secrets_dict.py``.
 """
@@ -24,6 +26,7 @@ mirror (gitignored), copy ``streamlit_secrets_dict.example.py`` to ``streamlit_s
 from __future__ import annotations
 
 import hashlib
+import hmac
 import io
 import json
 import traceback
@@ -710,6 +713,48 @@ def unique_pairs_with_source_gap(df: pd.DataFrame) -> list[tuple[str, str]]:
     return list(zip(g["user_email"], g["domain_title"]))
 
 
+def _app_password_from_secrets() -> str:
+    """Plain-text app password from ``st.secrets['password']`` (top-level TOML key)."""
+    try:
+        p = st.secrets.get("password")
+        if p is None:
+            return ""
+        return str(p).strip()
+    except Exception:
+        return ""
+
+
+def _password_matches(entered: str, expected: str) -> bool:
+    """Constant-time comparison (handles unequal lengths via hashed digests)."""
+    he = hashlib.sha256(entered.encode("utf-8")).digest()
+    hx = hashlib.sha256(expected.encode("utf-8")).digest()
+    return hmac.compare_digest(he, hx)
+
+
+def _require_password() -> None:
+    """Block all app content until the user submits the password from secrets."""
+    expected = _app_password_from_secrets()
+    if not expected:
+        st.error(
+            "Missing **password** in Streamlit secrets. "
+            "Add a top-level line: `password = \"…\"` in `.streamlit/secrets.toml` (see `streamlit_secrets_dict.example.py`)."
+        )
+        st.stop()
+    if st.session_state.get("auth_ok"):
+        return
+
+    st.title("Assessment step backfill review")
+    st.caption("Enter the app password to continue.")
+    entered = st.text_input("Password", type="password", autocomplete="current-password", key="_login_pw")
+    if st.button("Continue", type="primary"):
+        if _password_matches(entered, expected):
+            st.session_state.auth_ok = True
+            st.rerun()
+        else:
+            st.error("Incorrect password.")
+    st.stop()
+
+
 def _require_streamlit_secrets() -> None:
     if not spreadsheet_id():
         st.error(
@@ -727,6 +772,7 @@ def _require_streamlit_secrets() -> None:
 
 def main() -> None:
     st.set_page_config(page_title="J&J backfill review", layout="wide")
+    _require_password()
     _require_streamlit_secrets()
     st.title("Assessment step backfill review")
 
