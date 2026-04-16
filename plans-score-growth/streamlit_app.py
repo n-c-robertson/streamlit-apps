@@ -182,6 +182,44 @@ def _read_public_sheet_csv(url: str) -> pd.DataFrame:
             return pd.read_csv(io.BytesIO(resp.read()))
 
 
+def _dataframe_for_csv_download(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Build a CSV-safe copy: datetimes as YYYY-MM-DD HH:MM:SS strings (UTC-normalized),
+    and pre/post attempt dates fall back to preserved sheet text when parsed value is NaT.
+    """
+    out = df.copy()
+
+    def _fmt_dt_series(s: pd.Series) -> pd.Series:
+        ser = pd.to_datetime(s, errors="coerce", utc=True)
+        str_dt = ser.dt.strftime("%Y-%m-%d %H:%M:%S")
+        return str_dt.where(ser.notna(), "")
+
+    for c in ("pre_attempt_date", "post_attempt_date"):
+        if c not in out.columns:
+            continue
+        sheet_col = f"{c}_sheet"
+        dt = pd.to_datetime(out[c], errors="coerce", utc=True)
+        str_dt = dt.dt.strftime("%Y-%m-%d %H:%M:%S")
+        if sheet_col in out.columns:
+            fb = (
+                out[sheet_col]
+                .astype(str)
+                .replace({"nan": "", "NaT": "", "<NA>": "", "None": ""})
+            )
+            out[c] = str_dt.where(dt.notna(), fb)
+            out = out.drop(columns=[sheet_col])
+        else:
+            out[c] = str_dt.where(dt.notna(), "")
+
+    for col in list(out.columns):
+        s = out[col]
+        if not pd.api.types.is_datetime64_any_dtype(s):
+            continue
+        out[col] = _fmt_dt_series(s)
+
+    return out
+
+
 def _format_sheet_last_updated(value) -> str | None:
     """Normalize Google Sheet `last_updated` field for display."""
     if value is None or (isinstance(value, float) and pd.isna(value)):
@@ -205,6 +243,11 @@ def load_long_dataframe(sheet_id: str) -> tuple[pd.DataFrame, str | None]:
         lu = raw["last_updated"].dropna()
         if not lu.empty:
             last_updated_display = _format_sheet_last_updated(lu.iloc[0])
+
+    # Preserve original sheet text so CSV export always has human-readable dates if parsing yields NaT
+    for _dc in ("pre_attempt_date", "post_attempt_date"):
+        if _dc in raw.columns:
+            raw[f"{_dc}_sheet"] = raw[_dc].map(lambda x: "" if pd.isna(x) else str(x).strip())
 
     raw["pre_attempt_date"] = pd.to_datetime(raw["pre_attempt_date"], errors="coerce")
     raw["post_attempt_date"] = pd.to_datetime(raw["post_attempt_date"], errors="coerce")
@@ -936,7 +979,8 @@ def main():
     safe_name = "".join(
         c if c.isalnum() or c in (" ", "-", "_") else "_" for c in str(plan)
     ).strip().replace(" ", "_")[:120] or "data"
-    csv_bytes = df_plan.to_csv(index=False).encode("utf-8")
+    csv_str = _dataframe_for_csv_download(df_plan).to_csv(index=False)
+    csv_bytes = csv_str.encode("utf-8-sig")
     st.download_button(
         label="Download filtered raw data (CSV)",
         data=csv_bytes,
