@@ -449,6 +449,12 @@ def apply_min_pre_score_filter(df: pd.DataFrame, min_pre_allowed: float) -> pd.D
     return df.loc[~(ps < float(min_pre_allowed))].copy()
 
 
+def apply_advanced_pre_score_filters(df: pd.DataFrame, max_cap: float, min_floor: float) -> pd.DataFrame:
+    """Apply max cap and min floor in one pass (same rules as the two helpers). Used for all charts + CSV."""
+    out = apply_max_pre_score_filter(df, float(max_cap))
+    return apply_min_pre_score_filter(out, float(min_floor))
+
+
 def prepare_score_delta_scatter_df(df_plan: pd.DataFrame, x_col: str) -> pd.DataFrame:
     """One row per learner × domain (pre row: earliest snapshot) with numeric x_col and score_delta."""
     if not {x_col, "score_delta"}.issubset(df_plan.columns):
@@ -939,13 +945,6 @@ def main():
     if sheet_last_updated:
         st.caption(f"Data last updated (from source sheet): **{sheet_last_updated}**")
 
-    plans = sorted(df_long["plan_title"].dropna().unique())
-    if not plans:
-        st.warning("No learning plans in the sheet.")
-        return
-
-    plan = st.selectbox("Learning plan", plans, index=0, key="plan_select")
-
     with st.expander("Advanced filters", expanded=False):
         max_pre_cap = st.number_input(
             "Exclude rows with earliest pre-assessment score above",
@@ -956,7 +955,8 @@ def main():
             key="filter_max_pre_score",
             help=(
                 "Drops learner × domain rows whose **earliest pre-assessment score** is strictly above this value "
-                "(applies to both row types for that assessment). Use 300 to include everyone on a 0–300 scale."
+                "(applies to both row types for that assessment). Use 300 to include everyone on a 0–300 scale. "
+                "Applies to **every chart** and the CSV download."
             ),
         )
         min_pre_floor = st.number_input(
@@ -968,13 +968,24 @@ def main():
             key="filter_min_pre_score",
             help=(
                 "Drops learner × domain rows whose **earliest pre-assessment score** is strictly below this value. "
-                "Use 0 for no lower bound."
+                "Use 0 for no lower bound. Applies to **every chart** and the CSV download."
             ),
         )
 
-    df_plan = df_long[df_long["plan_title"] == plan].copy()
-    df_plan = apply_max_pre_score_filter(df_plan, float(max_pre_cap))
-    df_plan = apply_min_pre_score_filter(df_plan, float(min_pre_floor))
+    df_filtered = apply_advanced_pre_score_filters(df_long, float(max_pre_cap), float(min_pre_floor))
+
+    plans = sorted(df_filtered["plan_title"].dropna().unique())
+    if not plans:
+        st.warning("No learning plans left after applying the advanced filters. Loosen the score range and try again.")
+        return
+
+    # If the current plan vanished from the list (filters tightened), reset selection
+    if st.session_state.get("plan_select") not in plans:
+        st.session_state.plan_select = plans[0]
+
+    plan = st.selectbox("Learning plan", plans, key="plan_select")
+
+    df_plan = df_filtered[df_filtered["plan_title"] == plan].copy()
 
     safe_name = "".join(
         c if c.isalnum() or c in (" ", "-", "_") else "_" for c in str(plan)
