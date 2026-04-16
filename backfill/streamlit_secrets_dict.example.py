@@ -62,6 +62,9 @@ service_account_json = """
 [google_form]
 form_id = "YOUR_GOOGLE_FORM_ID"
 entry_payload = "entry.1234567890"
+
+# Required: gate the entire app until this matches (see app.py _require_password).
+password = "YOUR_APP_PASSWORD"
 '''
 
 # Mirror of keys the app reads (placeholders only — safe to commit).
@@ -82,4 +85,5 @@ RECOMMENDED_STREAMLIT_SECRETS: dict = {
         "form_id": "YOUR_GOOGLE_FORM_ID",
         "entry_payload": "entry.1234567890",
     },
+    "password": "YOUR_APP_PASSWORD",
 }
