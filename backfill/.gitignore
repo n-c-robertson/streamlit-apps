@@ -1,0 +1,5 @@
+# Local Streamlit secrets (never commit)
+.streamlit/secrets.toml
+
+# Filled copy of streamlit_secrets_dict.example.py — keep real values out of git
+streamlit_secrets_dict.py
