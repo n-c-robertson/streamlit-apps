@@ -182,12 +182,85 @@ def _read_public_sheet_csv(url: str) -> pd.DataFrame:
             return pd.read_csv(io.BytesIO(resp.read()))
 
 
-def _dataframe_for_csv_download(df: pd.DataFrame) -> pd.DataFrame:
+def _csv_merge_keys(df: pd.DataFrame) -> list[str]:
+    """Learner × domain keys shared by pre/post long rows."""
+    base = ["plan_title", "workera_user_email"]
+    if "course" in df.columns:
+        return base + ["course"]
+    if "domain_title" in df.columns:
+        return base + ["domain_title"]
+    raise ValueError("Dataframe needs course or domain_title to build wide CSV rows")
+
+
+def _dataframe_wide_for_csv_download(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Build a CSV-safe copy: datetimes as YYYY-MM-DD HH:MM:SS strings (UTC-normalized),
-    and pre/post attempt dates fall back to preserved sheet text when parsed value is NaT.
+    One row per learner × domain: sheet fields once, pre/post attempt fields flattened.
     """
-    out = df.copy()
+    if df.empty:
+        return df.copy()
+
+    keys = _csv_merge_keys(df)
+    long_cols = ["score", "workera_created_at", "strong_skills", "needs_improvement_skills"]
+    pre_renames = {
+        "score": "pre_attempt_score",
+        "workera_created_at": "pre_snapshot_at",
+        "strong_skills": "pre_skills_strong",
+        "needs_improvement_skills": "pre_skills_needs_improvement",
+    }
+    post_renames = {
+        "score": "post_attempt_score",
+        "workera_created_at": "post_snapshot_at",
+        "strong_skills": "post_skills_strong",
+        "needs_improvement_skills": "post_skills_needs_improvement",
+    }
+
+    pre_df = df[df["type"] == "pre"].drop_duplicates(subset=keys)
+    post_df = df[df["type"] == "post"].drop_duplicates(subset=keys)
+
+    pre_sheet = pre_df.drop(columns=[c for c in ["type"] + long_cols if c in pre_df.columns], errors="ignore")
+    post_sheet = post_df.drop(columns=[c for c in ["type"] + long_cols if c in post_df.columns], errors="ignore")
+
+    if pre_sheet.empty and post_sheet.empty:
+        return df.copy()
+
+    if pre_sheet.empty:
+        static = post_sheet.set_index(keys).reset_index()
+    elif post_sheet.empty:
+        static = pre_sheet.set_index(keys).reset_index()
+    else:
+        static = (
+            pre_sheet.set_index(keys).combine_first(post_sheet.set_index(keys)).reset_index()
+        )
+
+    wide = static.set_index(keys)
+    if not pre_df.empty:
+        pl = (
+            pre_df[keys + [c for c in long_cols if c in pre_df.columns]]
+            .drop_duplicates(subset=keys)
+            .set_index(keys)
+            .rename(columns=pre_renames)
+        )
+        wide = wide.join(pl, how="left")
+    if not post_df.empty:
+        ql = (
+            post_df[keys + [c for c in long_cols if c in post_df.columns]]
+            .drop_duplicates(subset=keys)
+            .set_index(keys)
+            .rename(columns=post_renames)
+        )
+        wide = wide.join(ql, how="left")
+
+    out = wide.reset_index()
+    # Long-format `score` duplicates sheet pre_score/post_score on each row — keep sheet columns only
+    for c in ("pre_attempt_score", "post_attempt_score"):
+        if c in out.columns:
+            out = out.drop(columns=[c])
+    return out
+
+
+def _format_csv_datetimes(out: pd.DataFrame) -> pd.DataFrame:
+    """Datetime columns as YYYY-MM-DD HH:MM:SS strings; pre/post attempt dates use sheet fallback when NaT."""
+    out = out.copy()
 
     def _fmt_dt_series(s: pd.Series) -> pd.Series:
         ser = pd.to_datetime(s, errors="coerce", utc=True)
@@ -218,6 +291,12 @@ def _dataframe_for_csv_download(df: pd.DataFrame) -> pd.DataFrame:
         out[col] = _fmt_dt_series(s)
 
     return out
+
+
+def _dataframe_for_csv_download(df: pd.DataFrame) -> pd.DataFrame:
+    """Wide-format learner × domain rows, then CSV-safe datetimes."""
+    wide = _dataframe_wide_for_csv_download(df)
+    return _format_csv_datetimes(wide)
 
 
 def _format_sheet_last_updated(value) -> str | None:
@@ -993,13 +1072,14 @@ def main():
     csv_str = _dataframe_for_csv_download(df_plan).to_csv(index=False)
     csv_bytes = csv_str.encode("utf-8-sig")
     st.download_button(
-        label="Download filtered raw data (CSV)",
+        label="Download filtered data (CSV, one row per learner × domain)",
         data=csv_bytes,
         file_name=f"learning_plan_{safe_name}.csv",
         mime="text/csv",
         help=(
-            "Filtered table for this plan: pre rows (earliest pre-assessment snapshot) and post rows "
-            "(latest post-assessment snapshot), per learner × domain."
+            "One row per **learner × domain** in this plan: sheet fields once, **pre_score** / **post_score**, "
+            "attempt dates, skill tags (**pre_** / **post_** columns), and metrics like **score_delta**. "
+            "Respects advanced filters."
         ),
     )
 
