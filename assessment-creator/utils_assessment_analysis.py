@@ -1307,20 +1307,48 @@ def plot_total_score_histogram(results_df):
     attempt_df = results_df.dropna(subset=['id'])
     if attempt_df.empty:
         return
-    attempt_rows = attempt_df.groupby('id', as_index=False).agg({
+    agg_cols = {
         'createdAt': 'first',
         'userId': 'first',
         'totalScore': 'first',
-    })
+    }
+    if 'assessmentId' in attempt_df.columns:
+        agg_cols['assessmentId'] = 'first'
+    attempt_rows = attempt_df.groupby('id', as_index=False).agg(agg_cols)
+
+    unique_aids = []
+    if 'assessmentId' in attempt_df.columns:
+        unique_aids = (
+            attempt_df['assessmentId'].dropna().astype(str).unique().tolist()
+        )
+
     with st.spinner("Loading learner emails..."):
         email_map = fetch_emails_for_user_ids(attempt_rows['userId'].tolist())
+        title_map = fetch_assessment_titles_map(unique_aids) if unique_aids else {}
+
     attempt_rows['Email'] = attempt_rows['userId'].map(lambda u: email_map.get(u, u))
     _ts = pd.to_datetime(attempt_rows['createdAt'], utc=True, errors='coerce')
     attempt_rows['Attempt time'] = _ts.dt.strftime('%Y-%m-%d %H:%M:%S UTC')
     attempt_rows.loc[_ts.isna(), 'Attempt time'] = ''
     attempt_rows = attempt_rows.sort_values('createdAt', ascending=False, na_position='last')
     attempt_rows['Overall Score'] = (attempt_rows['totalScore'] * 100).round(1).astype(str) + '%'
-    user_scores = attempt_rows[['Attempt time', 'Email', 'Overall Score']]
+
+    if 'assessmentId' in attempt_rows.columns:
+        attempt_rows['Assessment ID'] = attempt_rows['assessmentId'].astype(str)
+        attempt_rows['Assessment title'] = attempt_rows['Assessment ID'].map(
+            lambda x: (title_map.get(x) or '').strip() or '—'
+        )
+        display_cols = [
+            'Assessment ID',
+            'Assessment title',
+            'Attempt time',
+            'Email',
+            'Overall Score',
+        ]
+    else:
+        display_cols = ['Attempt time', 'Email', 'Overall Score']
+
+    user_scores = attempt_rows[display_cols]
     st.caption("Total score distribution data (one row per attempt)")
     st.dataframe(user_scores, use_container_width=True)
 
