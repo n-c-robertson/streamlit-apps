@@ -1,5 +1,6 @@
 # Assessment performance analytics across a fixed set of assessments (staff only).
 
+import pandas as pd
 import streamlit as st
 import utils_assessment_analysis
 
@@ -169,12 +170,59 @@ if view_df.empty:
     st.warning("No rows match the current filters.")
     st.stop()
 
+single_assessment = len(selected_assessments) == 1
+
 st.info(
-    "**Assessment Performance Analysis** — question quality, score distributions, and section "
-    "performance (same charts as the Analyzing Assessments tab). Adjust filters in the sidebar "
-    "to focus on all configured assessments or a subset, and to limit sections."
+    "**Assessment Performance Analysis** — question quality and total-score distributions "
+    "(same as the Analyzing Assessments tab). **Section performance** charts appear only when "
+    "exactly **one** assessment is selected in the sidebar. Use **Assessment-level summary** "
+    "below to compare assessments using aggregated question metrics."
 )
+
+st.subheader("Assessment-level summary")
+st.caption(
+    "Question-level stats are aggregated per assessment (weighted by response count). Only "
+    "questions with at least three attempts and valid discrimination are included—matching "
+    "the question performance chart. **Attempts** counts distinct assessment attempts in the "
+    "current filter sample."
+)
+summary_df = utils_assessment_analysis.assessment_level_summary_table(view_df)
+if summary_df.empty:
+    st.warning("No assessments in the current filter.")
+else:
+    display_summary = summary_df.copy()
+    display_summary["Avg success rate"] = display_summary["avg_success_rate"].map(
+        lambda x: f"{x:.3f}" if pd.notna(x) else "—"
+    )
+    display_summary["Avg discrimination"] = display_summary["avg_discrimination"].map(
+        lambda x: f"{x:.3f}" if pd.notna(x) else "—"
+    )
+    display_summary = display_summary.rename(
+        columns={
+            "assessment_id": "Assessment ID",
+            "questions_in_summary": "Questions in summary",
+            "n_attempts": "Attempts (distinct)",
+        }
+    )
+    display_summary = display_summary[
+        [
+            "Assessment ID",
+            "Questions in summary",
+            "Avg success rate",
+            "Avg discrimination",
+            "Attempts (distinct)",
+        ]
+    ]
+    st.dataframe(display_summary, use_container_width=True, hide_index=True)
 
 utils_assessment_analysis.plot_question_analysis(view_df)
 utils_assessment_analysis.plot_total_score_histogram(view_df)
-utils_assessment_analysis.plot_section_scores(view_df)
+
+if single_assessment:
+    utils_assessment_analysis.plot_section_scores(view_df)
+else:
+    st.subheader("Section performance")
+    st.info(
+        "Select **exactly one** assessment under **Assessments → Choose assessments** to load "
+        "section-level charts and tables."
+    )
