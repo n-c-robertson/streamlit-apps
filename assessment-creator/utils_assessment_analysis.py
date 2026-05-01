@@ -933,6 +933,65 @@ def calculate_question_statistics(results_df):
 
     return question_stats
 
+def assessment_level_summary_table(results_df, min_attempts_per_question=3):
+    """
+    Roll up question-level statistics (same eligibility filters as plot_question_analysis)
+    to one row per assessment: weighted avg success rate and discrimination, question count,
+    and distinct attempt count in the sample.
+    """
+    if results_df is None or results_df.empty:
+        return pd.DataFrame()
+
+    if 'assessmentId' not in results_df.columns:
+        return pd.DataFrame()
+
+    question_stats = calculate_question_statistics(results_df)
+    stats_df = (
+        pd.DataFrame.from_dict(question_stats, orient='index').reset_index(drop=True)
+        if question_stats
+        else pd.DataFrame()
+    )
+    if not stats_df.empty:
+        stats_df = stats_df[stats_df['n_attempts'] >= min_attempts_per_question]
+        stats_df = stats_df[stats_df['discrimination'].notna()]
+
+    rows = []
+    for aid in sorted(results_df['assessmentId'].dropna().astype(str).unique()):
+        sub = results_df[results_df['assessmentId'].astype(str) == aid]
+        n_attempts_distinct = int(sub.dropna(subset=['id'])['id'].nunique())
+
+        if stats_df.empty or 'assessment_id' not in stats_df.columns:
+            g = pd.DataFrame()
+        else:
+            g = stats_df[stats_df['assessment_id'].astype(str) == aid]
+
+        if len(g) == 0:
+            rows.append(
+                {
+                    'assessment_id': aid,
+                    'questions_in_summary': 0,
+                    'avg_success_rate': np.nan,
+                    'avg_discrimination': np.nan,
+                    'n_attempts': n_attempts_distinct,
+                }
+            )
+            continue
+
+        w = g['n_attempts'].sum()
+        avg_sr = float((g['difficulty'] * g['n_attempts']).sum() / w) if w else np.nan
+        avg_disc = float((g['discrimination'] * g['n_attempts']).sum() / w) if w else np.nan
+        rows.append(
+            {
+                'assessment_id': aid,
+                'questions_in_summary': int(len(g)),
+                'avg_success_rate': avg_sr,
+                'avg_discrimination': avg_disc,
+                'n_attempts': n_attempts_distinct,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
 def plot_question_analysis(results_df):
     """
     Create a scatter plot of question difficulty vs discrimination using matplotlib/seaborn.
