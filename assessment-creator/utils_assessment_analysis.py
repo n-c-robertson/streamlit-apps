@@ -492,6 +492,51 @@ def get_results(assessment_id):
     df = df.merge(skills_map, how='left', left_on='skillId', right_index=True)
     return df
 
+def _enrich_attempts_df(df, difficulty_map, skills_map, assessment_id):
+    """Merge difficulty/skills maps and tag rows with assessment_id."""
+    if df is None or df.empty:
+        return None
+    out = df.merge(difficulty_map, how='left', left_on='difficultyLevelId', right_index=True)
+    out = out.merge(skills_map, how='left', left_on='skillId', right_index=True)
+    out['assessmentId'] = assessment_id
+    return out
+
+def get_results_multi(assessment_ids, max_workers=8, progress_bar=None):
+    """
+    Fetch attempts for many assessments, merge catalog maps once, concatenate with assessmentId.
+    Failed IDs are skipped (returns partial data).
+    """
+    ids = [str(x).strip() for x in assessment_ids if str(x).strip()]
+    if not ids:
+        return pd.DataFrame()
+
+    difficulty_map = get_difficulty_levels()
+    skills_map = get_skills()
+
+    def load_one(aid):
+        try:
+            raw = get_attempts_dataframe(aid)
+            return _enrich_attempts_df(raw, difficulty_map, skills_map, aid)
+        except Exception:
+            return None
+
+    frames = []
+    total = len(ids)
+    done = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_map = {executor.submit(load_one, aid): aid for aid in ids}
+        for fut in concurrent.futures.as_completed(future_map):
+            got = fut.result()
+            if got is not None and not got.empty:
+                frames.append(got)
+            done += 1
+            if progress_bar is not None:
+                progress_bar.progress(min(done / total, 1.0))
+
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
 def user_skills(df):
     # Get a list of unique users.
     user_list = df['userId'].unique()
@@ -840,33 +885,28 @@ def calculate_question_statistics(results_df):
     Difficulty = proportion of students who answered correctly
     Discrimination = correlation between question score and total score
     """
-    # Group by question to calculate statistics
     question_stats = {}
-    
-    for question_id in results_df['questionId'].unique():
-        question_data = results_df[results_df['questionId'] == question_id]
-        
+    has_assessment = (
+        'assessmentId' in results_df.columns
+        and results_df['assessmentId'].notna().any()
+    )
+
+    def stats_for_slice(question_data, dict_key, assessment_id_val=None, question_id_val=None):
         if len(question_data) == 0:
-            continue
-            
-        # Calculate difficulty (proportion correct)
+            return
         difficulty = question_data['questionScore'].mean()
-        
-        # Calculate discrimination (correlation with total score)
-        # Only calculate if we have variation in both question scores and total scores
         if len(question_data) > 1 and question_data['questionScore'].std() > 0 and question_data['totalScore'].std() > 0:
             discrimination = question_data['questionScore'].corr(question_data['totalScore'])
         else:
             discrimination = 0.0
-            
-        # Get additional question info
         skill_title = question_data['skillsTitle'].iloc[0] if 'skillsTitle' in question_data.columns else 'Unknown'
         difficulty_level = question_data['difficultyLabel'].iloc[0] if 'difficultyLabel' in question_data.columns else 'Unknown'
         concept_title = question_data['conceptTitle'].iloc[0] if 'conceptTitle' in question_data.columns else 'Unknown'
         question_content = question_data['questionContent'].iloc[0] if 'questionContent' in question_data.columns else 'No content available'
         question_choices = question_data['questionChoices'].iloc[0] if 'questionChoices' in question_data.columns else '[]'
-        
-        question_stats[question_id] = {
+        qid = question_id_val if question_id_val is not None else dict_key
+        row = {
+            'question_id': qid,
             'difficulty': difficulty,
             'discrimination': discrimination,
             'skill_title': skill_title,
@@ -874,9 +914,23 @@ def calculate_question_statistics(results_df):
             'concept_title': concept_title,
             'question_content': question_content,
             'question_choices': question_choices,
-            'n_attempts': len(question_data)
+            'n_attempts': len(question_data),
         }
-    
+        if assessment_id_val is not None:
+            row['assessment_id'] = assessment_id_val
+        question_stats[dict_key] = row
+
+    if has_assessment:
+        grouped = results_df.dropna(subset=['questionId']).groupby(
+            ['assessmentId', 'questionId'], sort=False
+        )
+        for (aid, qid), question_data in grouped:
+            stats_for_slice(question_data, f"{aid}::{qid}", assessment_id_val=aid, question_id_val=qid)
+    else:
+        for question_id in results_df['questionId'].dropna().unique():
+            question_data = results_df[results_df['questionId'] == question_id]
+            stats_for_slice(question_data, question_id)
+
     return question_stats
 
 def plot_question_analysis(results_df):
@@ -888,10 +942,8 @@ def plot_question_analysis(results_df):
     if not question_stats:
         return
     
-    # Convert to DataFrame for easier plotting
-    stats_df = pd.DataFrame.from_dict(question_stats, orient='index')
-    stats_df['question_id'] = stats_df.index
-    
+    stats_df = pd.DataFrame.from_dict(question_stats, orient='index').reset_index(drop=True)
+
     # Filter out questions with too few attempts or invalid statistics
     stats_df = stats_df[stats_df['n_attempts'] >= 3]  # Minimum 3 attempts
     stats_df = stats_df[stats_df['discrimination'].notna()]  # Valid discrimination values
@@ -973,8 +1025,22 @@ def plot_question_analysis(results_df):
     st.pyplot(fig)
     
     # Add question details table (underlying data for the chart)
-    display_df = stats_df[['question_id', 'difficulty', 'discrimination', 'skill_title', 'difficulty_level', 'n_attempts', 'question_content', 'question_choices']].copy()
-    display_df.columns = ['Question ID', 'Success Rate', 'Discrimination', 'Skill', 'Difficulty Level', 'Attempts', 'Question Content', 'Question Choices']
+    table_cols = ['question_id', 'difficulty', 'discrimination', 'skill_title', 'difficulty_level', 'n_attempts', 'question_content', 'question_choices']
+    if 'assessment_id' in stats_df.columns:
+        table_cols = ['assessment_id'] + table_cols
+    display_df = stats_df[table_cols].copy()
+    rename_map = {
+        'assessment_id': 'Assessment ID',
+        'question_id': 'Question ID',
+        'difficulty': 'Success Rate',
+        'discrimination': 'Discrimination',
+        'skill_title': 'Skill',
+        'difficulty_level': 'Difficulty Level',
+        'n_attempts': 'Attempts',
+        'question_content': 'Question Content',
+        'question_choices': 'Question Choices',
+    }
+    display_df = display_df.rename(columns=rename_map)
     display_df = display_df.sort_values('Discrimination', ascending=False)
     st.caption("Question performance data")
     st.dataframe(display_df, use_container_width=True)
