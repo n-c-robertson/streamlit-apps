@@ -541,6 +541,7 @@ def get_results(assessment_id):
     skills_map = get_skills()
     df = df.merge(difficulty_map, how='left', left_on='difficultyLevelId', right_index=True)
     df = df.merge(skills_map, how='left', left_on='skillId', right_index=True)
+    df['assessmentId'] = str(assessment_id).strip()
     return df
 
 def _enrich_attempts_df(df, difficulty_map, skills_map, assessment_id):
@@ -1208,12 +1209,31 @@ def plot_question_analysis(results_df):
     st.pyplot(fig)
     
     # Add question details table (underlying data for the chart)
-    table_cols = ['question_id', 'difficulty', 'discrimination', 'skill_title', 'difficulty_level', 'n_attempts', 'question_content', 'question_choices']
-    if 'assessment_id' in stats_df.columns:
-        table_cols = ['assessment_id'] + table_cols
-    display_df = stats_df[table_cols].copy()
+    table_df = stats_df.copy()
+    if 'assessment_id' in table_df.columns:
+        aids = table_df['assessment_id'].dropna().astype(str).unique().tolist()
+        with st.spinner("Loading assessment titles..."):
+            _title_map = fetch_assessment_titles_map(aids)
+        table_df['assessment_title'] = table_df['assessment_id'].astype(str).map(
+            lambda x: (_title_map.get(x) or '').strip() or '—'
+        )
+
+    table_cols = [
+        'question_id',
+        'difficulty',
+        'discrimination',
+        'skill_title',
+        'difficulty_level',
+        'n_attempts',
+        'question_content',
+        'question_choices',
+    ]
+    if 'assessment_id' in table_df.columns:
+        table_cols = ['assessment_id', 'assessment_title'] + table_cols
+    display_df = table_df[table_cols].copy()
     rename_map = {
         'assessment_id': 'Assessment ID',
+        'assessment_title': 'Assessment title',
         'question_id': 'Question ID',
         'difficulty': 'Success Rate',
         'discrimination': 'Discrimination',
