@@ -4,6 +4,12 @@ import pandas as pd
 import streamlit as st
 import utils_assessment_analysis
 
+
+@st.cache_data(ttl=7200, show_spinner=False)
+def _cached_assessment_titles(ids_tuple):
+    return utils_assessment_analysis.fetch_assessment_titles_map(list(ids_tuple))
+
+
 ADMIN_ASSESSMENT_IDS = (
     "e40cedb5-6658-49d5-9de8-fe18c08fa0e9",
     "2ca0d560-0a85-4525-bf3e-ca17b7b384ee",
@@ -190,7 +196,18 @@ summary_df = utils_assessment_analysis.assessment_level_summary_table(view_df)
 if summary_df.empty:
     st.warning("No assessments in the current filter.")
 else:
+    _ids = tuple(sorted(summary_df["assessment_id"].astype(str).unique()))
+    with st.spinner("Loading assessment titles…"):
+        title_map = _cached_assessment_titles(_ids)
+    summary_df = summary_df.copy()
+    summary_df["assessment_title"] = summary_df["assessment_id"].astype(str).map(
+        lambda x: (title_map.get(x) or "").strip()
+    )
+
+    utils_assessment_analysis.plot_assessment_level_summary_scatter(summary_df)
+
     display_summary = summary_df.copy()
+    display_summary["Assessment title"] = display_summary["assessment_title"].replace("", "—")
     display_summary["Avg success rate"] = display_summary["avg_success_rate"].map(
         lambda x: f"{x:.3f}" if pd.notna(x) else "—"
     )
@@ -206,6 +223,7 @@ else:
     )
     display_summary = display_summary[
         [
+            "Assessment title",
             "Assessment ID",
             "Questions in summary",
             "Avg success rate",

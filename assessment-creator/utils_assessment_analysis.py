@@ -335,6 +335,57 @@ def fetch_attempts(assessment_id, limit=10):
 
     return all_attempts
 
+ASSESSMENT_TITLE_QUERY = """
+query AssessmentTitle($id: ID!) {
+  assessment(id: $id) {
+    id
+    title
+  }
+}
+"""
+
+
+def fetch_assessment_title(assessment_id: str) -> str:
+    """Resolve assessment display title from Assessments API; empty string on failure."""
+    if not assessment_id:
+        return ""
+    try:
+        response = requests.post(
+            settings.ASSESSMENTS_API_URL,
+            headers=settings.production_headers(),
+            json={"query": ASSESSMENT_TITLE_QUERY, "variables": {"id": str(assessment_id).strip()}},
+            timeout=30,
+        )
+        if response.status_code != 200:
+            return ""
+        payload = response.json()
+        if payload.get("errors"):
+            return ""
+        node = (payload.get("data") or {}).get("assessment")
+        if not node:
+            return ""
+        return str(node.get("title") or node.get("name") or "").strip()
+    except Exception:
+        return ""
+
+
+def fetch_assessment_titles_map(assessment_ids):
+    """Parallel fetch of titles for unique string IDs."""
+    ids = list(dict.fromkeys(str(x).strip() for x in assessment_ids if x and str(x).strip()))
+    if not ids:
+        return {}
+    out = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        fut_map = {executor.submit(fetch_assessment_title, aid): aid for aid in ids}
+        for fut in concurrent.futures.as_completed(fut_map):
+            aid = fut_map[fut]
+            try:
+                out[aid] = fut.result() or ""
+            except Exception:
+                out[aid] = ""
+    return out
+
+
 STUDENTS_USER_API = "https://students.udacity.com/api/user/users/{user_id}?projection=full"
 
 
@@ -991,6 +1042,79 @@ def assessment_level_summary_table(results_df, min_attempts_per_question=3):
         )
 
     return pd.DataFrame(rows)
+
+def plot_assessment_level_summary_scatter(summary_df):
+    """
+    Scatter of weighted avg discrimination (x) vs success rate (y) per assessment row.
+    Expects columns: avg_discrimination, avg_success_rate; optional assessment_title for labels.
+    """
+    if summary_df is None or summary_df.empty:
+        return
+    req = {"avg_discrimination", "avg_success_rate"}
+    if not req.issubset(summary_df.columns):
+        return
+    plot_df = summary_df.dropna(subset=["avg_success_rate", "avg_discrimination"]).copy()
+    if plot_df.empty:
+        st.caption("No assessments with both average success rate and discrimination to chart.")
+        return
+
+    fig, ax = plt.subplots(figsize=(12, 8), dpi=200)
+    ax.scatter(
+        plot_df["avg_discrimination"],
+        plot_df["avg_success_rate"],
+        s=80,
+        c="black",
+        alpha=0.85,
+        edgecolors="white",
+        linewidth=0.6,
+        zorder=3,
+    )
+
+    x = np.linspace(-1, 1, 100)
+    y = np.linspace(0, 1, 100)
+    X, Y = np.meshgrid(x, y)
+    difficulty_quality = np.clip(1 - 4 * (Y - 0.5) ** 2, 0, 1)
+    discrimination_quality = np.clip(X, 0, 1)
+    combined_quality = difficulty_quality * discrimination_quality
+    im = ax.imshow(
+        combined_quality,
+        extent=[-1, 1, 0, 1],
+        origin="lower",
+        cmap="RdYlGn",
+        alpha=0.3,
+        aspect="auto",
+        zorder=1,
+    )
+    cbar = plt.colorbar(im, ax=ax, shrink=0.8)
+    cbar.set_label("Assessment quality score (heuristic)")
+    cbar.set_ticks([0, 0.25, 0.5, 0.75, 1.0])
+    cbar.set_ticklabels(["Poor", "Fair", "Good", "Very Good", "Excellent"])
+
+    ax.set_xlabel("Avg discrimination (weighted by responses)")
+    ax.set_ylabel("Avg success rate (weighted by responses)")
+    ax.set_title("Assessment-level averages: success rate vs discrimination")
+    ax.set_xlim(-1, 1)
+    ax.set_ylim(0, 1)
+    ax.grid(True, alpha=0.3)
+    ax.set_axisbelow(True)
+
+    label_col = "assessment_title" if "assessment_title" in plot_df.columns else None
+    if label_col and len(plot_df) <= 30:
+        for _, row in plot_df.iterrows():
+            raw = str(row.get(label_col) or "").strip()
+            aid = str(row.get("assessment_id", ""))[:8]
+            label = (raw[:40] + "…") if len(raw) > 40 else (raw or aid)
+            ax.annotate(
+                label,
+                (row["avg_discrimination"], row["avg_success_rate"]),
+                textcoords="offset points",
+                xytext=(6, 4),
+                fontsize=7,
+                alpha=0.9,
+                zorder=4,
+            )
+
+    st.pyplot(fig)
 
 def plot_question_analysis(results_df):
     """
