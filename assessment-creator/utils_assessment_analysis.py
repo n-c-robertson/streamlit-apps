@@ -335,6 +335,57 @@ def fetch_attempts(assessment_id, limit=10):
 
     return all_attempts
 
+ASSESSMENT_TITLE_QUERY = """
+query AssessmentTitle($id: ID!) {
+  assessment(id: $id) {
+    id
+    title
+  }
+}
+"""
+
+
+def fetch_assessment_title(assessment_id: str) -> str:
+    """Resolve assessment display title from Assessments API; empty string on failure."""
+    if not assessment_id:
+        return ""
+    try:
+        response = requests.post(
+            settings.ASSESSMENTS_API_URL,
+            headers=settings.production_headers(),
+            json={"query": ASSESSMENT_TITLE_QUERY, "variables": {"id": str(assessment_id).strip()}},
+            timeout=30,
+        )
+        if response.status_code != 200:
+            return ""
+        payload = response.json()
+        if payload.get("errors"):
+            return ""
+        node = (payload.get("data") or {}).get("assessment")
+        if not node:
+            return ""
+        return str(node.get("title") or node.get("name") or "").strip()
+    except Exception:
+        return ""
+
+
+def fetch_assessment_titles_map(assessment_ids):
+    """Parallel fetch of titles for unique string IDs."""
+    ids = list(dict.fromkeys(str(x).strip() for x in assessment_ids if x and str(x).strip()))
+    if not ids:
+        return {}
+    out = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        fut_map = {executor.submit(fetch_assessment_title, aid): aid for aid in ids}
+        for fut in concurrent.futures.as_completed(fut_map):
+            aid = fut_map[fut]
+            try:
+                out[aid] = fut.result() or ""
+            except Exception:
+                out[aid] = ""
+    return out
+
+
 STUDENTS_USER_API = "https://students.udacity.com/api/user/users/{user_id}?projection=full"
 
 
@@ -490,6 +541,7 @@ def get_results(assessment_id):
     skills_map = get_skills()
     df = df.merge(difficulty_map, how='left', left_on='difficultyLevelId', right_index=True)
     df = df.merge(skills_map, how='left', left_on='skillId', right_index=True)
+    df['assessmentId'] = str(assessment_id).strip()
     return df
 
 def _enrich_attempts_df(df, difficulty_map, skills_map, assessment_id):
@@ -992,6 +1044,79 @@ def assessment_level_summary_table(results_df, min_attempts_per_question=3):
 
     return pd.DataFrame(rows)
 
+def plot_assessment_level_summary_scatter(summary_df):
+    """
+    Scatter of weighted avg discrimination (x) vs success rate (y) per assessment row.
+    Expects columns: avg_discrimination, avg_success_rate; optional assessment_title for labels.
+    """
+    if summary_df is None or summary_df.empty:
+        return
+    req = {"avg_discrimination", "avg_success_rate"}
+    if not req.issubset(summary_df.columns):
+        return
+    plot_df = summary_df.dropna(subset=["avg_success_rate", "avg_discrimination"]).copy()
+    if plot_df.empty:
+        st.caption("No assessments with both average success rate and discrimination to chart.")
+        return
+
+    fig, ax = plt.subplots(figsize=(12, 8), dpi=200)
+    ax.scatter(
+        plot_df["avg_discrimination"],
+        plot_df["avg_success_rate"],
+        s=80,
+        c="black",
+        alpha=0.85,
+        edgecolors="white",
+        linewidth=0.6,
+        zorder=3,
+    )
+
+    x = np.linspace(-1, 1, 100)
+    y = np.linspace(0, 1, 100)
+    X, Y = np.meshgrid(x, y)
+    difficulty_quality = np.clip(1 - 4 * (Y - 0.5) ** 2, 0, 1)
+    discrimination_quality = np.clip(X, 0, 1)
+    combined_quality = difficulty_quality * discrimination_quality
+    im = ax.imshow(
+        combined_quality,
+        extent=[-1, 1, 0, 1],
+        origin="lower",
+        cmap="RdYlGn",
+        alpha=0.3,
+        aspect="auto",
+        zorder=1,
+    )
+    cbar = plt.colorbar(im, ax=ax, shrink=0.8)
+    cbar.set_label("Assessment quality score (heuristic)")
+    cbar.set_ticks([0, 0.25, 0.5, 0.75, 1.0])
+    cbar.set_ticklabels(["Poor", "Fair", "Good", "Very Good", "Excellent"])
+
+    ax.set_xlabel("Avg discrimination (weighted by responses)")
+    ax.set_ylabel("Avg success rate (weighted by responses)")
+    ax.set_title("Assessment-level averages: success rate vs discrimination")
+    ax.set_xlim(-1, 1)
+    ax.set_ylim(0, 1)
+    ax.grid(True, alpha=0.3)
+    ax.set_axisbelow(True)
+
+    label_col = "assessment_title" if "assessment_title" in plot_df.columns else None
+    if label_col and len(plot_df) <= 30:
+        for _, row in plot_df.iterrows():
+            raw = str(row.get(label_col) or "").strip()
+            aid = str(row.get("assessment_id", ""))[:8]
+            label = (raw[:40] + "…") if len(raw) > 40 else (raw or aid)
+            ax.annotate(
+                label,
+                (row["avg_discrimination"], row["avg_success_rate"]),
+                textcoords="offset points",
+                xytext=(6, 4),
+                fontsize=7,
+                alpha=0.9,
+                zorder=4,
+            )
+
+    st.pyplot(fig)
+
 def plot_question_analysis(results_df):
     """
     Create a scatter plot of question difficulty vs discrimination using matplotlib/seaborn.
@@ -1084,12 +1209,31 @@ def plot_question_analysis(results_df):
     st.pyplot(fig)
     
     # Add question details table (underlying data for the chart)
-    table_cols = ['question_id', 'difficulty', 'discrimination', 'skill_title', 'difficulty_level', 'n_attempts', 'question_content', 'question_choices']
-    if 'assessment_id' in stats_df.columns:
-        table_cols = ['assessment_id'] + table_cols
-    display_df = stats_df[table_cols].copy()
+    table_df = stats_df.copy()
+    if 'assessment_id' in table_df.columns:
+        aids = table_df['assessment_id'].dropna().astype(str).unique().tolist()
+        with st.spinner("Loading assessment titles..."):
+            _title_map = fetch_assessment_titles_map(aids)
+        table_df['assessment_title'] = table_df['assessment_id'].astype(str).map(
+            lambda x: (_title_map.get(x) or '').strip() or '—'
+        )
+
+    table_cols = [
+        'question_id',
+        'difficulty',
+        'discrimination',
+        'skill_title',
+        'difficulty_level',
+        'n_attempts',
+        'question_content',
+        'question_choices',
+    ]
+    if 'assessment_id' in table_df.columns:
+        table_cols = ['assessment_id', 'assessment_title'] + table_cols
+    display_df = table_df[table_cols].copy()
     rename_map = {
         'assessment_id': 'Assessment ID',
+        'assessment_title': 'Assessment title',
         'question_id': 'Question ID',
         'difficulty': 'Success Rate',
         'discrimination': 'Discrimination',
@@ -1183,20 +1327,48 @@ def plot_total_score_histogram(results_df):
     attempt_df = results_df.dropna(subset=['id'])
     if attempt_df.empty:
         return
-    attempt_rows = attempt_df.groupby('id', as_index=False).agg({
+    agg_cols = {
         'createdAt': 'first',
         'userId': 'first',
         'totalScore': 'first',
-    })
+    }
+    if 'assessmentId' in attempt_df.columns:
+        agg_cols['assessmentId'] = 'first'
+    attempt_rows = attempt_df.groupby('id', as_index=False).agg(agg_cols)
+
+    unique_aids = []
+    if 'assessmentId' in attempt_df.columns:
+        unique_aids = (
+            attempt_df['assessmentId'].dropna().astype(str).unique().tolist()
+        )
+
     with st.spinner("Loading learner emails..."):
         email_map = fetch_emails_for_user_ids(attempt_rows['userId'].tolist())
+        title_map = fetch_assessment_titles_map(unique_aids) if unique_aids else {}
+
     attempt_rows['Email'] = attempt_rows['userId'].map(lambda u: email_map.get(u, u))
     _ts = pd.to_datetime(attempt_rows['createdAt'], utc=True, errors='coerce')
     attempt_rows['Attempt time'] = _ts.dt.strftime('%Y-%m-%d %H:%M:%S UTC')
     attempt_rows.loc[_ts.isna(), 'Attempt time'] = ''
     attempt_rows = attempt_rows.sort_values('createdAt', ascending=False, na_position='last')
     attempt_rows['Overall Score'] = (attempt_rows['totalScore'] * 100).round(1).astype(str) + '%'
-    user_scores = attempt_rows[['Attempt time', 'Email', 'Overall Score']]
+
+    if 'assessmentId' in attempt_rows.columns:
+        attempt_rows['Assessment ID'] = attempt_rows['assessmentId'].astype(str)
+        attempt_rows['Assessment title'] = attempt_rows['Assessment ID'].map(
+            lambda x: (title_map.get(x) or '').strip() or '—'
+        )
+        display_cols = [
+            'Assessment ID',
+            'Assessment title',
+            'Attempt time',
+            'Email',
+            'Overall Score',
+        ]
+    else:
+        display_cols = ['Attempt time', 'Email', 'Overall Score']
+
+    user_scores = attempt_rows[display_cols]
     st.caption("Total score distribution data (one row per attempt)")
     st.dataframe(user_scores, use_container_width=True)
 

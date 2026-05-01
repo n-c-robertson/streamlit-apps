@@ -1,8 +1,16 @@
 # Assessment performance analytics across a fixed set of assessments (staff only).
 
+from collections import Counter
+
 import pandas as pd
 import streamlit as st
 import utils_assessment_analysis
+
+
+@st.cache_data(ttl=7200, show_spinner=False)
+def _cached_assessment_titles(ids_tuple):
+    return utils_assessment_analysis.fetch_assessment_titles_map(list(ids_tuple))
+
 
 ADMIN_ASSESSMENT_IDS = (
     "e40cedb5-6658-49d5-9de8-fe18c08fa0e9",
@@ -112,6 +120,22 @@ if "admin_perf_df" not in st.session_state:
 full_df = st.session_state["admin_perf_df"]
 assessment_options = sorted(full_df["assessmentId"].astype(str).unique())
 
+_ids_tuple = tuple(sorted(assessment_options))
+sidebar_title_map = _cached_assessment_titles(_ids_tuple)
+_base_labels = {
+    aid: ((sidebar_title_map.get(aid) or "").strip() or "(Untitled)")
+    for aid in assessment_options
+}
+_title_counts = Counter(_base_labels.values())
+_assessment_display_labels = {
+    aid: (
+        f"{_base_labels[aid]} ({aid[:8]}…)"
+        if _title_counts[_base_labels[aid]] > 1
+        else _base_labels[aid]
+    )
+    for aid in assessment_options
+}
+
 st.sidebar.markdown("### Filters")
 scope = st.sidebar.radio(
     "Assessments",
@@ -122,49 +146,18 @@ if scope == "All assessments":
     selected_assessments = assessment_options
 else:
     selected_assessments = st.sidebar.multiselect(
-        "Assessment IDs",
+        "Assessments",
         options=assessment_options,
         default=assessment_options,
+        format_func=lambda aid: _assessment_display_labels.get(str(aid), str(aid)),
     )
 
 assessment_filtered = full_df[full_df["assessmentId"].astype(str).isin(selected_assessments)]
-
-section_titles = (
-    assessment_filtered["sectionTitle"]
-    .dropna()
-    .astype(str)
-    .sort_values()
-    .unique()
-    .tolist()
-)
-
-section_scope = st.sidebar.radio(
-    "Sections",
-    ["All sections", "Choose sections"],
-    horizontal=False,
-)
+view_df = assessment_filtered
 
 if not selected_assessments:
     st.warning("Select at least one assessment.")
     st.stop()
-
-if section_scope == "All sections":
-    view_df = assessment_filtered
-else:
-    if not section_titles:
-        st.warning("No section titles in the current assessment selection.")
-        st.stop()
-    selected_sections = st.sidebar.multiselect(
-        "Section titles",
-        options=section_titles,
-        default=section_titles,
-    )
-    if not selected_sections:
-        st.warning("Select at least one section.")
-        st.stop()
-    view_df = assessment_filtered[
-        assessment_filtered["sectionTitle"].isin(selected_sections)
-    ]
 
 if view_df.empty:
     st.warning("No rows match the current filters.")
@@ -175,8 +168,8 @@ single_assessment = len(selected_assessments) == 1
 st.info(
     "**Assessment Performance Analysis** — question quality and total-score distributions "
     "(same as the Analyzing Assessments tab). **Section performance** charts appear only when "
-    "exactly **one** assessment is selected in the sidebar. Use **Assessment-level summary** "
-    "below to compare assessments using aggregated question metrics."
+    "exactly **one** assessment is selected. Use **Assessment-level summary** below to compare "
+    "assessments using aggregated question metrics."
 )
 
 st.subheader("Assessment-level summary")
@@ -190,7 +183,15 @@ summary_df = utils_assessment_analysis.assessment_level_summary_table(view_df)
 if summary_df.empty:
     st.warning("No assessments in the current filter.")
 else:
+    summary_df = summary_df.copy()
+    summary_df["assessment_title"] = summary_df["assessment_id"].astype(str).map(
+        lambda x: (sidebar_title_map.get(x) or "").strip()
+    )
+
+    utils_assessment_analysis.plot_assessment_level_summary_scatter(summary_df)
+
     display_summary = summary_df.copy()
+    display_summary["Assessment title"] = display_summary["assessment_title"].replace("", "—")
     display_summary["Avg success rate"] = display_summary["avg_success_rate"].map(
         lambda x: f"{x:.3f}" if pd.notna(x) else "—"
     )
@@ -206,6 +207,7 @@ else:
     )
     display_summary = display_summary[
         [
+            "Assessment title",
             "Assessment ID",
             "Questions in summary",
             "Avg success rate",
@@ -223,6 +225,5 @@ if single_assessment:
 else:
     st.subheader("Section performance")
     st.info(
-        "Select **exactly one** assessment under **Assessments → Choose assessments** to load "
-        "section-level charts and tables."
+        "Select **exactly one** assessment in the sidebar to load section-level charts and tables."
     )
