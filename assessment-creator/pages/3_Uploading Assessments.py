@@ -1144,7 +1144,10 @@ query DownloadAssessment($id: ID!) {
         sourceCategory
         source {
           uri
-          key
+          partKey
+          partTitle
+          lessonTitle
+          conceptTitle
         }
         difficultyLevelId
         skillId
@@ -1240,13 +1243,18 @@ def convert_assessment_to_csv_dataframe(assessment):
             skill_id = question.get("skillId") or ""
 
             source_obj = question.get("source") or {}
-            # The API stores source.uri and source.key (which is the original partKey).
-            uri = source_obj.get("uri", "") if isinstance(source_obj, dict) else ""
-            part_key = source_obj.get("key", "") if isinstance(source_obj, dict) else ""
+            # QuestionSource exposes the content-hierarchy metadata directly
+            # (uri, partKey, partTitle, lessonTitle, conceptTitle, ...); rehydrate
+            # the dict shape the reviewer/uploader expect.
+            if not isinstance(source_obj, dict):
+                source_obj = {}
 
             source_dict = {
-                "uri": uri,
-                "partKey": part_key,
+                "uri": source_obj.get("uri", "") or "",
+                "partKey": source_obj.get("partKey", "") or "",
+                "partTitle": source_obj.get("partTitle", "") or "",
+                "lessonTitle": source_obj.get("lessonTitle", "") or "",
+                "conceptTitle": source_obj.get("conceptTitle", "") or "",
             }
 
             choices = question.get("choices") or []
