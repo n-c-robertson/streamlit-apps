@@ -1751,7 +1751,9 @@ def generate_assessments(
     ASSESSMENT_TYPE, 
     NUMBER_QUESTIONS_PER_CONCEPT, 
     progress_bar=None, 
-    progress_text=None
+    progress_text=None,
+    include_case_study=True,
+    include_coding=True,
 ):
     # Used to be defaulted to 1, now set to up to 5 to allow work around for Solutions Architects.
     NUMBER_QUESTIONS_PER_CONCEPT = NUMBER_QUESTIONS_PER_CONCEPT
@@ -1770,8 +1772,16 @@ def generate_assessments(
         "Filtering failed evaluations...",
         "Deduplicating questions...",
         "Filtering content-specific questions...",
-        "Converting 15 percent of questions to case studies...",
-        "Converting 30 percent of coding questions to include code markdown...",
+        (
+            "Converting 15 percent of questions to case studies..."
+            if include_case_study
+            else "Skipping case study conversion (disabled)..."
+        ),
+        (
+            "Converting 30 percent of coding questions to include code markdown..."
+            if include_coding
+            else "Skipping coding question conversion (disabled)..."
+        ),
         "Tuning distractors for 20 percent of questions...",
         "Selecting best questions (if limit specified)...",
         "Finalizing results..."
@@ -1990,12 +2000,25 @@ def generate_assessments(
 
     step += 1
     update_progress(step)
-    questions_choices_df, conversion_stats = convert_questions_to_case_studies(questions_choices_df, question_col="question_content", conversion_percentage=0.15, batch_size=50, customized_prompt_instructions=CUSTOMIZED_PROMPT_INSTRUCTIONS)
-    debug_outputs['convert_questions_to_case_studies'] = {
-        'output': f"Converted {conversion_stats.get('successfully_converted', 0)} questions to case studies",
-        'type': 'DataFrame',
-        'conversion_stats': conversion_stats
-    }
+    if include_case_study:
+        questions_choices_df, conversion_stats = convert_questions_to_case_studies(questions_choices_df, question_col="question_content", conversion_percentage=0.15, batch_size=50, customized_prompt_instructions=CUSTOMIZED_PROMPT_INSTRUCTIONS)
+        debug_outputs['convert_questions_to_case_studies'] = {
+            'output': f"Converted {conversion_stats.get('successfully_converted', 0)} questions to case studies",
+            'type': 'DataFrame',
+            'conversion_stats': conversion_stats
+        }
+    else:
+        conversion_stats = {
+            'successfully_converted': 0,
+            'questions_selected_for_conversion': 0,
+            'skipped': True,
+            'reason': 'Case study conversion disabled via Advanced Settings toggle'
+        }
+        debug_outputs['convert_questions_to_case_studies'] = {
+            'output': 'Skipped - case study conversion disabled via Advanced Settings toggle',
+            'type': 'skipped',
+            'conversion_stats': conversion_stats
+        }
     
     # Count questions after case study conversion
     total_choices_final_converted = len(questions_choices_df)
@@ -2004,17 +2027,30 @@ def generate_assessments(
 
     step += 1
     update_progress(step)
-    # Convert code format questions directly on the filtered dataframe
-    questions_choices_df, code_conversion_stats = convert_questions_to_code_format_dataframe(
-        questions_choices_df, 
-        conversion_percentage=0.30, 
-        customized_prompt_instructions=CUSTOMIZED_PROMPT_INSTRUCTIONS
-    )
-    debug_outputs['convert_questions_to_code_format'] = {
-        'output': f"Converted {code_conversion_stats.get('converted_questions', 0)} questions to code format",
-        'type': 'DataFrame',
-        'code_conversion_stats': code_conversion_stats
-    }
+    if include_coding:
+        # Convert code format questions directly on the filtered dataframe
+        questions_choices_df, code_conversion_stats = convert_questions_to_code_format_dataframe(
+            questions_choices_df, 
+            conversion_percentage=0.30, 
+            customized_prompt_instructions=CUSTOMIZED_PROMPT_INSTRUCTIONS
+        )
+        debug_outputs['convert_questions_to_code_format'] = {
+            'output': f"Converted {code_conversion_stats.get('converted_questions', 0)} questions to code format",
+            'type': 'DataFrame',
+            'code_conversion_stats': code_conversion_stats
+        }
+    else:
+        code_conversion_stats = {
+            'converted_questions': 0,
+            'total_coding_questions': 0,
+            'skipped': True,
+            'reason': 'Coding question conversion disabled via Advanced Settings toggle'
+        }
+        debug_outputs['convert_questions_to_code_format'] = {
+            'output': 'Skipped - coding question conversion disabled via Advanced Settings toggle',
+            'type': 'skipped',
+            'code_conversion_stats': code_conversion_stats
+        }
     
     # Count questions after code conversion
     unique_questions_after_code = questions_choices_df['question_content'].nunique()

@@ -62,6 +62,18 @@ def main():
 
             CUSTOMIZED_DIFFICULTY = st.select_slider('Custom Difficulty', options=['Much Easier', 'Easier', 'A Little Easier', 'No Change', 'A Little Harder', 'Harder', 'Much Harder'], value='No Change', help="Adjust the base difficulty of the questions.")
 
+            INCLUDE_CASE_STUDY = st.toggle(
+                'Include Case Study questions',
+                value=True,
+                help="When enabled, ~15% of questions are converted into case study format. Disable to skip this step entirely."
+            )
+
+            INCLUDE_CODING = st.toggle(
+                'Include Coding questions',
+                value=True,
+                help="When enabled, ~30% of questions with coding content are reformatted to include code markdown. Disable to skip this step entirely."
+            )
+
             # Disabled in gpt-5, remove later if not neeeded.
             #TEMPERATURE = st.slider(
             #'Temperature', 
@@ -105,7 +117,9 @@ def main():
                             ASSESSMENT_TYPE, # Pass the selected assessment type
                             QUESTIONS_PER_CONCEPT,
                             progress_bar, 
-                            progress_text
+                            progress_text,
+                            include_case_study=INCLUDE_CASE_STUDY,
+                            include_coding=INCLUDE_CODING,
                         )
                     
                     # Check for missing prerequisite skills warning
