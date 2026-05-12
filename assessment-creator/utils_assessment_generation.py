@@ -149,6 +149,22 @@ def fetch_readiness_lessons_from_skills_api(prerequisite_skills):
         print(f"Skills API processing error: {e}")
         return []
 
+def _add_diagnostic(section, level, key, message):
+    """
+    Append a diagnostic record to a section so we can later explain why
+    a CD/ND key failed to produce questions.
+
+    level: "ERROR" (blocking), "WARNING" (likely cause of 0 questions),
+           or "INFO" (context).
+    """
+    section.setdefault('_diagnostics', []).append({
+        'level': level,
+        'key': key,
+        'message': message,
+    })
+    print(f"[DIAGNOSTIC][{level}] key={key}: {message}")
+
+
 def add_program_data(section_content_definitions, assessment_type="placement"):
 
     missing_prerequisite_skills = []
@@ -157,15 +173,29 @@ def add_program_data(section_content_definitions, assessment_type="placement"):
         section['difficulty_level'] = {}
         section['skills']           = {}
         section['readiness_lesson_ids'] = []  # New field for readiness lessons
+        section.setdefault('_diagnostics', [])
 
         for key in section['content_keys']:
+            print(f"\n=== ADD_PROGRAM_DATA: Fetching component for key '{key}' ({assessment_type}) ===")
             release = graphql_queries.query_component(key)
             if not release:
+                _add_diagnostic(
+                    section, "ERROR", key,
+                    "query_component returned no 'latest_release' — the key may not exist, "
+                    "may be unpublished, or the classroom-content API call failed. "
+                    "Check the key spelling and confirm it has a published release."
+                )
                 continue
 
             # 1) root_node_id may not exist — fall back to root_node.id
             root_id = release.get('root_node_id') \
                 or release.get('root_node', {}).get('id')
+            if root_id is None:
+                _add_diagnostic(
+                    section, "WARNING", key,
+                    "No root_node_id found on the latest_release; downstream node "
+                    "lookups will be skipped for this key."
+                )
             
             # 2) extract the title once, from the root_node key
             if not section['title']:
@@ -176,9 +206,22 @@ def add_program_data(section_content_definitions, assessment_type="placement"):
             comp = release.get('component')
             meta = (comp or {}).get('metadata')
             if not meta:
+                _add_diagnostic(
+                    section, "ERROR", key,
+                    "latest_release has no component.metadata — cannot determine "
+                    "difficulty_level / teaches_skills / prerequisite_skills. "
+                    "Check that program metadata is populated in Studio."
+                )
                 continue
 
-            section['difficulty_level'][key] = meta.get('difficulty_level')
+            difficulty_level_obj = meta.get('difficulty_level')
+            section['difficulty_level'][key] = difficulty_level_obj
+            if not difficulty_level_obj or not difficulty_level_obj.get('name'):
+                _add_diagnostic(
+                    section, "WARNING", key,
+                    "metadata.difficulty_level is missing/empty — question "
+                    "generation requires a difficulty level and may skip this key."
+                )
             
             # Handle assessment type logic
             if assessment_type.lower() == "readiness":
@@ -191,6 +234,11 @@ def add_program_data(section_content_definitions, assessment_type="placement"):
                 
                 if not prerequisite_skills:
                     # Return error if no prerequisite skills found
+                    _add_diagnostic(
+                        section, "ERROR", key,
+                        "Readiness assessment requested but metadata.prerequisite_skills "
+                        "is empty — cannot generate readiness questions."
+                    )
                     raise ValueError(f"No prerequisite skills found for key {key}. Please go to Studio and add prerequisite skills to generate a readiness assessment.")
                 
                 # Extract skill names from prerequisite skills
@@ -202,10 +250,23 @@ def add_program_data(section_content_definitions, assessment_type="placement"):
                     print(f"  {i+1}. name: '{skill.get('name', 'MISSING')}', uri: '{skill.get('uri', 'MISSING')}'")
                 
                 if not skill_names:
+                    _add_diagnostic(
+                        section, "ERROR", key,
+                        "metadata.prerequisite_skills entries are missing 'name' values — "
+                        "cannot search the Skills API for prerequisite lessons."
+                    )
                     raise ValueError(f"No valid prerequisite skill names found for key {key}. Please check the prerequisite skills in Studio.")
                 
                 # Fetch lessons from Skills API based on prerequisite skills
                 lesson_ids = fetch_readiness_lessons_from_skills_api(skill_names)
+                if not lesson_ids:
+                    _add_diagnostic(
+                        section, "WARNING", key,
+                        f"Skills API returned 0 lessons for prerequisite skills {skill_names}. "
+                        "Readiness assessment will have no source content to generate questions from."
+                    )
+                else:
+                    print(f"Skills API returned {len(lesson_ids)} lesson ids for key {key}: {lesson_ids}")
                 
                 # Store the lesson IDs and prerequisite skills
                 section['readiness_lesson_ids'].extend(lesson_ids)
@@ -221,7 +282,22 @@ def add_program_data(section_content_definitions, assessment_type="placement"):
                 print(f"Assessment Type: {assessment_type}")
                 print(f"Raw teaches_skills from metadata: {teaches_skills}")
                 
-                if teaches_skills:
+                if not teaches_skills:
+                    _add_diagnostic(
+                        section, "ERROR", key,
+                        "Placement assessment requested but metadata.teaches_skills is empty/missing. "
+                        "Every generated question is filtered out unless its skillId matches a "
+                        "teaches_skills name, so this will produce 0 questions. "
+                        "Add teaches_skills in Studio."
+                    )
+                else:
+                    skill_names_placement = [skill.get('name', '') for skill in teaches_skills if skill.get('name')]
+                    if not skill_names_placement:
+                        _add_diagnostic(
+                            section, "ERROR", key,
+                            "metadata.teaches_skills exists but no entries have a 'name' value — "
+                            "downstream skillId matching will reject every generated question."
+                        )
                     print(f"Teaches skill objects:")
                     for i, skill in enumerate(teaches_skills):
                         print(f"  {i+1}. name: '{skill.get('name', 'MISSING')}', uri: '{skill.get('uri', 'MISSING')}'")
@@ -234,24 +310,71 @@ def add_node_data(section_content_definitions, assessment_type="placement"):
     
     for section in section_content_definitions:
         section['nodes'] = {}
+        section.setdefault('_diagnostics', [])
         
         if assessment_type.lower() == "readiness":
+            lesson_ids = section.get('readiness_lesson_ids', [])
+            if not lesson_ids:
+                _add_diagnostic(
+                    section, "ERROR", section.get('title') or '<no-title>',
+                    "Readiness assessment has no lesson IDs to fetch — the Skills API returned "
+                    "no lessons for the prerequisite skills, so no nodes will be processed."
+                )
             # For readiness assessment, process lesson IDs from Skills API
-            for lesson_id in section.get('readiness_lesson_ids', []):
+            for lesson_id in lesson_ids:
                 try:
                     node_data = graphql_queries.query_node(lesson_id)
                     if node_data is not None:
                         # Use lesson_id as key for readiness lessons
                         section['nodes'][str(lesson_id)] = node_data
-                except Exception:
+                    else:
+                        _add_diagnostic(
+                            section, "WARNING", str(lesson_id),
+                            "query_node returned None for readiness lesson — the lesson may "
+                            "have been deleted or be unavailable in the classroom-content API."
+                        )
+                except Exception as e:
+                    _add_diagnostic(
+                        section, "WARNING", str(lesson_id),
+                        f"Exception while fetching readiness lesson node: {type(e).__name__}: {e}"
+                    )
                     continue
         else:
             # For placement assessment, use original logic
             # assume section['content_ids'] and section['content_keys'] line up one-to-one
+            if not section['content_ids']:
+                _add_diagnostic(
+                    section, "ERROR", section.get('title') or '<no-title>',
+                    f"No content_ids resolved from content_keys {section['content_keys']}. "
+                    "add_program_data was unable to find root node ids — see earlier "
+                    "diagnostics for the underlying cause."
+                )
+            if len(section['content_keys']) != len(section['content_ids']):
+                _add_diagnostic(
+                    section, "WARNING", section.get('title') or '<no-title>',
+                    f"content_keys ({len(section['content_keys'])}) and content_ids "
+                    f"({len(section['content_ids'])}) lengths differ; nodes will be paired "
+                    "positionally and any unmatched keys will be skipped silently. "
+                    f"keys={section['content_keys']} ids={section['content_ids']}"
+                )
             for key, node_id in zip(section['content_keys'], section['content_ids']):
-                node_data = graphql_queries.query_node(node_id)
+                try:
+                    node_data = graphql_queries.query_node(node_id)
+                except Exception as e:
+                    _add_diagnostic(
+                        section, "WARNING", key,
+                        f"Exception while fetching node id {node_id}: {type(e).__name__}: {e}"
+                    )
+                    continue
                 if node_data is not None:
                     section['nodes'][key] = node_data
+                else:
+                    _add_diagnostic(
+                        section, "ERROR", key,
+                        f"query_node returned None for node id {node_id} — content_keys/content_ids "
+                        "may be misaligned, or the node may not be available in the classroom-content "
+                        "API. No content can be extracted for this key."
+                    )
     
     return section_content_definitions
 
@@ -468,6 +591,7 @@ def process_nodes(section_content_definitions, assessment_type="placement"):
     # Create a list of nodes to process based on assessment type
     all_nodes = []
     for section in section_content_definitions:
+        section.setdefault('_diagnostics', [])
         if assessment_type.lower() == "readiness":
             # For readiness, only process lesson nodes from Skills API
             for lesson_key, node in section.get('nodes', {}).items():
@@ -479,14 +603,29 @@ def process_nodes(section_content_definitions, assessment_type="placement"):
                 if node:
                     all_nodes.append(node)
 
+        if not section.get('nodes'):
+            _add_diagnostic(
+                section, "ERROR", section.get('title') or '<no-title>',
+                "No nodes were loaded for this section — process_nodes has nothing to walk. "
+                "See add_program_data / add_node_data diagnostics for why."
+            )
+
+    print(f"\n=== PROCESS_NODES: {len(all_nodes)} node(s) to process ===")
+
     # Process all nodes concurrently.
+    process_node_errors = 0
     with concurrent.futures.ThreadPoolExecutor() as executor:
         futures = [executor.submit(process_node, node) for node in all_nodes]
         for future in concurrent.futures.as_completed(futures):
             try:
                 future.result()
-            except Exception:
+            except Exception as e:
+                process_node_errors += 1
+                print(f"[process_nodes] exception while processing a node: {type(e).__name__}: {e}")
                 continue
+
+    if process_node_errors:
+        print(f"[process_nodes] WARNING: {process_node_errors} node(s) raised exceptions during processing.")
     
     return all_nodes
 
@@ -558,9 +697,25 @@ def extract_content_helper(node):
 def extract_content(section_content_definitions):
     for section in section_content_definitions:
         section['content'] = dict()
+        section.setdefault('_diagnostics', [])
         for key in section['nodes']:
             node = section['nodes'][key] 
-            section['content'][key] = extract_content_helper(node)
+            extracted = extract_content_helper(node)
+            section['content'][key] = extracted
+            if not extracted or not extracted.strip():
+                _add_diagnostic(
+                    section, "WARNING", key,
+                    f"extract_content produced empty content for node "
+                    f"(semantic_type={node.get('semantic_type') if isinstance(node, dict) else type(node).__name__}). "
+                    "The node may have no modules/lessons/concepts/atoms with usable text — "
+                    "this concept will have nothing for the AI to base questions on."
+                )
+        if not section['content']:
+            _add_diagnostic(
+                section, "ERROR", section.get('title') or '<no-title>',
+                "Section has no content entries — nothing to feed to the learning-objective "
+                "generator or the question generator."
+            )
     return section_content_definitions
 
 def learning_objective_generator(section_content_definitions):
@@ -806,23 +961,42 @@ def process_concepts(section_content_definitions, number_questions_per_concept, 
     
     for section in section_content_definitions:
         section['questions_choices'] = []
+        section.setdefault('_diagnostics', [])
         learning_objectives = section.get('learning_objectives')
 
         if assessment_type.lower() == "readiness":
             # For readiness assessment, collect all prerequisite skills from all program keys
             original_prerequisite_skills = set()
             for key in section['content_keys']:
-                skills_for_key = section['skills'].get(key, [])
+                skills_for_key = section['skills'].get(key, []) or []
                 for skill in skills_for_key:
                     skill_name = skill.get('name', '')
-                    original_prerequisite_skills.add(skill_name)
+                    if skill_name:
+                        original_prerequisite_skills.add(skill_name)
             
             print(f"\n=== READINESS SKILLS VALIDATION ===")
             print(f"Original prerequisite skills collected: {sorted(list(original_prerequisite_skills))}")
-            
+
+            if not original_prerequisite_skills:
+                _add_diagnostic(
+                    section, "ERROR", section.get('title') or '<no-title>',
+                    "No prerequisite skill names collected from any program key — every "
+                    "generated question would be filtered out as 'skillId not in expected skills'."
+                )
+
+            if not section.get('nodes'):
+                _add_diagnostic(
+                    section, "ERROR", section.get('title') or '<no-title>',
+                    "Readiness section has no lesson nodes to process — no questions can be generated."
+                )
+
             # Process each lesson node from Skills API
             for lesson_key, node in section['nodes'].items():
                 if not node:
+                    _add_diagnostic(
+                        section, "WARNING", lesson_key,
+                        "Lesson node is empty/None at process_concepts time — skipping."
+                    )
                     continue
                 
                 # For readiness, we use the first available difficulty and skills from the original program keys
@@ -830,12 +1004,18 @@ def process_concepts(section_content_definitions, number_questions_per_concept, 
                 difficulty_level = None
                 difficulty_level_uri = None
                 for key in section['content_keys']:
-                    if section['difficulty_level'].get(key):
-                        difficulty_level = section['difficulty_level'][key]['name']
-                        difficulty_level_uri = section['difficulty_level'][key].get('uri', '')
+                    dl_obj = section['difficulty_level'].get(key)
+                    if dl_obj and dl_obj.get('name'):
+                        difficulty_level = dl_obj['name']
+                        difficulty_level_uri = dl_obj.get('uri', '')
                         break
                 
                 if not difficulty_level:
+                    _add_diagnostic(
+                        section, "ERROR", lesson_key,
+                        "No difficulty_level resolved from any program key — readiness lesson "
+                        "node skipped; difficulty is required by the question prompt."
+                    )
                     continue
                 
                 # Use original prerequisite skills for question generation
@@ -879,10 +1059,30 @@ def process_concepts(section_content_definitions, number_questions_per_concept, 
                                             assessment_type
                                         )
                                     )
-                    
+
+                    if concept_count == 0:
+                        _add_diagnostic(
+                            section, "WARNING", lesson_key,
+                            f"Readiness node (semantic_type={node.get('semantic_type')}) had no concepts to "
+                            "walk — modules/lessons/concepts arrays were empty. Nothing was sent to the AI for this node."
+                        )
+
+                    print(f"[process_concepts] readiness lesson {lesson_key}: dispatched {concept_count} concept(s)")
+
+                    concept_results_returned = 0
+                    concept_results_with_questions = 0
+                    questions_from_ai = 0
+                    questions_kept = 0
+                    questions_skill_rejected = 0
+                    concept_exceptions = 0
+
                     for future in concurrent.futures.as_completed(futures):
                         try:
                             qcs = future.result()
+                            concept_results_returned += 1
+                            if qcs:
+                                concept_results_with_questions += 1
+                            questions_from_ai += len(qcs)
                             
                             # Filter questions to only include those tagged with original prerequisite skills
                             filtered_qcs = []
@@ -894,18 +1094,68 @@ def process_concepts(section_content_definitions, number_questions_per_concept, 
                                 if question_skill in original_prerequisite_skills:
                                     filtered_qcs.append(qc)
                                 else:
+                                    questions_skill_rejected += 1
                                     print(f"WARNING: Question skillId '{question_skill}' not in original prerequisite skills {sorted(list(original_prerequisite_skills))}")
                             
+                            questions_kept += len(filtered_qcs)
                             section['questions_choices'].extend(filtered_qcs)
-                        except Exception:
+                        except Exception as e:
+                            concept_exceptions += 1
+                            print(f"[process_concepts] exception in readiness concept future: {type(e).__name__}: {e}")
                             continue
+
+                    print(
+                        f"[process_concepts] readiness lesson {lesson_key} summary: "
+                        f"{concept_results_returned}/{concept_count} concepts returned "
+                        f"({concept_exceptions} exceptions), {concept_results_with_questions} produced questions, "
+                        f"{questions_from_ai} questions generated by AI, {questions_kept} kept after skill filter "
+                        f"(rejected {questions_skill_rejected})."
+                    )
+
+                    if concept_count > 0 and questions_from_ai == 0:
+                        _add_diagnostic(
+                            section, "WARNING", lesson_key,
+                            f"AI returned 0 questions across {concept_count} concept(s) for this readiness lesson."
+                        )
+                    if questions_from_ai > 0 and questions_kept == 0:
+                        _add_diagnostic(
+                            section, "ERROR", lesson_key,
+                            f"AI returned {questions_from_ai} question(s) for this lesson but ALL were "
+                            "rejected because their skillId did not match any prerequisite skill name. "
+                            f"Expected one of: {sorted(list(original_prerequisite_skills))}."
+                        )
                             
         else:
             # Original placement logic
             for key in section['content_keys']:
-                difficulty_level = section['difficulty_level'][key]['name']
-                difficulty_level_uri = section['difficulty_level'][key].get('uri', '')
-                skills = [s['name'] for s in section['skills'][key]]
+                dl_obj = section.get('difficulty_level', {}).get(key)
+                if not dl_obj or not dl_obj.get('name'):
+                    _add_diagnostic(
+                        section, "ERROR", key,
+                        "No difficulty_level for this key in process_concepts — see add_program_data diagnostics. "
+                        "Skipping concept processing for this key."
+                    )
+                    continue
+                difficulty_level = dl_obj['name']
+                difficulty_level_uri = dl_obj.get('uri', '')
+
+                raw_skills = section.get('skills', {}).get(key) or []
+                skills = [s.get('name') for s in raw_skills if s and s.get('name')]
+                if not skills:
+                    _add_diagnostic(
+                        section, "ERROR", key,
+                        "Skills list is empty for this key — every generated question is filtered "
+                        "out because its skillId must match a teaches_skills name. "
+                        "This produces 0 questions for this key. Fix teaches_skills in Studio."
+                    )
+
+                if key not in section.get('nodes', {}):
+                    _add_diagnostic(
+                        section, "ERROR", key,
+                        "No node loaded for this key in process_concepts — see add_node_data diagnostics. "
+                        "Skipping concept processing for this key."
+                    )
+                    continue
                 node = section['nodes'][key]
                 
                 print(f"\n=== PLACEMENT SKILLS VALIDATION ===")
@@ -914,10 +1164,12 @@ def process_concepts(section_content_definitions, number_questions_per_concept, 
                 print(f"Skills for question generation: {skills}")
 
                 futures = []
+                concept_count = 0
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     for module in node.get('modules', []):
                         for lesson in module.get('lessons', []):
                             for concept in lesson.get('concepts', []):
+                                concept_count += 1
                                 futures.append(
                                     executor.submit(
                                         process_concept,
@@ -927,20 +1179,58 @@ def process_concepts(section_content_definitions, number_questions_per_concept, 
                                         assessment_type
                                     )
                                 )
+
+                    if concept_count == 0:
+                        _add_diagnostic(
+                            section, "ERROR", key,
+                            f"Node (semantic_type={node.get('semantic_type')}) yielded 0 concepts — "
+                            "modules/lessons/concepts were all empty, so nothing was sent to the AI."
+                        )
+
+                    print(f"[process_concepts] placement key {key}: dispatched {concept_count} concept(s)")
+
+                    concept_results_returned = 0
+                    concept_results_with_questions = 0
+                    questions_from_ai = 0
+                    questions_skill_rejected = 0
+                    concept_exceptions = 0
+
                     for future in concurrent.futures.as_completed(futures):
                         try:
                             qcs = future.result()
+                            concept_results_returned += 1
+                            if qcs:
+                                concept_results_with_questions += 1
+                            questions_from_ai += len(qcs)
                             
                             # Log generated questions for placement
                             for qc in qcs:
                                 question_skill = qc.get('question', {}).get('skillId', '')
                                 print(f"Placement question generated with skillId: '{question_skill}' - Valid: {question_skill in skills}")
                                 if question_skill not in skills:
+                                    questions_skill_rejected += 1
                                     print(f"WARNING: Placement question skillId '{question_skill}' not in expected skills {skills}")
                             
                             section['questions_choices'].extend(qcs)
-                        except Exception:
+                        except Exception as e:
+                            concept_exceptions += 1
+                            print(f"[process_concepts] exception in placement concept future: {type(e).__name__}: {e}")
                             continue
+
+                    print(
+                        f"[process_concepts] placement key {key} summary: "
+                        f"{concept_results_returned}/{concept_count} concepts returned "
+                        f"({concept_exceptions} exceptions), {concept_results_with_questions} produced questions, "
+                        f"{questions_from_ai} questions kept (rejected-by-skill warnings: {questions_skill_rejected})."
+                    )
+
+                    if concept_count > 0 and questions_from_ai == 0:
+                        _add_diagnostic(
+                            section, "WARNING", key,
+                            f"AI returned 0 questions across {concept_count} concept(s) for key '{key}'. "
+                            "Concept content may have been empty or every question was rejected at "
+                            "process_concept's skillId filter — check the per-concept logs above."
+                        )
 
         # Deduplicate questions using the hash-based approach.
         unique_qcs = {}
@@ -950,6 +1240,11 @@ def process_concepts(section_content_definitions, number_questions_per_concept, 
                 unique_qcs[qc_id] = qc
 
         section['questions_choices'] = list(unique_qcs.values())
+
+        print(
+            f"[process_concepts] section '{section.get('title') or '<no-title>'}' "
+            f"final question count: {len(section['questions_choices'])}"
+        )
 
     return section_content_definitions
 
@@ -1873,27 +2168,54 @@ def generate_assessments(
     estimated_choices = total_questions * 4
     question_counts.append(("After Processing Concepts", total_questions, estimated_choices))
     
+    # Collect per-section diagnostics now so every return path can include them.
+    section_diagnostics = []
+    for i, section in enumerate(section_content_definitions):
+        section_diagnostics.append({
+            'section_index': i,
+            'title': section.get('title') or '<no-title>',
+            'content_keys': list(section.get('content_keys', [])),
+            'content_ids': list(section.get('content_ids', [])),
+            'nodes_loaded': sorted(list(section.get('nodes', {}).keys())),
+            'skills_per_key': {
+                k: [s.get('name') for s in (v or []) if s and s.get('name')]
+                for k, v in (section.get('skills') or {}).items()
+            },
+            'difficulty_per_key': {
+                k: ((v or {}).get('name') if v else None)
+                for k, v in (section.get('difficulty_level') or {}).items()
+            },
+            'questions_generated': len(section.get('questions_choices', [])),
+            'diagnostics': list(section.get('_diagnostics', [])),
+        })
+    debug_outputs['section_diagnostics'] = {
+        'output': f"Captured diagnostics for {len(section_diagnostics)} section(s)",
+        'type': 'list',
+        'section_diagnostics': section_diagnostics,
+    }
+
     # Add debugging for empty questions
     if total_questions == 0:
         print("\n" + "="*80)
         print("WARNING: No questions were generated during concept processing!")
         print("="*80)
-        print("Debugging information:")
-        for i, section in enumerate(section_content_definitions):
-            print(f"\nSection {i+1}:")
-            print(f"  Title: {section.get('title', 'N/A')}")
-            print(f"  Content keys: {section.get('content_keys', [])}")
-            print(f"  Nodes: {len(section.get('nodes', {}))}")
-            print(f"  Skills: {section.get('skills', {})}")
-            print(f"  Questions generated: {len(section.get('questions_choices', []))}")
-            
-            # Check if nodes were processed
-            if not section.get('nodes'):
-                print("  ERROR: No nodes found - check if program keys are valid")
-            elif not section.get('skills'):
-                print("  ERROR: No skills found - check program metadata")
+        print("Per-section diagnostics (use these to identify where the CD/ND key fell short):")
+        for sd in section_diagnostics:
+            print(f"\nSection {sd['section_index']+1}: '{sd['title']}'")
+            print(f"  Content keys:        {sd['content_keys']}")
+            print(f"  Content ids:         {sd['content_ids']}")
+            print(f"  Nodes loaded ({len(sd['nodes_loaded'])}): {sd['nodes_loaded']}")
+            print(f"  Skills per key:      {sd['skills_per_key']}")
+            print(f"  Difficulty per key:  {sd['difficulty_per_key']}")
+            print(f"  Questions generated: {sd['questions_generated']}")
+            diags = sd['diagnostics']
+            if not diags:
+                print("  (no diagnostics captured — questions may have been generated but later filtered "
+                      "downstream; check evaluate_questions / dedupe / content-specific filtering logs)")
             else:
-                print("  Nodes and skills present but no questions generated")
+                print(f"  Diagnostics ({len(diags)}):")
+                for d in diags:
+                    print(f"    - [{d['level']}] key={d['key']}: {d['message']}")
         print("="*80)
         
         # Continue with empty dataset to avoid crashes
@@ -1916,6 +2238,7 @@ def generate_assessments(
             'code_conversion_stats': {'converted_questions': 0, 'total_questions': 0},
             'tuning_stats': {'tuned_questions': 0, 'total_questions': 0},
             'missing_prerequisite_skills': missing_prerequisite_skills,
+            'section_diagnostics': section_diagnostics,
             'debug_outputs': debug_outputs
         }
         return questions_choices_df, progress_data
@@ -2105,6 +2428,21 @@ def generate_assessments(
     step += 1
     update_progress(step)
 
+    # Final summary log — if we ended up empty after downstream filtering, surface that
+    # explicitly so the user can see which step zeroed it out.
+    final_unique = questions_choices_df['question_content'].nunique() if len(questions_choices_df) else 0
+    final_rows = len(questions_choices_df)
+    print("\n" + "="*80)
+    print(f"FINAL PIPELINE SUMMARY: {final_unique} unique questions / {final_rows} choice rows")
+    print("Per-step question counts:")
+    for label, q_count, c_count in question_counts:
+        print(f"  - {label}: {q_count} unique questions, {c_count} choices")
+    if final_unique == 0:
+        print("WARNING: Pipeline finished with 0 questions. If questions existed at 'After Processing Concepts' "
+              "but not here, look for the step where the count dropped to 0 above (typical culprits: "
+              "evaluation filtering, content-specificity filtering, intelligent_question_selection).")
+    print("="*80 + "\n")
+
     # Return both the dataframe and the progress data
     progress_data = {
         'question_counts': question_counts,
@@ -2116,6 +2454,7 @@ def generate_assessments(
         'code_conversion_stats': code_conversion_stats,
         'tuning_stats': tuning_stats,
         'missing_prerequisite_skills': missing_prerequisite_skills,
+        'section_diagnostics': section_diagnostics,
         'debug_outputs': debug_outputs
     }
 

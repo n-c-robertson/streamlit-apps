@@ -348,6 +348,55 @@ def main():
         
     elif st.session_state.generated_questions_df is not None and st.session_state.generated_questions_df.empty:
         st.warning("No questions were generated. Please check your program keys and try again.")
+
+        # Surface per-section diagnostics so the user can see exactly where the pipeline fell short.
+        progress_data = st.session_state.get('progress_data', {}) or {}
+        section_diagnostics = progress_data.get('section_diagnostics', [])
+        if section_diagnostics:
+            st.markdown("### Why no questions were generated")
+            st.caption(
+                "These diagnostics are collected as each CD/ND key is processed through the pipeline. "
+                "ERROR entries are blocking; WARNING entries are the most likely root causes of 0 questions."
+            )
+            for sd in section_diagnostics:
+                title = sd.get('title') or '<no-title>'
+                header = f"Section {sd.get('section_index', 0) + 1}: {title} (keys: {', '.join(sd.get('content_keys', [])) or '—'})"
+                with st.expander(header, expanded=True):
+                    cols = st.columns(2)
+                    with cols[0]:
+                        st.write("**Content keys:**", sd.get('content_keys', []))
+                        st.write("**Content ids:**", sd.get('content_ids', []))
+                        st.write("**Nodes loaded:**", sd.get('nodes_loaded', []))
+                    with cols[1]:
+                        st.write("**Skills per key:**", sd.get('skills_per_key', {}))
+                        st.write("**Difficulty per key:**", sd.get('difficulty_per_key', {}))
+                        st.write("**Questions generated:**", sd.get('questions_generated', 0))
+
+                    diags = sd.get('diagnostics', [])
+                    if not diags:
+                        st.info(
+                            "No diagnostics were captured for this section. Questions may have been "
+                            "generated upstream but filtered out downstream by evaluation, dedupe, or "
+                            "content-specificity filtering. Check the terminal/server logs for the "
+                            "FINAL PIPELINE SUMMARY block to see where the count dropped to 0."
+                        )
+                    else:
+                        for d in diags:
+                            level = (d.get('level') or 'INFO').upper()
+                            msg = f"**[{level}]** `{d.get('key')}` — {d.get('message')}"
+                            if level == "ERROR":
+                                st.error(msg)
+                            elif level == "WARNING":
+                                st.warning(msg)
+                            else:
+                                st.info(msg)
+        else:
+            st.info(
+                "No per-section diagnostics were captured. Check the terminal/server logs for "
+                "[DIAGNOSTIC] lines and the FINAL PIPELINE SUMMARY block to see where the count "
+                "dropped to 0."
+            )
+
         # Clear the empty result from session state
         st.session_state.generated_questions_df = None
 
