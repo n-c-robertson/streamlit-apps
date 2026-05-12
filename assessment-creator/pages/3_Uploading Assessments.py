@@ -1125,6 +1125,184 @@ def upload_assessment_to_api(df, assessment_title):
         return None
 
 #========================================
+# DOWNLOAD HELPERS
+#========================================
+
+ASSESSMENT_DOWNLOAD_QUERY = """
+query DownloadAssessment($id: ID!) {
+  assessment(id: $id) {
+    id
+    title
+    sections {
+      id
+      title
+      questions {
+        id
+        content
+        category
+        status
+        sourceCategory
+        source {
+          uri
+          key
+        }
+        difficultyLevelId
+        skillId
+        choices {
+          id
+          content
+          isCorrect
+          orderIndex
+          status
+        }
+      }
+    }
+  }
+}
+"""
+
+def fetch_assessment_for_download(assessment_id):
+    """Fetch a complete assessment (sections, questions, choices) for export.
+
+    Returns the assessment dict from the GraphQL response, or None on error.
+    """
+    try:
+        payload = {
+            "query": ASSESSMENT_DOWNLOAD_QUERY,
+            "variables": {"id": str(assessment_id).strip()}
+        }
+        response = requests.post(
+            settings.ASSESSMENTS_API_URL,
+            headers=settings.production_headers(),
+            json=payload,
+            timeout=60,
+        )
+        if response.status_code != 200:
+            print(f"ERROR: Assessment fetch failed with status code {response.status_code}: {response.text}")
+            return None, f"HTTP {response.status_code}: {response.text}"
+
+        response_json = response.json()
+        if response_json.get("errors"):
+            print(f"ERROR: GraphQL errors fetching assessment: {response_json['errors']}")
+            return None, f"GraphQL errors: {response_json['errors']}"
+
+        assessment = (response_json.get("data") or {}).get("assessment")
+        if not assessment:
+            return None, "Assessment not found."
+
+        return assessment, None
+    except Exception as e:
+        print(f"CRITICAL ERROR in fetch_assessment_for_download: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        return None, str(e)
+
+
+def _normalize_category_to_string(category):
+    """Convert a category value (string or int enum) to the uploader's expected string."""
+    if isinstance(category, str):
+        return category
+    # Integer enum mapping mirrors create_question's mapping: 0 -> MULTIPLE_CHOICE, 3 -> SINGLE_CHOICE
+    if category == 0:
+        return "MULTIPLE_CHOICE"
+    if category == 3:
+        return "SINGLE_CHOICE"
+    return category
+
+
+def convert_assessment_to_csv_dataframe(assessment):
+    """Convert a fetched assessment dict into a DataFrame in the uploader's CSV format.
+
+    Builds lookups (id -> externalId/title) for skills and difficulty levels so the
+    output mirrors what the Generating Assessments tab produces. Returns a DataFrame
+    with one row per (question, choice).
+    """
+    # Build lookup maps from the same API used by the uploader.
+    difficulty_levels = fetch_difficulty_levels()
+    skills = fetch_skills()
+
+    difficulty_id_to_external = {
+        dl["id"]: dl.get("externalId", "") for dl in difficulty_levels if dl.get("id")
+    }
+    skill_id_to_external = {
+        s["id"]: s.get("externalId", "") for s in skills if s.get("id")
+    }
+    skill_id_to_title = {
+        s["id"]: s.get("title", "") for s in skills if s.get("id")
+    }
+
+    rows = []
+    sections = assessment.get("sections") or []
+    for section in sections:
+        section_title = section.get("title") or ""
+        questions = section.get("questions") or []
+        for question in questions:
+            difficulty_id = question.get("difficultyLevelId") or ""
+            skill_id = question.get("skillId") or ""
+
+            source_obj = question.get("source") or {}
+            # The API stores source.uri and source.key (which is the original partKey).
+            uri = source_obj.get("uri", "") if isinstance(source_obj, dict) else ""
+            part_key = source_obj.get("key", "") if isinstance(source_obj, dict) else ""
+
+            source_dict = {
+                "uri": uri,
+                "partKey": part_key,
+            }
+
+            choices = question.get("choices") or []
+            # Order choices by orderIndex when available for deterministic output.
+            try:
+                choices = sorted(
+                    choices,
+                    key=lambda c: (c.get("orderIndex") is None, c.get("orderIndex"))
+                )
+            except Exception:
+                pass
+
+            base_row = {
+                "sectionId": section_title,
+                "difficultyLevelId": difficulty_id,
+                "difficultyLevelUri": difficulty_id_to_external.get(difficulty_id, ""),
+                "skillId": skill_id_to_title.get(skill_id, ""),
+                "skillUri": skill_id_to_external.get(skill_id, ""),
+                "category": _normalize_category_to_string(question.get("category")),
+                "question_status": question.get("status"),
+                "question_content": question.get("content"),
+                "sourceCategory": question.get("sourceCategory") or "UDACITY",
+                "source": source_dict,
+            }
+
+            if not choices:
+                row = dict(base_row)
+                row.update({
+                    "choice_status": None,
+                    "choice_content": None,
+                    "choice_isCorrect": None,
+                    "choice_orderIndex": None,
+                })
+                rows.append(row)
+                continue
+
+            for choice in choices:
+                row = dict(base_row)
+                row.update({
+                    "choice_status": choice.get("status"),
+                    "choice_content": choice.get("content"),
+                    "choice_isCorrect": choice.get("isCorrect"),
+                    "choice_orderIndex": choice.get("orderIndex"),
+                })
+                rows.append(row)
+
+    columns = [
+        "sectionId", "difficultyLevelId", "difficultyLevelUri", "skillId", "skillUri",
+        "category", "question_status", "question_content", "sourceCategory", "source",
+        "choice_status", "choice_content", "choice_isCorrect", "choice_orderIndex",
+    ]
+    df = pd.DataFrame(rows, columns=columns)
+    return df
+
+
+#========================================
 # UI
 #========================================
 
@@ -1200,6 +1378,94 @@ def main():
 
                     else:
                         st.error("Failed to create assessment. Please check the console for errors.")
-    
+
+    # ------------------------------------------------------------------
+    # Download an existing assessment as CSV
+    # ------------------------------------------------------------------
+    st.markdown("---")
+    st.markdown("### Download Existing Assessment")
+    st.markdown(
+        "Enter an `assessment_id` to download its data as a CSV in the same "
+        "format the uploader expects (one row per choice)."
+    )
+
+    if 'download_df' not in st.session_state:
+        st.session_state.download_df = None
+    if 'download_assessment_title' not in st.session_state:
+        st.session_state.download_assessment_title = ""
+
+    with st.form('download_assessment_data'):
+        download_assessment_id = st.text_input(
+            'Assessment ID',
+            placeholder='e.g. 1a2b3c4d-...-...',
+            help="The UUID of the assessment you want to download.",
+        )
+
+        download_password = st.text_input(
+            "Staff Password",
+            type="password",
+            key="download_password",
+            help="Enter the required staff password",
+        )
+
+        download_submitted = st.form_submit_button(
+            "Fetch Assessment Data",
+            use_container_width=True,
+        )
+
+        if download_submitted:
+            if download_password != settings.PASSWORD:
+                st.error("❌ Incorrect password. Please try again.")
+            elif not download_assessment_id.strip():
+                st.error("Please enter an assessment ID.")
+            else:
+                with st.spinner("Fetching assessment data..."):
+                    assessment, error = fetch_assessment_for_download(download_assessment_id.strip())
+
+                if error or not assessment:
+                    st.error(f"Failed to fetch assessment: {error or 'unknown error'}")
+                    st.session_state.download_df = None
+                    st.session_state.download_assessment_title = ""
+                else:
+                    with st.spinner("Building CSV..."):
+                        try:
+                            df = convert_assessment_to_csv_dataframe(assessment)
+                        except Exception as e:
+                            print(f"ERROR building CSV: {type(e).__name__}: {e}")
+                            traceback.print_exc()
+                            st.error(f"Error building CSV: {e}")
+                            df = None
+
+                    if df is None:
+                        st.session_state.download_df = None
+                        st.session_state.download_assessment_title = ""
+                    elif df.empty:
+                        st.warning("Assessment fetched, but it contains no questions to export.")
+                        st.session_state.download_df = df
+                        st.session_state.download_assessment_title = assessment.get("title", "") or ""
+                    else:
+                        st.session_state.download_df = df
+                        st.session_state.download_assessment_title = assessment.get("title", "") or ""
+                        st.success(
+                            f"Loaded assessment '{st.session_state.download_assessment_title}': "
+                            f"{df['question_content'].nunique()} questions, {len(df)} rows."
+                        )
+
+    if st.session_state.download_df is not None and not st.session_state.download_df.empty:
+        title_slug = generate_slug(st.session_state.download_assessment_title) or "assessment"
+        file_name = f"{title_slug}.csv"
+        csv_bytes = st.session_state.download_df.to_csv(index=False).encode("utf-8")
+
+        st.download_button(
+            label=f"Download {file_name}",
+            data=csv_bytes,
+            file_name=file_name,
+            mime="text/csv",
+            use_container_width=True,
+        )
+
+        with st.expander("Preview assessment data"):
+            st.dataframe(st.session_state.download_df, use_container_width=True)
+
 if __name__ == "__main__":
     main()
