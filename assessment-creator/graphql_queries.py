@@ -83,31 +83,40 @@ def query_component(key, locale="en-us"):
         return None
 
 
-def query_nanodegree_parts(node_id):
-    """Fetch only the parts list for a Nanodegree node.
+def query_nd_parts_by_key(nd_key, locale="en-us"):
+    """Crosswalk an `nd*` key to its part `cd*` keys in a single round-trip.
 
-    Used to crosswalk an `nd*` key down to its part `cd*` keys so the rest of
-    the assessment-generation pipeline can treat each part like a normal
-    user-submitted cd key.
+    Routes through component(key:).latest_release.root_node so we stay on the
+    latest RELEASED version of the Nanodegree (matching the cd flow), rather
+    than hitting node(key:) which would resolve to the latest BRANCH and could
+    pick up an unreleased draft.
+
+    Returns the root_node dict (with title + parts[]) or None on failure.
+    The caller is responsible for asserting semantic_type == 'Nanodegree' and
+    extracting parts[].key.
     """
     payload = {
         "query": """
-        query AssessmentsAPI_NDPartsQuery($id: Int!) {
-          node(id: $id) {
-            ... on Nanodegree {
-              key
-              title
-              semantic_type
-              parts {
-                key
-                title
-                semantic_type
+        query AssessmentsAPI_NDPartsByKeyQuery($key: String!, $locale: String!) {
+          component(key: $key, locale: $locale) {
+            latest_release {
+              root_node {
+                ... on Nanodegree {
+                  key
+                  title
+                  semantic_type
+                  parts {
+                    key
+                    title
+                    semantic_type
+                  }
+                }
               }
             }
           }
         }
         """,
-        "variables": {"id": node_id}
+        "variables": {"key": nd_key, "locale": locale}
     }
 
     try:
@@ -117,10 +126,13 @@ def query_nanodegree_parts(node_id):
             json=payload
         )
         response.raise_for_status()
-        return response.json().get('data', {}).get('node')
+        data = response.json().get('data') or {}
+        component = data.get('component') or {}
+        latest_release = component.get('latest_release') or {}
+        return latest_release.get('root_node')
 
     except Exception as e:
-        print(f"\n\nERROR querying nanodegree parts for node {node_id}: {e}")
+        print(f"\n\nERROR querying nanodegree parts for key {nd_key}: {e}")
         return None
 
 

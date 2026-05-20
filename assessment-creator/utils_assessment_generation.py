@@ -76,34 +76,35 @@ def is_nd_key(key):
 def _resolve_nd_to_part_keys(nd_key):
     """Crosswalk an nd* key to its part cd* keys.
 
-    Returns a tuple of (nd_title, [part_cd_keys]). Returns (None, []) when the
-    crosswalk fails for any reason (missing component, missing root node,
+    Single round-trip: hits component(key:).latest_release.root_node with a
+    Nanodegree inline fragment, so we stay on the latest RELEASE (same as the
+    cd flow) without needing a separate root_node_id lookup.
+
+    Returns (nd_title, [part_cd_keys]). Returns (None, []) when the crosswalk
+    fails for any reason (no component, no latest release, root_node missing,
     root not a Nanodegree, no parts). The caller is expected to surface the
     failure as a section-level diagnostic.
     """
-    release = graphql_queries.query_component(nd_key)
-    if not release:
-        print(f"[_resolve_nd_to_part_keys] {nd_key}: query_component returned no latest_release")
-        return None, []
-
-    root_id = release.get('root_node_id') or release.get('root_node', {}).get('id')
-    if root_id is None:
-        print(f"[_resolve_nd_to_part_keys] {nd_key}: latest_release has no root_node_id")
-        return None, []
-
-    nd_node = graphql_queries.query_nanodegree_parts(root_id)
+    nd_node = graphql_queries.query_nd_parts_by_key(nd_key)
     if not nd_node:
-        print(f"[_resolve_nd_to_part_keys] {nd_key}: query_nanodegree_parts returned no node for root_id={root_id}")
+        print(
+            f"[_resolve_nd_to_part_keys] {nd_key}: no root_node returned "
+            "(component, latest_release, or root_node missing)"
+        )
         return None, []
 
     if nd_node.get('semantic_type') != 'Nanodegree':
+        # The inline fragment only matches Nanodegree, so a non-Nanodegree
+        # root_node comes back without the parts selection populated. Treat
+        # this as a failed crosswalk so the caller emits a diagnostic instead
+        # of silently producing an empty section.
         print(
             f"[_resolve_nd_to_part_keys] {nd_key}: root node semantic_type="
             f"{nd_node.get('semantic_type')!r}, not 'Nanodegree'"
         )
         return None, []
 
-    nd_title = nd_node.get('title') or release.get('root_node', {}).get('title', '')
+    nd_title = nd_node.get('title') or ''
     part_keys = [p.get('key') for p in (nd_node.get('parts') or []) if p and p.get('key')]
 
     if not part_keys:
