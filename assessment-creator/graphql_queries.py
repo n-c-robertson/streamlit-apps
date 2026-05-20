@@ -83,40 +83,36 @@ def query_component(key, locale="en-us"):
         return None
 
 
-def query_nd_parts_by_key(nd_key, locale="en-us"):
+def query_nd_parts_by_key(nd_key):
     """Crosswalk an `nd*` key to its part `cd*` keys in a single round-trip.
 
-    Routes through component(key:).latest_release.root_node so we stay on the
-    latest RELEASED version of the Nanodegree (matching the cd flow), rather
-    than hitting node(key:) which would resolve to the latest BRANCH and could
-    pick up an unreleased draft.
+    Uses the dedicated `nanodegree(key:)` root resolver rather than going
+    through component(key, locale:). The component-based path requires an
+    exact locale match and silently returns null for NDs whose only release
+    is in a non-en-us locale (e.g. enterprise variants like
+    `nd029-ent-vfgermany`). `nanodegree(key:)` resolves by key alone and
+    picks the latest available version regardless of locale.
 
-    Returns the root_node dict (with title + parts[]) or None on failure.
+    Returns the Nanodegree dict (with title + parts[]) or None on failure.
     The caller is responsible for asserting semantic_type == 'Nanodegree' and
     extracting parts[].key.
     """
     payload = {
         "query": """
-        query AssessmentsAPI_NDPartsByKeyQuery($key: String!, $locale: String!) {
-          component(key: $key, locale: $locale) {
-            latest_release {
-              root_node {
-                ... on Nanodegree {
-                  key
-                  title
-                  semantic_type
-                  parts {
-                    key
-                    title
-                    semantic_type
-                  }
-                }
-              }
+        query AssessmentsAPI_NDPartsByKeyQuery($key: String!) {
+          nanodegree(key: $key) {
+            key
+            title
+            semantic_type
+            parts {
+              key
+              title
+              semantic_type
             }
           }
         }
         """,
-        "variables": {"key": nd_key, "locale": locale}
+        "variables": {"key": nd_key}
     }
 
     try:
@@ -127,9 +123,7 @@ def query_nd_parts_by_key(nd_key, locale="en-us"):
         )
         response.raise_for_status()
         data = response.json().get('data') or {}
-        component = data.get('component') or {}
-        latest_release = component.get('latest_release') or {}
-        return latest_release.get('root_node')
+        return data.get('nanodegree')
 
     except Exception as e:
         print(f"\n\nERROR querying nanodegree parts for key {nd_key}: {e}")

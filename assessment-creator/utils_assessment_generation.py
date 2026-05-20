@@ -76,20 +76,21 @@ def is_nd_key(key):
 def _resolve_nd_to_part_keys(nd_key):
     """Crosswalk an nd* key to its part cd* keys.
 
-    Single round-trip: hits component(key:).latest_release.root_node with a
-    Nanodegree inline fragment, so we stay on the latest RELEASE (same as the
-    cd flow) without needing a separate root_node_id lookup.
+    Single round-trip: hits the `nanodegree(key:)` root resolver, which
+    resolves by key alone and works for non-en-us NDs (e.g. enterprise
+    variants like `nd029-ent-vfgermany`) where component(key, locale:)
+    would silently return null.
 
     Returns (nd_title, [part_cd_keys]). Returns (None, []) when the crosswalk
-    fails for any reason (no component, no latest release, root_node missing,
-    root not a Nanodegree, no parts). The caller is expected to surface the
-    failure as a section-level diagnostic.
+    fails for any reason (key doesn't resolve to a Nanodegree, no parts).
+    The caller is expected to surface the failure as a section-level
+    diagnostic.
     """
     nd_node = graphql_queries.query_nd_parts_by_key(nd_key)
     if not nd_node:
         print(
-            f"[_resolve_nd_to_part_keys] {nd_key}: no root_node returned "
-            "(component, latest_release, or root_node missing)"
+            f"[_resolve_nd_to_part_keys] {nd_key}: nanodegree(key:) returned "
+            "null (key may not exist or not be a Nanodegree)"
         )
         return None, []
 
