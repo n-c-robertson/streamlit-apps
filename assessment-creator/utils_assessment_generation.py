@@ -64,20 +64,103 @@ def format_exception_details(e):
 """
     return details
 
+ND_KEY_PATTERN = re.compile(r'^nd[\W_]*\d', re.IGNORECASE)
+CD_KEY_PATTERN = re.compile(r'^cd[\W_]*\d', re.IGNORECASE)
+
+
+def is_nd_key(key):
+    """Return True if the key looks like a Nanodegree key (e.g. 'nd1827', 'ND-101')."""
+    return bool(ND_KEY_PATTERN.match((key or '').strip()))
+
+
+def _resolve_nd_to_part_keys(nd_key):
+    """Crosswalk an nd* key to its part cd* keys.
+
+    Returns a tuple of (nd_title, [part_cd_keys]). Returns (None, []) when the
+    crosswalk fails for any reason (missing component, missing root node,
+    root not a Nanodegree, no parts). The caller is expected to surface the
+    failure as a section-level diagnostic.
+    """
+    release = graphql_queries.query_component(nd_key)
+    if not release:
+        print(f"[_resolve_nd_to_part_keys] {nd_key}: query_component returned no latest_release")
+        return None, []
+
+    root_id = release.get('root_node_id') or release.get('root_node', {}).get('id')
+    if root_id is None:
+        print(f"[_resolve_nd_to_part_keys] {nd_key}: latest_release has no root_node_id")
+        return None, []
+
+    nd_node = graphql_queries.query_nanodegree_parts(root_id)
+    if not nd_node:
+        print(f"[_resolve_nd_to_part_keys] {nd_key}: query_nanodegree_parts returned no node for root_id={root_id}")
+        return None, []
+
+    if nd_node.get('semantic_type') != 'Nanodegree':
+        print(
+            f"[_resolve_nd_to_part_keys] {nd_key}: root node semantic_type="
+            f"{nd_node.get('semantic_type')!r}, not 'Nanodegree'"
+        )
+        return None, []
+
+    nd_title = nd_node.get('title') or release.get('root_node', {}).get('title', '')
+    part_keys = [p.get('key') for p in (nd_node.get('parts') or []) if p and p.get('key')]
+
+    if not part_keys:
+        print(f"[_resolve_nd_to_part_keys] {nd_key}: Nanodegree has 0 parts with keys")
+        return nd_title, []
+
+    print(f"[_resolve_nd_to_part_keys] {nd_key} -> {len(part_keys)} part(s): {part_keys}")
+    return nd_title, part_keys
+
+
 def prep_program_keys(PROGRAM_KEYS):
+    """Build section_content_definitions from a comma-separated program key list.
 
-    # 1. Split into lines and filter out any blank lines:
-    keys = PROGRAM_KEYS.replace(' ', '').split(',')
+    Each cd* key becomes a single-key section (existing behavior). Each nd* key
+    is crosswalked to its part cd* keys and produces ONE section containing all
+    of those part keys, so the ND ultimately yields a single assessment driven
+    by part-level metadata from the existing cd query flow.
+    """
+    keys = [k for k in PROGRAM_KEYS.replace(' ', '').split(',') if k]
 
-    # 2. Build the desired structure with empty titles:
-    section_content_definitions = [
-        {
-        'title': '',
-        'content_keys': [key],
-        'content_ids': []
-        }
-        for key in keys
-    ]
+    section_content_definitions = []
+    for key in keys:
+        if is_nd_key(key):
+            nd_title, part_keys = _resolve_nd_to_part_keys(key)
+            if not part_keys:
+                # Surface the failure as a section-level diagnostic so the
+                # "Why no questions were generated" panel shows what happened.
+                section_content_definitions.append({
+                    'title': nd_title or key,
+                    'content_keys': [],
+                    'content_ids': [],
+                    'source_nd_key': key,
+                    '_diagnostics': [{
+                        'level': 'ERROR',
+                        'key': key,
+                        'message': (
+                            "Could not crosswalk ND key to part cd keys "
+                            "(component, root node, or parts list missing, or "
+                            "root node was not a Nanodegree). Verify the ND is "
+                            "published and has parts in Studio."
+                        ),
+                    }],
+                })
+                continue
+
+            section_content_definitions.append({
+                'title': nd_title or key,
+                'content_keys': part_keys,
+                'content_ids': [],
+                'source_nd_key': key,
+            })
+        else:
+            section_content_definitions.append({
+                'title': '',
+                'content_keys': [key],
+                'content_ids': []
+            })
 
     return section_content_definitions
 

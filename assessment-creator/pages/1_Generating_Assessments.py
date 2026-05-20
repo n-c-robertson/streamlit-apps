@@ -26,10 +26,16 @@ def main():
     with st.form('Generate Assessments'):
         st.markdown('#### Required Parameters')
         PROGRAM_KEYS = st.text_input(
-            'Program Keys (comma separated)', 
-            value='cd13303,cd13318,cd13267,cd1827 (use CD keys, not ND keys)', 
-            placeholder='Enter program keys (comma separated). Use CD keys, not ND keys.',
-            help="Enter the program keys for the content you want to generate questions for (cd101, cd102, etc.)"
+            'Program Keys (comma separated)',
+            value='cd13303,cd13318,cd13267,cd1827,nd1827',
+            placeholder='Enter program keys (comma separated). CD and ND keys are both supported.',
+            help=(
+                "Enter program keys for the content you want to generate questions for. "
+                "Mix CD and ND keys freely (e.g. `cd13303, nd1827`). "
+                "Each CD key produces its own assessment. Each ND key is automatically "
+                "expanded into its parts and produces a single assessment, with skills "
+                "and difficulty sourced from each part's component metadata."
+            )
         )
         
         with st.expander("Advanced Settings"):

@@ -83,6 +83,47 @@ def query_component(key, locale="en-us"):
         return None
 
 
+def query_nanodegree_parts(node_id):
+    """Fetch only the parts list for a Nanodegree node.
+
+    Used to crosswalk an `nd*` key down to its part `cd*` keys so the rest of
+    the assessment-generation pipeline can treat each part like a normal
+    user-submitted cd key.
+    """
+    payload = {
+        "query": """
+        query AssessmentsAPI_NDPartsQuery($id: Int!) {
+          node(id: $id) {
+            ... on Nanodegree {
+              key
+              title
+              semantic_type
+              parts {
+                key
+                title
+                semantic_type
+              }
+            }
+          }
+        }
+        """,
+        "variables": {"id": node_id}
+    }
+
+    try:
+        response = requests.post(
+            settings.CLASSROOM_CONTENT_API_URL,
+            headers=settings.production_headers(),
+            json=payload
+        )
+        response.raise_for_status()
+        return response.json().get('data', {}).get('node')
+
+    except Exception as e:
+        print(f"\n\nERROR querying nanodegree parts for node {node_id}: {e}")
+        return None
+
+
 def query_node(node_id):
     payload = {
         "query": """
