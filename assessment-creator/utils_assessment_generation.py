@@ -128,6 +128,11 @@ def prep_program_keys(PROGRAM_KEYS):
     """
     keys = [k for k in PROGRAM_KEYS.replace(' ', '').split(',') if k]
 
+    print(f"\n[prep_program_keys] Routing decision for {len(keys)} key(s):")
+    for key in keys:
+        branch = 'ND path (query_nd_full)' if is_nd_key(key) else 'cd path (query_component)'
+        print(f"  - {key!r:30s} -> {branch}")
+
     section_content_definitions = []
     for key in keys:
         if is_nd_key(key):

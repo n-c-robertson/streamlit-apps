@@ -2,8 +2,40 @@
 #IMPORT PACKAGES
 #========================================
 
+import os
+import subprocess
+
 import streamlit as st
 import utils_assessment_generation
+
+
+#========================================
+# BUILD MARKER
+#========================================
+# Visible breadcrumb so we can confirm at a glance which commit the running
+# Streamlit Cloud build is on. If git metadata is unavailable (e.g. when the
+# Streamlit Cloud image strips .git), falls back to "unknown".
+
+def _resolve_build_sha():
+    env_sha = os.environ.get('STREAMLIT_BUILD_SHA') or os.environ.get('GIT_SHA')
+    if env_sha:
+        return env_sha[:10]
+    try:
+        sha = subprocess.check_output(
+            ['git', 'rev-parse', '--short=10', 'HEAD'],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+        ).decode().strip()
+        if sha:
+            return sha
+    except Exception:
+        pass
+    return 'unknown'
+
+
+BUILD_SHA = _resolve_build_sha()
+
 
 #========================================
 #UI
@@ -11,6 +43,7 @@ import utils_assessment_generation
 
 def main():
     st.title("Generating Assessments")
+    st.caption(f"Build: `{BUILD_SHA}`")
     st.markdown("Create AI-generated assessment questions for one or more Udacity programs.")
     
     # Initialize session state for storing results
