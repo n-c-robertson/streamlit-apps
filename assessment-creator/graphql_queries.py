@@ -83,36 +83,144 @@ def query_component(key, locale="en-us"):
         return None
 
 
-def query_nd_parts_by_key(nd_key):
-    """Crosswalk an `nd*` key to its part `cd*` keys in a single round-trip.
+def query_nd_full(nd_key, locale="en-us"):
+    """Fetch an ND's full part data (metadata + content tree) in a single round-trip.
 
-    Uses the dedicated `nanodegree(key:)` root resolver rather than going
-    through component(key, locale:). The component-based path requires an
-    exact locale match and silently returns null for NDs whose only release
-    is in a non-en-us locale (e.g. enterprise variants like
-    `nd029-ent-vfgermany`). `nanodegree(key:)` resolves by key alone and
-    picks the latest available version regardless of locale.
+    Replaces the previous ND crosswalk (which only returned `parts[].key` and
+    then required an N+1 fan-out of `query_component` + `query_node` calls per
+    part) with a single GraphQL request that traverses
+    `parts -> branch -> component -> metadata` and `parts -> modules -> lessons
+    -> concepts -> atoms` in one shot.
 
-    Returns the Nanodegree dict (with title + parts[]) or None on failure.
-    The caller is responsible for asserting semantic_type == 'Nanodegree' and
-    extracting parts[].key.
+    Why `branch.component.metadata` and not the Part node directly: in the
+    classroom-content schema, `Part.metadata` is `[MetadataTag]` (software /
+    hardware / third_party_tool tags). The skills-and-difficulty metadata that
+    assessment generation needs (`difficulty_level`, `teaches_skills`,
+    `prerequisite_skills`) lives on `Component.metadata: ComponentMetadata`,
+    which is reachable from a Part node via `branch.component.metadata`.
+
+    Locale: the underlying `nanodegree(key:)` resolver defaults to `'en-us'`
+    when no locale is provided and does NOT fall back across locales. Pass an
+    explicit `locale` for non-en-us NDs (e.g. `'de-de'` for vfgermany variants).
+
+    Returns the Nanodegree dict (with `title`, `parts[]` containing inline
+    `metadata`, `id`, `modules`, etc.) or None on failure. The caller is
+    responsible for asserting semantic_type == 'Nanodegree' and iterating
+    parts[].
     """
     payload = {
         "query": """
-        query AssessmentsAPI_NDPartsByKeyQuery($key: String!) {
-          nanodegree(key: $key) {
+        query AssessmentsAPI_NDFullQuery($key: String!, $locale: String) {
+          nanodegree(key: $key, locale: $locale) {
+            id
             key
+            locale
+            version
             title
             semantic_type
             parts {
+              id
               key
+              locale
+              version
               title
               semantic_type
+              branch {
+                component {
+                  metadata {
+                    difficulty_level { name uri }
+                    teaches_skills { name uri }
+                    prerequisite_skills { name uri }
+                  }
+                }
+              }
+              modules {
+                key
+                locale
+                version
+                semantic_type
+                title
+                lessons {
+                  key
+                  locale
+                  version
+                  semantic_type
+                  title
+                  concepts {
+                    key
+                    locale
+                    version
+                    semantic_type
+                    title
+                    progress_key
+                    atoms {
+                      ... on TextAtom {
+                        key
+                        locale
+                        version
+                        semantic_type
+                        title
+                        text
+                      }
+                      ... on VideoAtom {
+                        key
+                        locale
+                        version
+                        semantic_type
+                        title
+                        video {
+                          vtt_url
+                        }
+                      }
+                      ... on RadioQuizAtom {
+                        semantic_type
+                        question {
+                          prompt
+                          answers {
+                            is_correct
+                            text
+                          }
+                        }
+                      }
+                      ... on CheckboxQuizAtom {
+                        semantic_type
+                        question {
+                          prompt
+                          correct_feedback
+                          answers {
+                            is_correct
+                            text
+                          }
+                        }
+                      }
+                      ... on MatchingQuizAtom {
+                        semantic_type
+                        question {
+                          answers_label
+                          concepts_label
+                          concepts {
+                            text
+                            correct_answer {
+                              text
+                            }
+                          }
+                          complex_prompt {
+                            text
+                          }
+                          answers {
+                            text
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
             }
           }
         }
         """,
-        "variables": {"key": nd_key}
+        "variables": {"key": nd_key, "locale": locale}
     }
 
     try:
@@ -126,7 +234,7 @@ def query_nd_parts_by_key(nd_key):
         return data.get('nanodegree')
 
     except Exception as e:
-        print(f"\n\nERROR querying nanodegree parts for key {nd_key}: {e}")
+        print(f"\n\nERROR querying nanodegree full content for key {nd_key} (locale={locale}): {e}")
         return None
 
 

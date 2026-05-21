@@ -73,47 +73,49 @@ def is_nd_key(key):
     return bool(ND_KEY_PATTERN.match((key or '').strip()))
 
 
-def _resolve_nd_to_part_keys(nd_key):
-    """Crosswalk an nd* key to its part cd* keys.
+def _resolve_nd_to_parts(nd_key, locale="en-us"):
+    """Fetch an nd* key's full part data (metadata + content) in a single round-trip.
 
-    Single round-trip: hits the `nanodegree(key:)` root resolver, which
-    resolves by key alone and works for non-en-us NDs (e.g. enterprise
-    variants like `nd029-ent-vfgermany`) where component(key, locale:)
-    would silently return null.
+    Uses `query_nd_full`, which traverses `parts -> branch -> component ->
+    metadata` and `parts -> modules -> lessons -> concepts -> atoms` so the
+    caller gets per-part `difficulty_level` / `teaches_skills` /
+    `prerequisite_skills` AND the full content tree without any further
+    `query_component` or `query_node` fan-out.
 
-    Returns (nd_title, [part_cd_keys]). Returns (None, []) when the crosswalk
-    fails for any reason (key doesn't resolve to a Nanodegree, no parts).
-    The caller is expected to surface the failure as a section-level
-    diagnostic.
+    Returns (nd_title, [part_dicts]). Each part dict is the raw GraphQL Part
+    payload (it carries `id`, `key`, `locale`, `version`, `title`,
+    `branch.component.metadata`, and `modules[...]`). Returns (None, []) on
+    crosswalk failure (key doesn't resolve to a Nanodegree, no parts).
     """
-    nd_node = graphql_queries.query_nd_parts_by_key(nd_key)
+    nd_node = graphql_queries.query_nd_full(nd_key, locale=locale)
     if not nd_node:
         print(
-            f"[_resolve_nd_to_part_keys] {nd_key}: nanodegree(key:) returned "
-            "null (key may not exist or not be a Nanodegree)"
+            f"[_resolve_nd_to_parts] {nd_key}: nanodegree(key:, locale={locale!r}) "
+            "returned null (key may not exist or have no release in that locale)"
         )
         return None, []
 
     if nd_node.get('semantic_type') != 'Nanodegree':
-        # The inline fragment only matches Nanodegree, so a non-Nanodegree
-        # root_node comes back without the parts selection populated. Treat
-        # this as a failed crosswalk so the caller emits a diagnostic instead
-        # of silently producing an empty section.
+        # The Nanodegree-typed selection set only populates when the root node
+        # is actually a Nanodegree. Treat anything else as a failed crosswalk
+        # so the caller emits a section-level diagnostic instead of silently
+        # producing an empty section.
         print(
-            f"[_resolve_nd_to_part_keys] {nd_key}: root node semantic_type="
+            f"[_resolve_nd_to_parts] {nd_key}: root node semantic_type="
             f"{nd_node.get('semantic_type')!r}, not 'Nanodegree'"
         )
         return None, []
 
     nd_title = nd_node.get('title') or ''
-    part_keys = [p.get('key') for p in (nd_node.get('parts') or []) if p and p.get('key')]
+    parts = [p for p in (nd_node.get('parts') or []) if p and p.get('key')]
 
-    if not part_keys:
-        print(f"[_resolve_nd_to_part_keys] {nd_key}: Nanodegree has 0 parts with keys")
+    if not parts:
+        print(f"[_resolve_nd_to_parts] {nd_key}: Nanodegree has 0 parts with keys")
         return nd_title, []
 
-    print(f"[_resolve_nd_to_part_keys] {nd_key} -> {len(part_keys)} part(s): {part_keys}")
-    return nd_title, part_keys
+    part_keys_preview = [p.get('key') for p in parts]
+    print(f"[_resolve_nd_to_parts] {nd_key} -> {len(parts)} part(s): {part_keys_preview}")
+    return nd_title, parts
 
 
 def prep_program_keys(PROGRAM_KEYS):
@@ -129,8 +131,8 @@ def prep_program_keys(PROGRAM_KEYS):
     section_content_definitions = []
     for key in keys:
         if is_nd_key(key):
-            nd_title, part_keys = _resolve_nd_to_part_keys(key)
-            if not part_keys:
+            nd_title, parts = _resolve_nd_to_parts(key)
+            if not parts:
                 # Surface the failure as a section-level diagnostic so the
                 # "Why no questions were generated" panel shows what happened.
                 section_content_definitions.append({
@@ -151,11 +153,15 @@ def prep_program_keys(PROGRAM_KEYS):
                 })
                 continue
 
+            # `_prefetched_parts` lets add_program_data / add_node_data skip
+            # the per-part query_component + query_node fan-out (everything
+            # they need was already fetched by query_nd_full).
             section_content_definitions.append({
                 'title': nd_title or key,
-                'content_keys': part_keys,
+                'content_keys': [p.get('key') for p in parts],
                 'content_ids': [],
                 'source_nd_key': key,
+                '_prefetched_parts': parts,
             })
         else:
             section_content_definitions.append({
@@ -260,43 +266,71 @@ def add_program_data(section_content_definitions, assessment_type="placement"):
         section['readiness_lesson_ids'] = []  # New field for readiness lessons
         section.setdefault('_diagnostics', [])
 
+        # ND-sourced sections carry pre-fetched part payloads from query_nd_full
+        # (set in prep_program_keys). Use them to skip the per-part
+        # query_component round-trip entirely. cd-key sections have no
+        # _prefetched_parts and fall back to the original component lookup.
+        prefetched_parts = section.get('_prefetched_parts') or []
+        prefetched_by_key = {
+            p.get('key'): p for p in prefetched_parts if p and p.get('key')
+        }
+
         for key in section['content_keys']:
-            print(f"\n=== ADD_PROGRAM_DATA: Fetching component for key '{key}' ({assessment_type}) ===")
-            release = graphql_queries.query_component(key)
-            if not release:
-                _add_diagnostic(
-                    section, "ERROR", key,
-                    "query_component returned no 'latest_release' — the key may not exist, "
-                    "may be unpublished, or the classroom-content API call failed. "
-                    "Check the key spelling and confirm it has a published release."
-                )
-                continue
+            prefetched_part = prefetched_by_key.get(key)
 
-            # 1) root_node_id may not exist — fall back to root_node.id
-            root_id = release.get('root_node_id') \
-                or release.get('root_node', {}).get('id')
-            if root_id is None:
-                _add_diagnostic(
-                    section, "WARNING", key,
-                    "No root_node_id found on the latest_release; downstream node "
-                    "lookups will be skipped for this key."
+            if prefetched_part is not None:
+                # ND path: data already in hand from query_nd_full.
+                print(
+                    f"\n=== ADD_PROGRAM_DATA: Using prefetched ND part for key '{key}' "
+                    f"({assessment_type}) ==="
                 )
-            
-            # 2) extract the title once, from the root_node key
-            if not section['title']:
-                section['title'] = release.get('root_node', {}) \
-                                        .get('title', '')
-
-            # 3) pull metadata safely
-            comp = release.get('component')
-            meta = (comp or {}).get('metadata')
-            if not meta:
-                _add_diagnostic(
-                    section, "ERROR", key,
+                root_id = prefetched_part.get('id')
+                root_node_title = prefetched_part.get('title') or ''
+                comp = (prefetched_part.get('branch') or {}).get('component') or {}
+                meta = comp.get('metadata')
+                missing_meta_diagnostic = (
+                    "Prefetched part has no branch.component.metadata — cannot "
+                    "determine difficulty_level / teaches_skills / "
+                    "prerequisite_skills. Check that program metadata is "
+                    "populated in Studio."
+                )
+            else:
+                # cd-key direct path: original behavior.
+                print(
+                    f"\n=== ADD_PROGRAM_DATA: Fetching component for key '{key}' "
+                    f"({assessment_type}) ==="
+                )
+                release = graphql_queries.query_component(key)
+                if not release:
+                    _add_diagnostic(
+                        section, "ERROR", key,
+                        "query_component returned no 'latest_release' — the key may not exist, "
+                        "may be unpublished, or the classroom-content API call failed. "
+                        "Check the key spelling and confirm it has a published release."
+                    )
+                    continue
+                root_id = release.get('root_node_id') \
+                    or (release.get('root_node') or {}).get('id')
+                root_node_title = (release.get('root_node') or {}).get('title') or ''
+                meta = ((release.get('component') or {})).get('metadata')
+                missing_meta_diagnostic = (
                     "latest_release has no component.metadata — cannot determine "
                     "difficulty_level / teaches_skills / prerequisite_skills. "
                     "Check that program metadata is populated in Studio."
                 )
+
+            if root_id is None:
+                _add_diagnostic(
+                    section, "WARNING", key,
+                    "No root_node_id found for this key; downstream node "
+                    "lookups will be skipped for this key."
+                )
+
+            if not section['title']:
+                section['title'] = root_node_title
+
+            if not meta:
+                _add_diagnostic(section, "ERROR", key, missing_meta_diagnostic)
                 continue
 
             difficulty_level_obj = meta.get('difficulty_level')
@@ -425,24 +459,56 @@ def add_node_data(section_content_definitions, assessment_type="placement"):
                     )
                     continue
         else:
-            # For placement assessment, use original logic
-            # assume section['content_ids'] and section['content_keys'] line up one-to-one
-            if not section['content_ids']:
-                _add_diagnostic(
-                    section, "ERROR", section.get('title') or '<no-title>',
-                    f"No content_ids resolved from content_keys {section['content_keys']}. "
-                    "add_program_data was unable to find root node ids — see earlier "
-                    "diagnostics for the underlying cause."
-                )
-            if len(section['content_keys']) != len(section['content_ids']):
-                _add_diagnostic(
-                    section, "WARNING", section.get('title') or '<no-title>',
-                    f"content_keys ({len(section['content_keys'])}) and content_ids "
-                    f"({len(section['content_ids'])}) lengths differ; nodes will be paired "
-                    "positionally and any unmatched keys will be skipped silently. "
-                    f"keys={section['content_keys']} ids={section['content_ids']}"
-                )
-            for key, node_id in zip(section['content_keys'], section['content_ids']):
+            # ND-sourced sections carry pre-fetched part payloads from
+            # query_nd_full (set in prep_program_keys). The Part dicts already
+            # include the same modules > lessons > concepts > atoms tree that
+            # query_node(node_id) would return, so we can populate
+            # section['nodes'] directly and skip the per-part round-trip.
+            prefetched_parts = section.get('_prefetched_parts') or []
+            prefetched_by_key = {
+                p.get('key'): p for p in prefetched_parts if p and p.get('key')
+            }
+
+            # cd-key direct sections only: warn on misaligned content_ids /
+            # content_keys (ND sections drive node lookup from the prefetched
+            # part list, not from these positional arrays).
+            if not prefetched_by_key:
+                if not section['content_ids']:
+                    _add_diagnostic(
+                        section, "ERROR", section.get('title') or '<no-title>',
+                        f"No content_ids resolved from content_keys {section['content_keys']}. "
+                        "add_program_data was unable to find root node ids — see earlier "
+                        "diagnostics for the underlying cause."
+                    )
+                if len(section['content_keys']) != len(section['content_ids']):
+                    _add_diagnostic(
+                        section, "WARNING", section.get('title') or '<no-title>',
+                        f"content_keys ({len(section['content_keys'])}) and content_ids "
+                        f"({len(section['content_ids'])}) lengths differ; nodes will be paired "
+                        "positionally and any unmatched keys will be skipped silently. "
+                        f"keys={section['content_keys']} ids={section['content_ids']}"
+                    )
+
+            for key in section['content_keys']:
+                prefetched_part = prefetched_by_key.get(key)
+                if prefetched_part is not None:
+                    # ND path: Part payload already contains modules tree.
+                    section['nodes'][key] = prefetched_part
+                    continue
+
+                # cd-key direct path: original per-key query_node lookup.
+                node_id = None
+                try:
+                    idx = section['content_keys'].index(key)
+                    node_id = section['content_ids'][idx]
+                except (ValueError, IndexError):
+                    _add_diagnostic(
+                        section, "ERROR", key,
+                        "No content_id available for this cd-key (content_keys / "
+                        "content_ids misaligned); no content can be extracted."
+                    )
+                    continue
+
                 try:
                     node_data = graphql_queries.query_node(node_id)
                 except Exception as e:
