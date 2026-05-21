@@ -184,8 +184,8 @@ query DebugNDFull($key: String!, $locale: String) {
 }
 """
 
-COMPONENT_FOR_PART = """
-query DebugComponentForPart($key: String!, $locale: String!) {
+COMPONENT_FOR_KEY = """
+query DebugComponentForKey($key: String!, $locale: String!) {
   component(key: $key, locale: $locale) {
     id
     key
@@ -412,6 +412,49 @@ def main() -> None:
             "or the JWT can't see it."
         )
 
+    # ---- Step 1b --------------------------------------------------------
+    st.header(
+        "Step 1b - component(key:, locale:) on the INPUT key "
+        "(ND-level metadata probe)"
+    )
+    st.caption(
+        "Smoking-gun check: if this returns a Component with "
+        "latest_release.component.metadata populated, then the ND itself "
+        "carries the difficulty / skills metadata and we should use *this* "
+        "result for every section derived from the ND - NOT try to call "
+        "component(key: <part_uuid>) per part, which can never work because "
+        "Part.key is a node UUID, not a Component cd* key."
+    )
+    step1b = gql(jwt, COMPONENT_FOR_KEY, {"key": nd_key, "locale": locale})
+    render_result(
+        f"component(key:{nd_key!r}, locale:{locale!r})",
+        step1b,
+        COMPONENT_FOR_KEY,
+    )
+    comp_data = ((step1b.get("data") or {}).get("component")) or {}
+    nd_meta = (
+        ((comp_data.get("latest_release") or {}).get("component") or {})
+        .get("metadata")
+    )
+    if nd_meta:
+        st.success(
+            "ND-level metadata IS available on the input key's Component. "
+            "Fix path: stop per-part component() calls; use this once and "
+            "apply to all sections."
+        )
+    elif comp_data:
+        st.warning(
+            "Input key resolves to a Component, but latest_release."
+            "component.metadata is null. Metadata may live somewhere else "
+            "(e.g. Studio program metadata) for this program."
+        )
+    else:
+        st.warning(
+            "Input key did NOT resolve via component(key:, locale:). If "
+            "Step 1 found components in other locales, retry Step 1b with "
+            "one of those locales."
+        )
+
     # ---- Step 2 ---------------------------------------------------------
     st.header("Step 2 - nanodegree(key:, locale:) shallow")
     st.caption(
@@ -479,13 +522,13 @@ def main() -> None:
 
         s4a = gql(
             jwt,
-            COMPONENT_FOR_PART,
+            COMPONENT_FOR_KEY,
             {"key": part_key, "locale": part_locale},
         )
         render_result(
             f"component(key:{part_key!r}, locale:{part_locale!r})",
             s4a,
-            COMPONENT_FOR_PART,
+            COMPONENT_FOR_KEY,
         )
 
         if part_id is None:

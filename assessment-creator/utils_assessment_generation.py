@@ -74,18 +74,28 @@ def is_nd_key(key):
 
 
 def _resolve_nd_to_parts(nd_key, locale="en-us"):
-    """Fetch an nd* key's full part data (metadata + content) in a single round-trip.
+    """Fetch an nd* key's full part tree + ND-level metadata.
 
-    Uses `query_nd_full`, which traverses `parts -> branch -> component ->
-    metadata` and `parts -> modules -> lessons -> concepts -> atoms` so the
-    caller gets per-part `difficulty_level` / `teaches_skills` /
-    `prerequisite_skills` AND the full content tree without any further
-    `query_component` or `query_node` fan-out.
+    Two GraphQL calls:
 
-    Returns (nd_title, [part_dicts]). Each part dict is the raw GraphQL Part
-    payload (it carries `id`, `key`, `locale`, `version`, `title`,
-    `branch.component.metadata`, and `modules[...]`). Returns (None, []) on
-    crosswalk failure (key doesn't resolve to a Nanodegree, no parts).
+      1. `query_nd_full(nd_key, locale)` -> the Nanodegree node and its full
+         `parts -> modules -> lessons -> concepts -> atoms` tree. Part dicts
+         carry `id`, `key` (a NODE UUID, not a Component key), `locale`,
+         `version`, `title`, `semantic_type`, and `modules[...]`.
+
+      2. `query_component(nd_key, locale)` -> the ND's OWN Component release.
+         This is where `difficulty_level` / `teaches_skills` /
+         `prerequisite_skills` live for an ND. Per-part Component metadata
+         is NOT reachable from a Part node on this schema: `Part.branch` has
+         no field resolver, and `component(key: <part.key>)` always returns
+         null because `Part.key` is a node UUID (not a `cd*` Component key).
+         Confirmed empirically via the `gql-debug` tool.
+
+    Returns (nd_title, [part_dicts], nd_release_dict). `nd_release_dict` is
+    whatever `query_component(nd_key)` returned (a `latest_release` dict with
+    `component.metadata` populated) or None if the ND doesn't expose one.
+    Returns (None, [], None) on crosswalk failure (key doesn't resolve to a
+    Nanodegree, no parts).
     """
     nd_node = graphql_queries.query_nd_full(nd_key, locale=locale)
     if not nd_node:
@@ -93,7 +103,7 @@ def _resolve_nd_to_parts(nd_key, locale="en-us"):
             f"[_resolve_nd_to_parts] {nd_key}: nanodegree(key:, locale={locale!r}) "
             "returned null (key may not exist or have no release in that locale)"
         )
-        return None, []
+        return None, [], None
 
     if nd_node.get('semantic_type') != 'Nanodegree':
         # The Nanodegree-typed selection set only populates when the root node
@@ -104,18 +114,32 @@ def _resolve_nd_to_parts(nd_key, locale="en-us"):
             f"[_resolve_nd_to_parts] {nd_key}: root node semantic_type="
             f"{nd_node.get('semantic_type')!r}, not 'Nanodegree'"
         )
-        return None, []
+        return None, [], None
 
     nd_title = nd_node.get('title') or ''
     parts = [p for p in (nd_node.get('parts') or []) if p and p.get('key')]
 
+    # ND-level metadata. Done unconditionally (even if parts is empty) so a
+    # caller that surfaces "ND has 0 parts" can still attach whatever skills
+    # / difficulty Studio has set on the ND itself.
+    nd_release = graphql_queries.query_component(nd_key, locale=locale)
+    if not nd_release:
+        print(
+            f"[_resolve_nd_to_parts] {nd_key}: query_component(locale={locale!r}) "
+            "returned no latest_release for the ND key itself; ND-level "
+            "metadata will be unavailable for downstream sections."
+        )
+
     if not parts:
         print(f"[_resolve_nd_to_parts] {nd_key}: Nanodegree has 0 parts with keys")
-        return nd_title, []
+        return nd_title, [], nd_release
 
     part_keys_preview = [p.get('key') for p in parts]
-    print(f"[_resolve_nd_to_parts] {nd_key} -> {len(parts)} part(s): {part_keys_preview}")
-    return nd_title, parts
+    print(
+        f"[_resolve_nd_to_parts] {nd_key} -> {len(parts)} part(s): "
+        f"{part_keys_preview}; nd_release={'present' if nd_release else 'MISSING'}"
+    )
+    return nd_title, parts, nd_release
 
 
 def prep_program_keys(PROGRAM_KEYS):
@@ -136,7 +160,7 @@ def prep_program_keys(PROGRAM_KEYS):
     section_content_definitions = []
     for key in keys:
         if is_nd_key(key):
-            nd_title, parts = _resolve_nd_to_parts(key)
+            nd_title, parts, nd_release = _resolve_nd_to_parts(key)
             if not parts:
                 # Surface the failure as a section-level diagnostic so the
                 # "Why no questions were generated" panel shows what happened.
@@ -161,12 +185,20 @@ def prep_program_keys(PROGRAM_KEYS):
             # `_prefetched_parts` lets add_program_data / add_node_data skip
             # the per-part query_component + query_node fan-out (everything
             # they need was already fetched by query_nd_full).
+            #
+            # `_prefetched_nd_release` is the single component(key: nd_key,
+            # locale:) result that carries difficulty_level / teaches_skills
+            # / prerequisite_skills. add_program_data applies this same
+            # metadata to every part-derived section entry, because per-part
+            # component(key:) lookups can't work (Part.key is a node UUID,
+            # not a Component cd* key).
             section_content_definitions.append({
                 'title': nd_title or key,
                 'content_keys': [p.get('key') for p in parts],
                 'content_ids': [],
                 'source_nd_key': key,
                 '_prefetched_parts': parts,
+                '_prefetched_nd_release': nd_release,
             })
         else:
             section_content_definitions.append({
@@ -272,49 +304,60 @@ def add_program_data(section_content_definitions, assessment_type="placement"):
         section.setdefault('_diagnostics', [])
 
         # ND-sourced sections carry pre-fetched part payloads from query_nd_full
-        # (set in prep_program_keys). Use them to skip the per-part
-        # query_component round-trip entirely. cd-key sections have no
-        # _prefetched_parts and fall back to the original component lookup.
+        # AND a pre-fetched ND-level component release (set in
+        # prep_program_keys). Use both to skip per-part query_component +
+        # query_node round-trips entirely. cd-key sections have neither and
+        # fall back to the original component(key:) lookup below.
         prefetched_parts = section.get('_prefetched_parts') or []
         prefetched_by_key = {
             p.get('key'): p for p in prefetched_parts if p and p.get('key')
         }
+        nd_release = section.get('_prefetched_nd_release')
+        nd_source_key = section.get('source_nd_key')
 
         for key in section['content_keys']:
             prefetched_part = prefetched_by_key.get(key)
 
             if prefetched_part is not None:
-                # ND path: structure + content tree are already in hand from
-                # query_nd_full. Component metadata is NOT — there is no
-                # field resolver registered for Part.branch in
-                # classroom-content, so the branch.component.metadata path
-                # silently returns null. Fetch metadata via the proven
-                # `component(key:, locale:)` root resolver, using the part's
-                # own locale (so non-en-us NDs work correctly).
+                # ND path: structure + content tree come from query_nd_full,
+                # and difficulty_level / teaches_skills / prerequisite_skills
+                # come from the single query_component(nd_key, locale=...)
+                # call made in _resolve_nd_to_parts. We deliberately do NOT
+                # call component(key: <part.key>) here - Part.key is a node
+                # UUID, not a Component cd* key, so that call always returns
+                # null. Confirmed empirically via the gql-debug tool's
+                # Step 4. The trade-off: every part in an ND-sourced section
+                # gets the same ND-level metadata, instead of part-specific
+                # metadata. That's correct for most modern NDs (parts aren't
+                # standalone Components anymore) and matches what Studio
+                # exposes for the ND as a whole.
                 part_locale = prefetched_part.get('locale') or 'en-us'
                 print(
                     f"\n=== ADD_PROGRAM_DATA: Prefetched ND part for key '{key}' "
-                    f"({assessment_type}); fetching metadata via "
-                    f"query_component(locale={part_locale!r}) ==="
+                    f"(nd={nd_source_key!r}, locale={part_locale!r}, "
+                    f"{assessment_type}); applying ND-level metadata from "
+                    "prefetched component(nd_key, locale) ==="
                 )
                 root_id = prefetched_part.get('id')
                 root_node_title = prefetched_part.get('title') or ''
-                release = graphql_queries.query_component(key, locale=part_locale)
+                release = nd_release
                 if not release:
                     _add_diagnostic(
                         section, "ERROR", key,
-                        f"query_component(locale={part_locale!r}) returned no "
-                        "'latest_release' for this ND part — the part may not "
-                        "have a published release in that locale. Verify the "
-                        "ND is published and that the right locale is being used."
+                        f"ND-level component(key:{nd_source_key!r}, locale:...) "
+                        "returned no 'latest_release' - the ND itself may not "
+                        "have a published release in this locale, or its key "
+                        "is not a Component key in classroom-content. Verify "
+                        "the ND is published and that the right locale is "
+                        "being used."
                     )
                     continue
                 meta = ((release.get('component') or {})).get('metadata')
                 missing_meta_diagnostic = (
-                    f"latest_release (locale={part_locale!r}) has no "
-                    "component.metadata — cannot determine difficulty_level "
-                    "/ teaches_skills / prerequisite_skills. Check that "
-                    "program metadata is populated in Studio."
+                    f"ND-level latest_release (nd={nd_source_key!r}) has no "
+                    "component.metadata - cannot determine difficulty_level "
+                    "/ teaches_skills / prerequisite_skills. Add program "
+                    "metadata to the ND in Studio."
                 )
             else:
                 # cd-key direct path: original behavior.
