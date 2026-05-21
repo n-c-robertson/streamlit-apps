@@ -279,20 +279,37 @@ def add_program_data(section_content_definitions, assessment_type="placement"):
             prefetched_part = prefetched_by_key.get(key)
 
             if prefetched_part is not None:
-                # ND path: data already in hand from query_nd_full.
+                # ND path: structure + content tree are already in hand from
+                # query_nd_full. Component metadata is NOT — there is no
+                # field resolver registered for Part.branch in
+                # classroom-content, so the branch.component.metadata path
+                # silently returns null. Fetch metadata via the proven
+                # `component(key:, locale:)` root resolver, using the part's
+                # own locale (so non-en-us NDs work correctly).
+                part_locale = prefetched_part.get('locale') or 'en-us'
                 print(
-                    f"\n=== ADD_PROGRAM_DATA: Using prefetched ND part for key '{key}' "
-                    f"({assessment_type}) ==="
+                    f"\n=== ADD_PROGRAM_DATA: Prefetched ND part for key '{key}' "
+                    f"({assessment_type}); fetching metadata via "
+                    f"query_component(locale={part_locale!r}) ==="
                 )
                 root_id = prefetched_part.get('id')
                 root_node_title = prefetched_part.get('title') or ''
-                comp = (prefetched_part.get('branch') or {}).get('component') or {}
-                meta = comp.get('metadata')
+                release = graphql_queries.query_component(key, locale=part_locale)
+                if not release:
+                    _add_diagnostic(
+                        section, "ERROR", key,
+                        f"query_component(locale={part_locale!r}) returned no "
+                        "'latest_release' for this ND part — the part may not "
+                        "have a published release in that locale. Verify the "
+                        "ND is published and that the right locale is being used."
+                    )
+                    continue
+                meta = ((release.get('component') or {})).get('metadata')
                 missing_meta_diagnostic = (
-                    "Prefetched part has no branch.component.metadata — cannot "
-                    "determine difficulty_level / teaches_skills / "
-                    "prerequisite_skills. Check that program metadata is "
-                    "populated in Studio."
+                    f"latest_release (locale={part_locale!r}) has no "
+                    "component.metadata — cannot determine difficulty_level "
+                    "/ teaches_skills / prerequisite_skills. Check that "
+                    "program metadata is populated in Studio."
                 )
             else:
                 # cd-key direct path: original behavior.
