@@ -4,6 +4,7 @@
 
 import os
 import subprocess
+import sys
 
 import streamlit as st
 import utils_assessment_generation
@@ -12,9 +13,13 @@ import utils_assessment_generation
 #========================================
 # BUILD MARKER
 #========================================
-# Visible breadcrumb so we can confirm at a glance which commit the running
-# Streamlit Cloud build is on. If git metadata is unavailable (e.g. when the
-# Streamlit Cloud image strips .git), falls back to "unknown".
+# Hard-coded build tag that does NOT depend on .git being present at runtime
+# (Streamlit Cloud's container sometimes strips it). BUMP THIS STRING on every
+# commit that touches assessment-creator. The git SHA below is a "nice to
+# have" - the tag is the source of truth.
+
+BUILD_TAG = '2026-05-21-nd-metadata-fix-264fd09'
+
 
 def _resolve_build_sha():
     env_sha = os.environ.get('STREAMLIT_BUILD_SHA') or os.environ.get('GIT_SHA')
@@ -31,10 +36,48 @@ def _resolve_build_sha():
             return sha
     except Exception:
         pass
-    return 'unknown'
+    return 'unavailable'
 
 
 BUILD_SHA = _resolve_build_sha()
+
+
+# Loud module-load banner so the deployed Streamlit Cloud logs unambiguously
+# show which build is running (and confirm whether ND-metadata-fix code is
+# loaded). If you don't see this line in the cloud logs after pressing
+# Generate, the container hasn't picked up the new commit yet.
+print(
+    f"\n[BUILD] assessment-creator loaded: tag={BUILD_TAG}, sha={BUILD_SHA}",
+    file=sys.stderr,
+    flush=True,
+)
+
+
+# Best-effort check that the ND-metadata-fix code path is actually present.
+# Older revisions of utils_assessment_generation returned a 2-tuple from
+# _resolve_nd_to_parts; the fix makes it a 3-tuple. If the helper is missing
+# entirely OR has the old arity, we know this build is stale even if BUILD_TAG
+# claims otherwise (e.g. file was partially copied).
+def _detect_nd_fix_present():
+    helper = getattr(utils_assessment_generation, '_resolve_nd_to_parts', None)
+    if helper is None:
+        return False, '_resolve_nd_to_parts not found in utils module'
+    try:
+        import inspect
+        src = inspect.getsource(helper)
+    except Exception as e:
+        return False, f'inspect failed: {type(e).__name__}: {e}'
+    if '_prefetched_nd_release' in src or 'nd_release' in src:
+        return True, 'ok'
+    return False, '_resolve_nd_to_parts present but lacks ND-release fetch'
+
+
+ND_FIX_PRESENT, ND_FIX_DETAIL = _detect_nd_fix_present()
+print(
+    f"[BUILD] ND-metadata-fix present? {ND_FIX_PRESENT} ({ND_FIX_DETAIL})",
+    file=sys.stderr,
+    flush=True,
+)
 
 
 #========================================
@@ -43,7 +86,17 @@ BUILD_SHA = _resolve_build_sha()
 
 def main():
     st.title("Generating Assessments")
-    st.caption(f"Build: `{BUILD_SHA}`")
+    if ND_FIX_PRESENT:
+        st.success(
+            f"Build `{BUILD_TAG}` (git `{BUILD_SHA}`) - "
+            "ND-metadata-fix loaded."
+        )
+    else:
+        st.error(
+            f"Build `{BUILD_TAG}` (git `{BUILD_SHA}`) - "
+            f"ND-metadata-fix NOT loaded: {ND_FIX_DETAIL}. "
+            "Reboot the app from Streamlit Cloud (Manage app -> Reboot)."
+        )
     st.markdown("Create AI-generated assessment questions for one or more Udacity programs.")
     
     # Initialize session state for storing results
