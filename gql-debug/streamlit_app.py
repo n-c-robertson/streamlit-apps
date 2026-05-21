@@ -31,6 +31,7 @@ raw data section. Designed so you can see at a glance exactly which step
 returns null / errors / partial data.
 """
 
+import hashlib
 import json
 from typing import Any, Optional
 
@@ -390,6 +391,16 @@ def main() -> None:
     if not nd_key:
         st.error("ND or CD key is required.")
         return
+
+    # JWT fingerprint - same algorithm the assessment-creator uses for its
+    # deployed-environment banner. If these two fingerprints DO NOT match,
+    # the hosted app is using a different JWT and the debug-vs-hosted
+    # mismatch is fully explained by that secrets difference.
+    jwt_fp = hashlib.sha256(jwt.encode('utf-8')).hexdigest()[:10]
+    st.caption(
+        f"JWT fingerprint (sha256[:10]): `{jwt_fp}` - compare to the "
+        "fingerprint shown on the deployed assessment-creator's banner."
+    )
 
     # ---- Step 1 ---------------------------------------------------------
     st.header("Step 1 - components(key:) cross-locale probe")

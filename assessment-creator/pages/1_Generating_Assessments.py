@@ -2,11 +2,13 @@
 #IMPORT PACKAGES
 #========================================
 
+import hashlib
 import os
 import subprocess
 import sys
 
 import streamlit as st
+import settings
 import utils_assessment_generation
 
 
@@ -18,7 +20,31 @@ import utils_assessment_generation
 # commit that touches assessment-creator. The git SHA below is a "nice to
 # have" - the tag is the source of truth.
 
-BUILD_TAG = '2026-05-21-nd-locale-autodetect'
+BUILD_TAG = '2026-05-21-nd-via-query-node'
+
+
+def _safe_jwt_fingerprint():
+    """Short non-reversible hash of the deployed JWT so we can compare what
+    the hosted environment is using vs what gets pasted into the gql-debug
+    tool. Never logs the actual token."""
+    try:
+        token = settings.UDACITY_JWT or ''
+    except Exception:
+        return 'unavailable'
+    if not token:
+        return 'empty'
+    return hashlib.sha256(token.encode('utf-8')).hexdigest()[:10]
+
+
+def _safe_api_url():
+    try:
+        return settings.CLASSROOM_CONTENT_API_URL or 'unset'
+    except Exception:
+        return 'unavailable'
+
+
+JWT_FINGERPRINT = _safe_jwt_fingerprint()
+API_URL = _safe_api_url()
 
 
 def _resolve_build_sha():
@@ -67,10 +93,12 @@ def _detect_nd_fix_present():
         src = inspect.getsource(helper)
     except Exception as e:
         return False, f'inspect failed: {type(e).__name__}: {e}'
+    if 'query_node(root_id)' in src or 'walk to the Nanodegree node' in src:
+        return True, 'query-component+query-node flow (current fix)'
     if '_pick_nd_locale' in src or 'failure_reason' in src:
-        return True, 'locale-autodetect + structured-failure-reason present'
+        return True, 'locale-autodetect + structured-failure-reason (older fix)'
     if '_prefetched_nd_release' in src or 'nd_release' in src:
-        return True, 'nd-release fetch present (older fix)'
+        return True, 'nd-release fetch present (oldest fix)'
     return False, '_resolve_nd_to_parts present but lacks ND-release fetch'
 
 
@@ -88,16 +116,19 @@ print(
 
 def main():
     st.title("Generating Assessments")
+    env_caption = (
+        f"git `{BUILD_SHA}` | classroom-content `{API_URL}` | "
+        f"jwt sha256[:10] `{JWT_FINGERPRINT}`"
+    )
     if ND_FIX_PRESENT:
         st.success(
-            f"Build `{BUILD_TAG}` (git `{BUILD_SHA}`) - "
-            "ND-metadata-fix loaded."
+            f"Build `{BUILD_TAG}` - {ND_FIX_DETAIL}. {env_caption}"
         )
     else:
         st.error(
-            f"Build `{BUILD_TAG}` (git `{BUILD_SHA}`) - "
-            f"ND-metadata-fix NOT loaded: {ND_FIX_DETAIL}. "
-            "Reboot the app from Streamlit Cloud (Manage app -> Reboot)."
+            f"Build `{BUILD_TAG}` - ND fix NOT loaded: {ND_FIX_DETAIL}. "
+            "Reboot the app from Streamlit Cloud (Manage app -> Reboot). "
+            f"{env_caption}"
         )
     st.markdown("Create AI-generated assessment questions for one or more Udacity programs.")
     

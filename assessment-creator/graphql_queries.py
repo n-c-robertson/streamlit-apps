@@ -362,12 +362,14 @@ def query_node(node_id):
         query AssessmentsAPINotebooks_NodeQuery($id: Int!) {
   node(id: $id) {
     ... on Nanodegree {
+      id
       key
       locale
       version
       semantic_type
       title
       parts {
+        id
         key
         locale
         version
@@ -458,6 +460,7 @@ def query_node(node_id):
       }
     }
     ... on Part {
+      id
       key
       locale
       version
