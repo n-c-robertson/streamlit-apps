@@ -218,46 +218,53 @@ def _resolve_nd_to_parts(nd_key, locale="en-us"):
     semantic_type = nd_node.get('semantic_type')
     nd_title = nd_node.get('title') or root_node_title
 
-    # If the root node is actually a Part / Course (not a Nanodegree),
-    # treat it like a single-part section. This handles "nd alias for a
-    # course" edge cases gracefully instead of erroring out.
-    if semantic_type == 'Part':
+    # Shape-based detection instead of comparing semantic_type strings.
+    # The on-the-wire `semantic_type` value has drifted over time: modern
+    # Nanodegrees report `semantic_type='Degree'` (confirmed in
+    # udacity-codebase semantic_types.js: `const NANODEGREE = 'Degree'`),
+    # older content reports `'Nanodegree'`, and Studio could rename
+    # again. The GraphQL TYPE name is still `Nanodegree`, so the
+    # `... on Nanodegree { parts { ... } }` fragment in query_node
+    # matches both old and new and populates parts[]. Trust the
+    # selection set that fired: if `parts[]` is populated the node is
+    # Nanodegree-shaped; if `modules[]` is populated it's Part-shaped.
+    nanodegree_parts = [
+        p for p in (nd_node.get('parts') or []) if p and p.get('key')
+    ]
+    part_modules = nd_node.get('modules') or []
+
+    if nanodegree_parts:
+        part_summary = [
+            f"{p.get('key')!r}(id={p.get('id')}, locale={p.get('locale')!r})"
+            for p in nanodegree_parts
+        ]
         print(
-            f"[_resolve_nd_to_parts] {nd_key}: root node is a Part, not a "
-            "Nanodegree; using it as a single-part section."
+            f"[_resolve_nd_to_parts] {nd_key} -> locale={chosen_locale!r}, "
+            f"semantic_type={semantic_type!r} (Nanodegree-shape), "
+            f"{len(nanodegree_parts)} part(s): {part_summary}; "
+            f"nd_release={'present' if nd_release else 'MISSING'}; "
+            f"nd_metadata={'present' if (nd_release.get('component') or {}).get('metadata') else 'MISSING'}"
+        )
+        return nd_title, nanodegree_parts, nd_release, None
+
+    if part_modules:
+        print(
+            f"[_resolve_nd_to_parts] {nd_key}: root node is Part-shaped "
+            f"(semantic_type={semantic_type!r}, "
+            f"{len(part_modules)} module(s)); using as single-part section."
         )
         return nd_title, [nd_node], nd_release, None
 
-    if semantic_type != 'Nanodegree':
-        return nd_title or None, [], nd_release, (
-            f"node(id:{root_id}) for ND {nd_key!r} is a "
-            f"{semantic_type!r}, not a Nanodegree or Part. The "
-            "Nanodegree-typed selection set in query_node only populates "
-            "for Nanodegree/Part nodes, so we can't extract content "
-            "from this shape. Most likely this key is an alias for a "
-            "different program type - use that program's cd* key directly."
-        )
-
-    parts = [p for p in (nd_node.get('parts') or []) if p and p.get('key')]
-    if not parts:
-        return nd_title, [], nd_release, (
-            f"node(id:{root_id}) for ND {nd_key!r} is a Nanodegree but "
-            f"its parts[] array is empty (locale={chosen_locale!r}, "
-            f"available locales={available_locales}). Publish parts in "
-            "Studio or pick a locale that has published parts."
-        )
-
-    part_summary = [
-        f"{p.get('key')!r}(id={p.get('id')}, locale={p.get('locale')!r})"
-        for p in parts
-    ]
-    print(
-        f"[_resolve_nd_to_parts] {nd_key} -> locale={chosen_locale!r}, "
-        f"{len(parts)} part(s): {part_summary}; "
-        f"nd_release={'present' if nd_release else 'MISSING'}; "
-        f"nd_metadata={'present' if (nd_release.get('component') or {}).get('metadata') else 'MISSING'}"
+    return nd_title, [], nd_release, (
+        f"node(id:{root_id}) for ND {nd_key!r} returned a node with "
+        f"semantic_type={semantic_type!r} but neither `parts[]` nor "
+        f"`modules[]` were populated. Either the Nanodegree has 0 "
+        f"published parts in locale={chosen_locale!r} (available locales: "
+        f"{available_locales}), or the root node is some other content "
+        "type (Course, Lesson, etc.) that query_node has no fragment for. "
+        "Publish parts in Studio, pick a different locale, or use the "
+        "underlying cd* key directly."
     )
-    return nd_title, parts, nd_release, None
 
 
 def prep_program_keys(PROGRAM_KEYS):

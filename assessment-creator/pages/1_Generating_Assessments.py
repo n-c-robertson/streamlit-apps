@@ -20,7 +20,7 @@ import utils_assessment_generation
 # commit that touches assessment-creator. The git SHA below is a "nice to
 # have" - the tag is the source of truth.
 
-BUILD_TAG = '2026-05-21-nd-via-query-node'
+BUILD_TAG = '2026-05-21-nd-shape-detection'
 
 
 def _safe_jwt_fingerprint():
@@ -93,8 +93,10 @@ def _detect_nd_fix_present():
         src = inspect.getsource(helper)
     except Exception as e:
         return False, f'inspect failed: {type(e).__name__}: {e}'
+    if 'Nanodegree-shape' in src or 'nanodegree_parts' in src:
+        return True, 'shape-based detection (Degree-aware, current fix)'
     if 'query_node(root_id)' in src or 'walk to the Nanodegree node' in src:
-        return True, 'query-component+query-node flow (current fix)'
+        return True, 'query-component+query-node flow (older fix - still rejects Degree)'
     if '_pick_nd_locale' in src or 'failure_reason' in src:
         return True, 'locale-autodetect + structured-failure-reason (older fix)'
     if '_prefetched_nd_release' in src or 'nd_release' in src:
