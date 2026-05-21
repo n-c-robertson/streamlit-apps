@@ -26,6 +26,85 @@ import settings
 # QUERIES
 #========================================
 
+def query_components_by_key(key):
+    """Cross-locale enumeration of Component rows for a given key.
+
+    `components(key:)` is NOT locale-gated, so this returns every release
+    of the key across every locale we can see with the current JWT. Useful
+    as the first step in resolving an ND key whose locale we don't know
+    ahead of time (e.g. `nd029-ent-vfgermany`).
+
+    Returns a list of component dicts (id, key, locale, type, deprecated,
+    latest_release.root_node_id, ...) or [] on failure. On failure, prints
+    structured diagnostics.
+    """
+    payload = {
+        "query": """
+        query AssessmentsAPI_ComponentsByKey($key: String!) {
+          components(key: $key, count: 50) {
+            id
+            key
+            locale
+            type
+            deprecated
+            latest_release {
+              root_node_id
+              major
+              minor
+              patch
+            }
+          }
+        }
+        """,
+        "variables": {"key": key}
+    }
+
+    try:
+        resp = requests.post(
+            settings.CLASSROOM_CONTENT_API_URL,
+            headers=settings.production_headers(),
+            json=payload,
+            timeout=60,
+        )
+    except Exception as e:
+        print(
+            f"\n\nERROR [query_components_by_key] {key}: network/request "
+            f"failure: {type(e).__name__}: {e}"
+        )
+        return []
+
+    if resp.status_code != 200:
+        preview = (resp.text or "")[:500]
+        print(
+            f"\n\nERROR [query_components_by_key] {key}: HTTP "
+            f"{resp.status_code} from classroom-content. Preview: {preview!r}"
+        )
+        return []
+
+    try:
+        body = resp.json()
+    except Exception as e:
+        preview = (resp.text or "")[:500]
+        print(
+            f"\n\nERROR [query_components_by_key] {key}: non-JSON response "
+            f"({type(e).__name__}: {e}). Preview: {preview!r}"
+        )
+        return []
+
+    errors = body.get("errors")
+    if errors:
+        try:
+            errs_dump = json.dumps(errors, indent=2)[:2000]
+        except Exception:
+            errs_dump = str(errors)[:2000]
+        print(
+            f"\n\nERROR [query_components_by_key] {key}: GraphQL returned "
+            f"{len(errors)} error(s):\n{errs_dump}"
+        )
+
+    return ((body.get("data") or {}).get("components")) or []
+
+
 def query_component(key, locale="en-us"):
     payload = {
         "query": """

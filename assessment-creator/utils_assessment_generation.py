@@ -73,73 +73,161 @@ def is_nd_key(key):
     return bool(ND_KEY_PATTERN.match((key or '').strip()))
 
 
+def _pick_nd_locale(nd_key, requested_locale="en-us"):
+    """Cross-locale resolution for an ND key.
+
+    `nanodegree(key:, locale:)` is strict on locale - it does not fall back
+    across locales. So an English ND happens to default fine with
+    `locale='en-us'`, but a German variant like `nd029-ent-vfgermany` will
+    return null because there's no en-us release.
+
+    We probe `components(key:)` (which is NOT locale-gated) to discover the
+    set of locales the key actually exists in, then pick the best one:
+      1. Prefer `requested_locale` if it's in the available set.
+      2. Otherwise prefer 'en-us' if it's in the available set.
+      3. Otherwise pick the first non-deprecated locale.
+      4. Otherwise pick the first locale (even if deprecated) - better to
+         try a deprecated release than to fail outright.
+
+    Returns (chosen_locale, components_list, picker_reason).
+      - chosen_locale: str, or None if no Component rows exist at all.
+      - components_list: the raw components(key:) response (for diagnostics).
+      - picker_reason: human-readable string explaining the choice or why
+        we couldn't make one.
+    """
+    components = graphql_queries.query_components_by_key(nd_key)
+    if not components:
+        return None, [], (
+            f"components(key:{nd_key!r}) returned 0 rows - the key does "
+            "not exist as a Component in classroom-content, or the JWT "
+            "lacks visibility. Verify the ND exists in Studio and that "
+            "the staff JWT has access."
+        )
+
+    available_locales = [c.get('locale') for c in components if c.get('locale')]
+    available_set = set(available_locales)
+    non_deprecated = [
+        c.get('locale') for c in components
+        if c.get('locale') and not c.get('deprecated')
+    ]
+
+    if requested_locale in available_set:
+        return requested_locale, components, (
+            f"requested locale {requested_locale!r} is in available set "
+            f"{sorted(available_set)}"
+        )
+    if 'en-us' in available_set:
+        return 'en-us', components, (
+            f"requested locale {requested_locale!r} NOT in available set "
+            f"{sorted(available_set)}; falling back to 'en-us'"
+        )
+    if non_deprecated:
+        chosen = non_deprecated[0]
+        return chosen, components, (
+            f"requested locale {requested_locale!r} NOT in available set "
+            f"{sorted(available_set)} and 'en-us' not present; picking "
+            f"first non-deprecated locale {chosen!r}"
+        )
+    chosen = available_locales[0]
+    return chosen, components, (
+        f"requested locale {requested_locale!r} NOT in available set "
+        f"{sorted(available_set)}; only deprecated locales remain; using "
+        f"{chosen!r} (deprecated)"
+    )
+
+
 def _resolve_nd_to_parts(nd_key, locale="en-us"):
     """Fetch an nd* key's full part tree + ND-level metadata.
 
-    Two GraphQL calls:
+    Three GraphQL calls:
 
-      1. `query_nd_full(nd_key, locale)` -> the Nanodegree node and its full
-         `parts -> modules -> lessons -> concepts -> atoms` tree. Part dicts
-         carry `id`, `key` (a NODE UUID, not a Component key), `locale`,
-         `version`, `title`, `semantic_type`, and `modules[...]`.
+      1. `query_components_by_key(nd_key)` -> cross-locale enumeration of
+         the key's releases. Used to auto-pick a locale we know exists
+         (handles non-en-us variants like `nd029-ent-vfgermany`).
 
-      2. `query_component(nd_key, locale)` -> the ND's OWN Component release.
-         This is where `difficulty_level` / `teaches_skills` /
+      2. `query_nd_full(nd_key, chosen_locale)` -> the Nanodegree node and
+         its full `parts -> modules -> lessons -> concepts -> atoms` tree.
+         Part dicts carry `id`, `key` (a NODE UUID, NOT a Component key),
+         `locale`, `version`, `title`, `semantic_type`, and `modules[...]`.
+
+      3. `query_component(nd_key, chosen_locale)` -> the ND's OWN Component
+         release. This is where `difficulty_level` / `teaches_skills` /
          `prerequisite_skills` live for an ND. Per-part Component metadata
-         is NOT reachable from a Part node on this schema: `Part.branch` has
-         no field resolver, and `component(key: <part.key>)` always returns
-         null because `Part.key` is a node UUID (not a `cd*` Component key).
-         Confirmed empirically via the `gql-debug` tool.
+         is NOT reachable from a Part node on this schema: `Part.branch`
+         has no field resolver, and `component(key: <part.key>)` always
+         returns null because `Part.key` is a node UUID (not a `cd*`
+         Component key). Confirmed empirically via the `gql-debug` tool.
 
-    Returns (nd_title, [part_dicts], nd_release_dict). `nd_release_dict` is
-    whatever `query_component(nd_key)` returned (a `latest_release` dict with
-    `component.metadata` populated) or None if the ND doesn't expose one.
-    Returns (None, [], None) on crosswalk failure (key doesn't resolve to a
-    Nanodegree, no parts).
+    Returns (nd_title, [part_dicts], nd_release_dict, failure_reason).
+      - On success: (title, parts, release, None).
+      - On crosswalk failure: (None, [], None, "...specific reason...").
+        The reason explains exactly which step failed and what we tried,
+        so prep_program_keys can surface it instead of the generic
+        "Could not crosswalk" message.
     """
-    nd_node = graphql_queries.query_nd_full(nd_key, locale=locale)
+    chosen_locale, components, picker_reason = _pick_nd_locale(nd_key, locale)
+    print(f"[_resolve_nd_to_parts] {nd_key}: locale resolution -> {picker_reason}")
+
+    if chosen_locale is None:
+        return None, [], None, picker_reason
+
+    nd_node = graphql_queries.query_nd_full(nd_key, locale=chosen_locale)
     if not nd_node:
-        print(
-            f"[_resolve_nd_to_parts] {nd_key}: nanodegree(key:, locale={locale!r}) "
-            "returned null (key may not exist or have no release in that locale)"
+        # query_nd_full prints its own structured diagnostics; just bubble
+        # up a clean reason for the caller.
+        return None, [], None, (
+            f"components(key:) reports {nd_key!r} exists in "
+            f"locales={sorted({c.get('locale') for c in components if c.get('locale')})} "
+            f"(picked {chosen_locale!r}), but "
+            f"nanodegree(key:, locale={chosen_locale!r}) returned null. "
+            "See query_nd_full diagnostics above for HTTP / GraphQL "
+            "details. Most likely the key resolves to a Component row "
+            "whose root node is NOT actually a Nanodegree (e.g. a Course "
+            "or DegreeProgram packaged under an nd* alias)."
         )
-        return None, [], None
 
     if nd_node.get('semantic_type') != 'Nanodegree':
-        # The Nanodegree-typed selection set only populates when the root node
-        # is actually a Nanodegree. Treat anything else as a failed crosswalk
-        # so the caller emits a section-level diagnostic instead of silently
-        # producing an empty section.
-        print(
-            f"[_resolve_nd_to_parts] {nd_key}: root node semantic_type="
-            f"{nd_node.get('semantic_type')!r}, not 'Nanodegree'"
+        return None, [], None, (
+            f"nanodegree(key:{nd_key!r}, locale={chosen_locale!r}) returned "
+            f"a node with semantic_type="
+            f"{nd_node.get('semantic_type')!r}, not 'Nanodegree'. The key "
+            "exists as a Component but its root node is a different type, "
+            "so the Nanodegree-typed selection set silently empties. Use "
+            "the cd* key for this program instead."
         )
-        return None, [], None
 
     nd_title = nd_node.get('title') or ''
     parts = [p for p in (nd_node.get('parts') or []) if p and p.get('key')]
 
-    # ND-level metadata. Done unconditionally (even if parts is empty) so a
-    # caller that surfaces "ND has 0 parts" can still attach whatever skills
-    # / difficulty Studio has set on the ND itself.
-    nd_release = graphql_queries.query_component(nd_key, locale=locale)
+    # ND-level metadata - issued unconditionally so we can surface it even
+    # if parts ends up empty (the diagnostic will at least show the ND
+    # title from the metadata).
+    nd_release = graphql_queries.query_component(nd_key, locale=chosen_locale)
     if not nd_release:
         print(
-            f"[_resolve_nd_to_parts] {nd_key}: query_component(locale={locale!r}) "
-            "returned no latest_release for the ND key itself; ND-level "
-            "metadata will be unavailable for downstream sections."
+            f"[_resolve_nd_to_parts] {nd_key}: query_component("
+            f"locale={chosen_locale!r}) returned no latest_release for the "
+            "ND key itself; ND-level metadata will be unavailable for "
+            "downstream sections."
         )
 
     if not parts:
-        print(f"[_resolve_nd_to_parts] {nd_key}: Nanodegree has 0 parts with keys")
-        return nd_title, [], nd_release
+        return nd_title, [], nd_release, (
+            f"nanodegree(key:{nd_key!r}, locale={chosen_locale!r}) returned "
+            f"a Nanodegree node but its parts[] array is empty. The ND "
+            "exists but has no published parts in this locale - publish "
+            "parts in Studio, or check whether you're targeting the right "
+            "locale (available: "
+            f"{sorted({c.get('locale') for c in components if c.get('locale')})})."
+        )
 
     part_keys_preview = [p.get('key') for p in parts]
     print(
-        f"[_resolve_nd_to_parts] {nd_key} -> {len(parts)} part(s): "
-        f"{part_keys_preview}; nd_release={'present' if nd_release else 'MISSING'}"
+        f"[_resolve_nd_to_parts] {nd_key} -> locale={chosen_locale!r}, "
+        f"{len(parts)} part(s): {part_keys_preview}; "
+        f"nd_release={'present' if nd_release else 'MISSING'}"
     )
-    return nd_title, parts, nd_release
+    return nd_title, parts, nd_release, None
 
 
 def prep_program_keys(PROGRAM_KEYS):
@@ -160,10 +248,18 @@ def prep_program_keys(PROGRAM_KEYS):
     section_content_definitions = []
     for key in keys:
         if is_nd_key(key):
-            nd_title, parts, nd_release = _resolve_nd_to_parts(key)
+            nd_title, parts, nd_release, failure_reason = _resolve_nd_to_parts(key)
             if not parts:
-                # Surface the failure as a section-level diagnostic so the
-                # "Why no questions were generated" panel shows what happened.
+                # Surface the SPECIFIC failure reason in the section-level
+                # diagnostic so the "Why no questions were generated" panel
+                # explains exactly what was tried and what didn't return data,
+                # instead of the old generic catch-all.
+                detail = failure_reason or (
+                    "Could not crosswalk ND key to part cd keys (component, "
+                    "root node, or parts list missing, or root node was not "
+                    "a Nanodegree). Verify the ND is published and has parts "
+                    "in Studio."
+                )
                 section_content_definitions.append({
                     'title': nd_title or key,
                     'content_keys': [],
@@ -172,12 +268,7 @@ def prep_program_keys(PROGRAM_KEYS):
                     '_diagnostics': [{
                         'level': 'ERROR',
                         'key': key,
-                        'message': (
-                            "Could not crosswalk ND key to part cd keys "
-                            "(component, root node, or parts list missing, or "
-                            "root node was not a Nanodegree). Verify the ND is "
-                            "published and has parts in Studio."
-                        ),
+                        'message': detail,
                     }],
                 })
                 continue

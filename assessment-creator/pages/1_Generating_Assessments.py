@@ -18,7 +18,7 @@ import utils_assessment_generation
 # commit that touches assessment-creator. The git SHA below is a "nice to
 # have" - the tag is the source of truth.
 
-BUILD_TAG = '2026-05-21-nd-metadata-fix-264fd09'
+BUILD_TAG = '2026-05-21-nd-locale-autodetect'
 
 
 def _resolve_build_sha():
@@ -67,8 +67,10 @@ def _detect_nd_fix_present():
         src = inspect.getsource(helper)
     except Exception as e:
         return False, f'inspect failed: {type(e).__name__}: {e}'
+    if '_pick_nd_locale' in src or 'failure_reason' in src:
+        return True, 'locale-autodetect + structured-failure-reason present'
     if '_prefetched_nd_release' in src or 'nd_release' in src:
-        return True, 'ok'
+        return True, 'nd-release fetch present (older fix)'
     return False, '_resolve_nd_to_parts present but lacks ND-release fetch'
 
 
