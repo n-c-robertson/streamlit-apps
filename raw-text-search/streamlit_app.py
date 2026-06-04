@@ -276,27 +276,147 @@ def search_dict_traces(
     return traces
 
 # API functions
+class ClassroomContentError(Exception):
+    """Structured error from a classroom-content GraphQL call.
+
+    Carries the HTTP status, GraphQL errors[] (if any), and a body preview
+    so the caller can render an actually-useful diagnostic. Replaces the
+    old pattern of `response.json()['data']['node']['id']` blowing up with
+    `KeyError: 'data'` whenever the API returned an auth error / gateway
+    error / non-GraphQL payload.
+    """
+
+    def __init__(self, message, *, status=None, gql_errors=None, body_preview=None):
+        super().__init__(message)
+        self.message = message
+        self.status = status
+        self.gql_errors = gql_errors
+        self.body_preview = body_preview
+
+    def __str__(self):
+        bits = [self.message]
+        if self.status is not None:
+            bits.append(f"http={self.status}")
+        if self.gql_errors:
+            # Compress GraphQL errors to "first error message" + count.
+            first = (self.gql_errors[0] or {}).get('message') if self.gql_errors else None
+            bits.append(f"gql_errors={len(self.gql_errors)}({first!r})")
+        if self.body_preview:
+            bits.append(f"body={self.body_preview!r}")
+        return " | ".join(bits)
+
+
+def _post_gql(query, variables, *, op_label):
+    """Run a GraphQL POST and return the parsed `data` dict.
+
+    Raises ClassroomContentError with full HTTP/GraphQL context on any
+    failure mode (network exception, non-200, non-JSON body,
+    GraphQL errors[], or data=null).
+    """
+    try:
+        resp = requests.post(
+            CLASSROOM_CONTENT_API_URL,
+            headers=headers,
+            json={"query": query, "variables": variables},
+            timeout=60,
+        )
+    except Exception as e:
+        raise ClassroomContentError(
+            f"{op_label}: network/request failure: {type(e).__name__}: {e}"
+        ) from e
+
+    body_preview = (resp.text or "")[:500]
+
+    if resp.status_code != 200:
+        raise ClassroomContentError(
+            f"{op_label}: non-200 from classroom-content",
+            status=resp.status_code,
+            body_preview=body_preview,
+        )
+
+    try:
+        body = resp.json()
+    except Exception as e:
+        raise ClassroomContentError(
+            f"{op_label}: non-JSON response ({type(e).__name__}: {e})",
+            status=resp.status_code,
+            body_preview=body_preview,
+        ) from e
+
+    gql_errors = body.get("errors") if isinstance(body, dict) else None
+    data = body.get("data") if isinstance(body, dict) else None
+
+    if data is None:
+        raise ClassroomContentError(
+            f"{op_label}: response has no 'data' field",
+            status=resp.status_code,
+            gql_errors=gql_errors,
+            body_preview=body_preview,
+        )
+
+    return data, gql_errors
+
+
 def fetchNodeId(key):
-    payload = {
-        "query": """
+    """Resolve a Component/Node key to a node id.
+
+    Tries `Query.node(key:)` first (works for legacy/root-aligned keys).
+    If that returns null, falls back to `Query.component(key:, locale:)`
+    and uses `latest_release.root_node_id` - the same path the
+    assessment-creator uses, which works for modern Component keys whose
+    node-level key is a UUID rather than the cd*/ud* string.
+    """
+    data, _ = _post_gql(
+        query="""
         query keyToNode($key: String!) {
-          node(key: $key ) {
+          node(key: $key) {
             id
           }
         }
-      """,
-        "variables": {
-            "key": key
-        }
-    }
-
-    response = requests.post(
-        CLASSROOM_CONTENT_API_URL,
-        headers=headers,
-        json=payload
+        """,
+        variables={"key": key},
+        op_label=f"node(key:{key!r})",
     )
-    
-    return response.json()['data']['node']['id']
+
+    node = data.get("node")
+    if node and node.get("id") is not None:
+        return node["id"]
+
+    # Fallback: resolve via Component -> latest_release.root_node_id.
+    data2, gql_errors2 = _post_gql(
+        query="""
+        query keyToComponentRootNode($key: String!, $locale: String!) {
+          component(key: $key, locale: $locale) {
+            latest_release {
+              root_node_id
+            }
+          }
+        }
+        """,
+        variables={"key": key, "locale": "en-us"},
+        op_label=f"component(key:{key!r}, locale:'en-us')",
+    )
+
+    component = data2.get("component")
+    if not component:
+        raise ClassroomContentError(
+            f"key={key!r}: node(key:) returned null AND "
+            f"component(key:, locale:'en-us') returned null. "
+            "The key is unknown to classroom-content in en-us, or the "
+            "JWT can't see it.",
+            gql_errors=gql_errors2,
+        )
+
+    release = component.get("latest_release") or {}
+    root_node_id = release.get("root_node_id")
+    if root_node_id is None:
+        raise ClassroomContentError(
+            f"key={key!r}: component resolved but latest_release."
+            "root_node_id is null. The Component exists but has no "
+            "published release in en-us.",
+            gql_errors=gql_errors2,
+        )
+    return root_node_id
 
 def fetchClassroomContent(node_id):
     payload = {
@@ -577,13 +697,23 @@ def fetchClassroomContent(node_id):
             "id": node_id
         }
     }
-    response = requests.post(
-        CLASSROOM_CONTENT_API_URL,
-        headers=headers,
-        json=payload
+    data, gql_errors = _post_gql(
+        query=payload["query"],
+        variables=payload["variables"],
+        op_label=f"node(id:{node_id})",
     )
-    
-    return response.json()
+    if (data.get("node") is None) and gql_errors:
+        # Surface GraphQL errors as a structured exception so the caller
+        # logs the actual reason instead of silently rendering an empty
+        # search result.
+        raise ClassroomContentError(
+            f"node(id:{node_id}): data.node is null and GraphQL returned errors",
+            gql_errors=gql_errors,
+        )
+    # Preserve the original `{"data": {...}}` envelope the downstream
+    # search_dict_traces walker expects (format_path explicitly skips the
+    # "data" key when rendering result paths).
+    return {"data": data}
 
 @st.cache_data
 def load_catalog():
@@ -607,20 +737,32 @@ def load_content(selected_keys):
         try:
             node_id = fetchNodeId(key)
             content = fetchClassroomContent(node_id)
-            
-            # Update progress thread-safely
             with progress_lock:
                 completed_count[0] += 1
-                progress = completed_count[0] / len(selected_keys)
-                # Note: We can't update Streamlit components from threads, 
-                # so we'll handle progress display differently
-            
             return {
                 'key': key,
                 'node_id': node_id,
                 'content': content,
                 'success': True,
-                'error': None
+                'error': None,
+                'error_detail': None,
+            }
+        except ClassroomContentError as e:
+            with progress_lock:
+                completed_count[0] += 1
+            return {
+                'key': key,
+                'node_id': None,
+                'content': None,
+                'success': False,
+                'error': str(e),
+                'error_detail': {
+                    'type': 'ClassroomContentError',
+                    'message': e.message,
+                    'http_status': e.status,
+                    'gql_errors': e.gql_errors,
+                    'body_preview': e.body_preview,
+                },
             }
         except Exception as e:
             with progress_lock:
@@ -630,7 +772,11 @@ def load_content(selected_keys):
                 'node_id': None,
                 'content': None,
                 'success': False,
-                'error': str(e)
+                'error': f"{type(e).__name__}: {e}",
+                'error_detail': {
+                    'type': type(e).__name__,
+                    'message': str(e),
+                },
             }
     
     # Create progress bar and status
@@ -640,15 +786,17 @@ def load_content(selected_keys):
     # Use ThreadPoolExecutor for parallel processing
     max_workers = min(10, len(selected_keys))  # Limit concurrent requests
     
+    failures = []
+
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all tasks
         future_to_key = {executor.submit(fetch_single_content, key): key for key in selected_keys}
-        
+
         # Process completed tasks
         for future in as_completed(future_to_key):
             key = future_to_key[future]
             result = future.result()
-            
+
             if result['success']:
                 content_data.append({
                     'key': result['key'],
@@ -656,15 +804,56 @@ def load_content(selected_keys):
                     'content': result['content']
                 })
             else:
-                st.error(f"Error loading content for {result['key']}: {result['error']}")
-            
+                failures.append(result)
+
             # Update progress
             progress = len([f for f in future_to_key if f.done()]) / len(selected_keys)
             progress_bar.progress(progress)
             status_text.text(f'Loading content... ({len([f for f in future_to_key if f.done()])}/{len(selected_keys)} completed)')
-    
+
     status_text.empty()
     progress_bar.empty()
+
+    if failures:
+        # Bucket failures by the leading part of the error so 700 catalog
+        # entries failing for the same reason collapse to one row instead
+        # of 700 red banners.
+        from collections import Counter as _Counter
+        buckets = _Counter()
+        for f in failures:
+            detail = f.get('error_detail') or {}
+            http = detail.get('http_status')
+            gql = detail.get('gql_errors') or []
+            first_gql_msg = (gql[0] or {}).get('message') if gql else None
+            bucket_key = (
+                detail.get('type') or 'Unknown',
+                http,
+                first_gql_msg,
+            )
+            buckets[bucket_key] += 1
+
+        st.warning(
+            f"{len(failures)} of {len(selected_keys)} key(s) failed to load - "
+            "expand below for details. The downstream search will only run "
+            "against the successful ones."
+        )
+        with st.expander("Per-key failure diagnostics", expanded=True):
+            st.markdown("**Failure buckets:**")
+            for (etype, http, first_gql), count in buckets.most_common():
+                st.write(
+                    f"- `{count}x` {etype} | http={http} | "
+                    f"first gql error: {first_gql!r}"
+                )
+
+            st.markdown("**First 5 failed keys (full detail):**")
+            for f in failures[:5]:
+                st.code(
+                    f"key={f['key']!r}\n"
+                    f"error={f['error']}\n"
+                    f"detail={f.get('error_detail')!r}",
+                    language="text",
+                )
+
     return content_data
 
 def format_path(path):
