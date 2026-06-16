@@ -20,7 +20,7 @@ st.set_page_config(
 # SESSION STATE INIT
 #========================================
 
-for _key in ["results_df", "user_skills_df", "assessment_id_loaded", "reco_filter_state", "question_details_df", "was_capped", "total_count"]:
+for _key in ["results_df", "user_skills_df", "assessment_id_loaded", "reco_filter_state", "question_details_df"]:
     if _key not in st.session_state:
         st.session_state[_key] = None
 
@@ -31,14 +31,12 @@ for _key in ["results_df", "user_skills_df", "assessment_id_loaded", "reco_filte
 with st.form("Analyze Assessments"):
     assessment_id = st.text_input("Assessment ID", value='c84dd4d7-0fa0-47e7-9757-ac5b2ceb85d6')
     
-    # Add filtering controls under an expander within the form
     with st.expander("Recommendation Filters", expanded=False):
         st.info("**Recommendation Filters**: Configure these settings to customize the content recommendations that will be generated from the Skills API.")
         
         col1, col2 = st.columns(2)
         
         with col1:
-            # Difficulty filter
             difficulty_options = ['Beginner', 'Intermediate', 'Advanced']
             selected_difficulties = st.multiselect(
                 "Difficulty Levels",
@@ -47,7 +45,6 @@ with st.form("Analyze Assessments"):
                 help="Select difficulty levels to include in recommendations"
             )
             
-            # Program Type filter
             program_type_options = ['Part', 'Course', 'Degree']
             selected_program_types = st.multiselect(
                 "Program Types",
@@ -57,7 +54,6 @@ with st.form("Analyze Assessments"):
             )
         
         with col2:
-            # Duration filter
             duration_options = ['Minutes', 'Hours', 'Days', 'Weeks', 'Months']
             selected_durations = st.multiselect(
                 "Duration",
@@ -66,23 +62,11 @@ with st.form("Analyze Assessments"):
                 help="Select duration ranges to include in recommendations"
             )
             
-            # Program Key filter (optional text input for specific keys)
             program_keys_input = st.text_input(
                 "Specific Program Keys (optional)",
                 placeholder="e.g., ud1110, cd2841",
                 help="Enter specific program keys separated by commas (leave empty to include all)"
             )
-
-    with st.expander("Performance Settings", expanded=False):
-        st.info("**Max Attempts**: For very large assessments, cap the number of attempts loaded to keep the app responsive. Increase or remove the cap if you need the full dataset.")
-        max_attempts_input = st.number_input(
-            "Max attempts to load (0 = no limit)",
-            min_value=0,
-            max_value=500_000,
-            value=20_000,
-            step=5_000,
-            help="Caps how many attempt records are fetched. The most recent data is always included first. Set to 0 to disable the cap."
-        )
     
     st.markdown('#### Staff Password')
     password = st.text_input("Staff Password", type="password", help="Enter the required staff password")
@@ -95,15 +79,10 @@ if submitted:
         fetch_progress = st.progress(0)
         fetch_status = st.empty()
 
-        max_attempts = int(max_attempts_input) if max_attempts_input else None
-        if max_attempts == 0:
-            max_attempts = None
-
         results_df = utils_assessment_analysis.get_results(
             assessment_id,
             progress_bar=fetch_progress,
             status_text=fetch_status,
-            max_attempts=max_attempts,
         )
 
         # Extract question text/choices (one row per unique question) BEFORE
@@ -115,17 +94,10 @@ if submitted:
 
         user_skills_df = utils_assessment_analysis.user_skills(results_df)
 
-        # Detect whether the fetch was capped
-        total_rows = len(results_df['id'].dropna().unique()) if 'id' in results_df.columns else 0
-        was_capped = max_attempts is not None and total_rows >= max_attempts
-
-        # Store in session state so charts survive reruns
         st.session_state.results_df = results_df
         st.session_state.user_skills_df = user_skills_df
         st.session_state.question_details_df = question_details_df
         st.session_state.assessment_id_loaded = assessment_id
-        st.session_state.was_capped = was_capped
-        st.session_state.total_count = total_rows
         st.session_state.reco_filter_state = {
             "difficulties": selected_difficulties,
             "program_types": selected_program_types,
@@ -141,13 +113,6 @@ if st.session_state.results_df is not None and not st.session_state.results_df.e
     results_df = st.session_state.results_df
     user_skills_df = st.session_state.user_skills_df
     question_details_df = st.session_state.question_details_df
-
-    if st.session_state.was_capped:
-        st.warning(
-            f"⚠️ This assessment has a very large number of responses. "
-            f"Analysis is based on the first **{st.session_state.total_count:,}** attempts loaded. "
-            f"Increase or remove the **Max attempts** limit in Performance Settings to load more."
-        )
 
     # Skills Analysis Expander
     with st.expander("Skills Analysis", expanded=False):

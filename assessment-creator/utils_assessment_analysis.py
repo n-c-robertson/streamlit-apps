@@ -7,7 +7,6 @@ import ast
 import concurrent.futures
 import hashlib
 import json
-import math
 import os
 import pickle
 import random
@@ -359,18 +358,13 @@ def fetch_page(assessment_id, limit, page):
     return response.json()["data"]["attempts"]
 
 
-def fetch_attempts(assessment_id, limit=50, progress_bar=None, status_text=None, max_attempts=None):
+def fetch_attempts(assessment_id, limit=50, progress_bar=None, status_text=None):
     """Fetch all attempt pages in parallel using ThreadPoolExecutor.
 
     Page 1 is fetched first to discover totalPages. Remaining pages are
     dispatched in parallel and results are collected via as_completed so
     the optional Streamlit progress_bar and status_text placeholders can
     be updated in the main thread without any thread-safety issues.
-
-    If max_attempts is set and the total exceeds it, only the first
-    ceil(max_attempts / limit) pages are fetched.  A (was_truncated,
-    total_count) tuple is NOT returned — callers receive the raw list and
-    can inspect len() vs the progress_bar status text for truncation info.
     """
     # Page 1 reveals pagination metadata
     page1_data = fetch_page(assessment_id, limit, 1)
@@ -378,19 +372,12 @@ def fetch_attempts(assessment_id, limit=50, progress_bar=None, status_text=None,
     total_count = page1_data["totalCount"]
     all_attempts = list(page1_data["attempts"])
 
-    # Apply cap: only fetch the first max_pages pages (oldest-first order)
-    if max_attempts and total_count > max_attempts:
-        max_pages = min(total_pages, math.ceil(max_attempts / limit))
-    else:
-        max_pages = total_pages
-
     if progress_bar is not None:
-        progress_bar.progress(1 / max(max_pages, 1))
+        progress_bar.progress(1 / max(total_pages, 1))
     if status_text is not None:
-        cap_note = f" (capped at {max_attempts:,})" if max_attempts and total_count > max_attempts else ""
-        status_text.text(f"Fetched page 1 of {max_pages} — {total_count:,} total responses{cap_note}...")
+        status_text.text(f"Fetched page 1 of {total_pages} — {total_count:,} total responses...")
 
-    if max_pages <= 1:
+    if total_pages <= 1:
         if progress_bar is not None:
             progress_bar.progress(1.0)
         if status_text is not None:
@@ -402,7 +389,7 @@ def fetch_attempts(assessment_id, limit=50, progress_bar=None, status_text=None,
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         future_to_page = {
             executor.submit(fetch_page, assessment_id, limit, p): p
-            for p in range(2, max_pages + 1)
+            for p in range(2, total_pages + 1)
         }
 
         for future in concurrent.futures.as_completed(future_to_page):
@@ -411,9 +398,9 @@ def fetch_attempts(assessment_id, limit=50, progress_bar=None, status_text=None,
             completed += 1
 
             if progress_bar is not None:
-                progress_bar.progress(completed / max_pages)
+                progress_bar.progress(completed / total_pages)
             if status_text is not None:
-                status_text.text(f"Fetched page {completed} of {max_pages} ({len(all_attempts):,} responses so far)...")
+                status_text.text(f"Fetched page {completed} of {total_pages} ({len(all_attempts):,} responses so far)...")
 
     if status_text is not None:
         status_text.text(f"Done — {len(all_attempts):,} responses fetched.")
@@ -555,8 +542,8 @@ def flatten_attempt(attempt):
 
     return questions or [flat]
 
-def get_attempts_dataframe(assessment_id, progress_bar=None, status_text=None, max_attempts=None):
-    raw_attempts = fetch_attempts(assessment_id, progress_bar=progress_bar, status_text=status_text, max_attempts=max_attempts)
+def get_attempts_dataframe(assessment_id, progress_bar=None, status_text=None):
+    raw_attempts = fetch_attempts(assessment_id, progress_bar=progress_bar, status_text=status_text)
     flattened = []
     for attempt in raw_attempts:
         try:
@@ -620,8 +607,8 @@ def get_skills():
     skills_map.columns = ['skillsTitle','skillsCategory','skillsExternalId']
     return skills_map
 
-def get_results(assessment_id, progress_bar=None, status_text=None, max_attempts=None):
-    df = get_attempts_dataframe(assessment_id, progress_bar=progress_bar, status_text=status_text, max_attempts=max_attempts)
+def get_results(assessment_id, progress_bar=None, status_text=None):
+    df = get_attempts_dataframe(assessment_id, progress_bar=progress_bar, status_text=status_text)
     difficulty_map = get_difficulty_levels()
     skills_map = get_skills()
     df = df.merge(difficulty_map, how='left', left_on='difficultyLevelId', right_index=True)
