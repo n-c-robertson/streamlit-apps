@@ -323,9 +323,14 @@ def load_long_dataframe(sheet_id: str) -> tuple[pd.DataFrame, str | None]:
         if not lu.empty:
             last_updated_display = _format_sheet_last_updated(lu.iloc[0])
 
-    # Preserve original sheet text so CSV export always has human-readable dates if parsing yields NaT
+    # Sheet stores date values with surrounding double-quotes (e.g. "2026-03-24T16:46:26Z").
+    # Strip those before parsing so workera_created_at / snapshot columns are not all NaT.
     for _dc in ("pre_attempt_date", "post_attempt_date"):
         if _dc in raw.columns:
+            raw[_dc] = raw[_dc].where(
+                raw[_dc].isna(),
+                raw[_dc].astype(str).str.strip().str.strip('"'),
+            )
             raw[f"{_dc}_sheet"] = raw[_dc].map(lambda x: "" if pd.isna(x) else str(x).strip())
 
     raw["pre_attempt_date"] = pd.to_datetime(raw["pre_attempt_date"], errors="coerce")
