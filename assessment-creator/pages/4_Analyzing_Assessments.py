@@ -17,6 +17,14 @@ st.set_page_config(
 )
 
 #========================================
+# SESSION STATE INIT
+#========================================
+
+for _key in ["results_df", "user_skills_df", "assessment_id_loaded", "reco_filter_state"]:
+    if _key not in st.session_state:
+        st.session_state[_key] = None
+
+#========================================
 # UI
 #========================================
 
@@ -70,77 +78,93 @@ with st.form("Analyze Assessments"):
     submitted = st.form_submit_button("Submit")
 
 if submitted:
-
     if password != utils_assessment_analysis.settings.PASSWORD:
-        st.error("❌ Incorrect password. Please try again.") 
+        st.error("❌ Incorrect password. Please try again.")
     else:
-        results_df = utils_assessment_analysis.get_results(assessment_id)
-        user_skills_df = utils_assessment_analysis.user_skills(results_df)
-        
-        # Skills Analysis Expander
-        with st.expander("Skills Analysis", expanded=False):
-            st.info("**Skills Analysis**: These charts show how learners perform across different skills. The heatmap displays individual skill performance, while the correlation chart shows which skills learners tend to score similarly on.")
-            utils_assessment_analysis.plot_net_skills_heatmap(user_skills_df, results_df)
-            utils_assessment_analysis.plot_skill_correlation_heatmap(user_skills_df)
-        
-        # Assessment Performance Expander
-        with st.expander("Assessment Performance Analysis", expanded=False):
-            st.info("**Assessment Performance Analysis**: These charts analyze question quality, score distributions, and section performance. The question analysis shows which questions are most effective, while the histogram and section charts show overall performance patterns.")
-            utils_assessment_analysis.plot_question_analysis(results_df)
-            utils_assessment_analysis.plot_total_score_histogram(results_df)
-            utils_assessment_analysis.plot_section_scores(results_df)
+        fetch_progress = st.progress(0)
+        fetch_status = st.empty()
 
-        # Recommendations Expander
-        with st.expander("Learner Recommendations", expanded=False):
-            st.subheader("Content Recommendations Based on Skill Gaps")
-            st.info("**Content Recommendations**: Based on learners' skill gaps, these tables show personalized content recommendations. The program table summarizes top program recommendations, the lesson table shows individual lesson suggestions, and the learner table provides detailed recommendations for each user.")
-            
-            # Get recommendations from Skills API using the filters from the form
+        results_df = utils_assessment_analysis.get_results(
+            assessment_id,
+            progress_bar=fetch_progress,
+            status_text=fetch_status,
+        )
+        user_skills_df = utils_assessment_analysis.user_skills(results_df)
+
+        # Store in session state so charts survive reruns
+        st.session_state.results_df = results_df
+        st.session_state.user_skills_df = user_skills_df
+        st.session_state.assessment_id_loaded = assessment_id
+        # Stash recommendation filter values alongside the loaded data so the
+        # "Load Recommendations" button can use them even after a rerun.
+        st.session_state.reco_filter_state = {
+            "difficulties": selected_difficulties,
+            "program_types": selected_program_types,
+            "durations": selected_durations,
+            "program_keys": program_keys_input.strip() if program_keys_input.strip() else None,
+        }
+
+        fetch_progress.empty()
+        fetch_status.empty()
+
+# Render analysis sections whenever results are available in session state
+if st.session_state.results_df is not None and not st.session_state.results_df.empty:
+    results_df = st.session_state.results_df
+    user_skills_df = st.session_state.user_skills_df
+
+    # Skills Analysis Expander
+    with st.expander("Skills Analysis", expanded=False):
+        st.info("**Skills Analysis**: These charts show how learners perform across different skills. The heatmap displays individual skill performance, while the correlation chart shows which skills learners tend to score similarly on.")
+        utils_assessment_analysis.plot_net_skills_heatmap(user_skills_df, results_df)
+        utils_assessment_analysis.plot_skill_correlation_heatmap(user_skills_df)
+    
+    # Assessment Performance Expander
+    with st.expander("Assessment Performance Analysis", expanded=False):
+        st.info("**Assessment Performance Analysis**: These charts analyze question quality, score distributions, and section performance. The question analysis shows which questions are most effective, while the histogram and section charts show overall performance patterns.")
+        utils_assessment_analysis.plot_question_analysis(results_df)
+        utils_assessment_analysis.plot_total_score_histogram(results_df)
+        utils_assessment_analysis.plot_section_scores(results_df)
+
+    # Recommendations Expander — manual trigger only
+    with st.expander("Learner Recommendations", expanded=False):
+        st.subheader("Content Recommendations Based on Skill Gaps")
+        st.info("**Content Recommendations**: Based on learners' skill gaps, these tables show personalized content recommendations. The program table summarizes top program recommendations, the lesson table shows individual lesson suggestions, and the learner table provides detailed recommendations for each user.")
+
+        if st.button("Load Recommendations", type="primary"):
+            filters = st.session_state.reco_filter_state or {}
             with st.spinner("Fetching recommendations from Skills API..."):
                 recommendations_df = utils_assessment_analysis.get_skills_recommendations(
-                    user_skills_df, 
+                    user_skills_df,
                     results_df,
-                    difficulty_filter=selected_difficulties,
-                    program_type_filter=selected_program_types,
-                    duration_filter=selected_durations,
-                    program_keys_filter=program_keys_input.strip() if program_keys_input.strip() else None
+                    difficulty_filter=filters.get("difficulties"),
+                    program_type_filter=filters.get("program_types"),
+                    duration_filter=filters.get("durations"),
+                    program_keys_filter=filters.get("program_keys"),
                 )
-            
+
             if not recommendations_df.empty:
-                # Add the program recommendations table
                 st.markdown("### Program Recommendations Summary Table")
                 st.caption("**Program Summary**: Shows which programs are most commonly recommended as top choices, along with the skills they address for users who have them as their #1 recommendation.")
                 program_table_df = utils_assessment_analysis.create_program_recommendations_table(recommendations_df)
-                
                 if program_table_df is not None:
-                    # Display the table
                     st.dataframe(program_table_df, use_container_width=True)
                 else:
                     st.info("Dataframe is empty.")
-                
-                # Add the lesson recommendations table
+
                 st.markdown("### Lesson Recommendations Summary Table")
                 st.caption("**Lesson Summary**: Displays individual lesson recommendations for each user, showing their top 5 lessons and associated programs in a user-friendly format.")
                 lesson_table_df = utils_assessment_analysis.create_lesson_recommendations_table(recommendations_df)
-                
                 if lesson_table_df is not None:
-                    # Display the table
                     st.dataframe(lesson_table_df, use_container_width=True)
                 else:
                     st.info("Dataframe is empty.")
-                
-                # Add the learner recommendations table
+
                 st.markdown("### Learner Recommendations Table")
                 st.caption("**Learner Details**: Comprehensive view of all recommendations for each learner, including their weak skills, top lessons, and program recommendations.")
                 learner_table_df = utils_assessment_analysis.create_learner_recommendations_table(recommendations_df)
-                
                 if learner_table_df is not None:
-                    # Display the table
                     st.dataframe(learner_table_df, use_container_width=True)
                 else:
                     st.info("Dataframe is empty.")
-                    
-
             else:
                 st.warning("No recommendations available. This could be due to API issues or no weak skills identified.")
-        
