@@ -168,14 +168,18 @@ def query_construction_release(key, locale="en-us"):
     classroom-content is branch-based (RELEASE / BUGFIX / CONSTRUCTION).
     `component(key:).latest_release` only returns the latest RELEASE branch,
     so it is null for a program that has never been published. The unreleased
-    work lives on the CONSTRUCTION branch, which is reachable by passing
-    `version: "construction"` to any node query (resolveRef returns the latest
-    construction branch for that magic version string).
+    work lives on the CONSTRUCTION branch.
 
-    `Nanodegree`, `Course`, and `Part` all implement `Node` and expose
-    `branch { component { metadata { ... } } }`, so this recovers the same
-    `difficulty_level` / `teaches_skills` / `prerequisite_skills` metadata the
-    release path reads off `latest_release.component.metadata`.
+    We resolve this off the Component directly (NOT via a node query): the
+    node-level `branch` field has no resolver in classroom-content - e.g.
+    `Part.branch` returns null even when `branch_id` is set (same quirk
+    documented in query_nd_full) - so `node(...).branch.component.metadata`
+    yields null. Instead we read:
+      - `component(key:, locale:).metadata` for difficulty_level /
+        teaches_skills / prerequisite_skills (populated regardless of release
+        state), and
+      - `component.branches(type:"CONSTRUCTION").root_node_id` for the content
+        tree pointer (fed into query_node, exactly like latest_release).
 
     Returns a dict shaped exactly like `query_component`'s `latest_release`
     return (so callers can use it without branching), plus an `_unreleased`
@@ -192,44 +196,42 @@ def query_construction_release(key, locale="en-us"):
     error), printing structured diagnostics in the same style as the other
     queries here.
     """
-    metadata_fields = """
-                metadata {
-                  difficulty_level {
-                    name
-                    uri
-                  }
-                  teaches_skills {
-                    name
-                    uri
-                  }
-                  prerequisite_skills {
-                    name
-                    uri
-                  }
-                }
-    """
-    branch_fragment = f"""
+    payload = {
+        "query": """
+        query AssessmentsAPI_ConstructionQuery($key: String!, $locale: String!) {
+          component(key: $key, locale: $locale) {
             id
-            title
-            branch {{
+            key
+            type
+            metadata {
+              difficulty_level {
+                name
+                uri
+              }
+              teaches_skills {
+                name
+                uri
+              }
+              prerequisite_skills {
+                name
+                uri
+              }
+            }
+            branches(type: "CONSTRUCTION") {
+              id
+              type
               major
               minor
               patch
-              has_staged_changes
-              component {{
-{metadata_fields}
-              }}
-            }}
-    """
-    payload = {
-        "query": f"""
-        query AssessmentsAPI_ConstructionQuery($key: String!, $locale: String!) {{
-          node(key: $key, locale: $locale, version: "construction") {{
-            ... on Nanodegree {{{branch_fragment}}}
-            ... on Course {{{branch_fragment}}}
-            ... on Part {{{branch_fragment}}}
-          }}
-        }}
+              root_node_id
+              root_node {
+                id
+                key
+                title
+              }
+            }
+          }
+        }
         """,
         "variables": {"key": key, "locale": locale},
     }
@@ -277,20 +279,42 @@ def query_construction_release(key, locale="en-us"):
             f"GraphQL returned {len(errors)} error(s):\n{errs_dump}"
         )
 
-    node = (body.get("data") or {}).get("node")
-    if not node:
+    component = (body.get("data") or {}).get("component")
+    if not component:
         print(
             f"\n[query_construction_release] {key} locale={locale!r}: "
-            "node(version:'construction') returned null. Either there is no "
-            "construction branch in this locale, or the JWT cannot read it."
+            "component(key:, locale:) returned null. The key may not exist "
+            "as a Component in this locale, or the JWT cannot read it."
         )
         return None
 
-    branch = node.get("branch") or {}
+    construction_branches = [
+        b for b in (component.get("branches") or [])
+        if b and b.get("root_node_id") is not None
+    ]
+    if not construction_branches:
+        print(
+            f"\n[query_construction_release] {key} locale={locale!r}: "
+            "Component exists but has no CONSTRUCTION branch with a "
+            "root_node_id. Nothing unreleased to fall back to."
+        )
+        return None
+
+    # Pick the highest-versioned construction branch (defensive: there is
+    # usually exactly one, but order isn't guaranteed).
+    def _branch_sort_key(b):
+        return (b.get("major") or 0, b.get("minor") or 0, b.get("patch") or 0)
+
+    branch = max(construction_branches, key=_branch_sort_key)
+    root_node = branch.get("root_node") or {}
+
     return {
-        "root_node_id": node.get("id"),
-        "root_node": {"id": node.get("id"), "title": node.get("title")},
-        "component": {"metadata": (branch.get("component") or {}).get("metadata")},
+        "root_node_id": branch.get("root_node_id"),
+        "root_node": {
+            "id": branch.get("root_node_id"),
+            "title": root_node.get("title"),
+        },
+        "component": {"metadata": component.get("metadata")},
         "_unreleased": True,
     }
 
