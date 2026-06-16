@@ -57,18 +57,54 @@ CHAT_COMPLETIONS_RESPONSE_FORMAT = {
 #CONTEXT MANAGEMENT UTILITIES
 #========================================
 
-# GPT-4o context limits (approximate)
+# GPT-4o context limits.
 GPT4O_MAX_TOKENS = 128000
-GPT4O_MAX_INPUT_TOKENS = 100000  # Conservative estimate for input tokens
+# Tokens we reserve for the model's response so a large input can't crowd out
+# the completion. gpt-4o supports up to ~16k output tokens.
+RESERVED_OUTPUT_TOKENS = 16000
+# Small buffer for per-message structural overhead.
+SAFETY_BUFFER_TOKENS = 1000
+# Maximum input tokens we will send in a single request.
+GPT4O_MAX_INPUT_TOKENS = GPT4O_MAX_TOKENS - RESERVED_OUTPUT_TOKENS - SAFETY_BUFFER_TOKENS
+
+# Lazily-initialised tiktoken encoder so we count tokens accurately instead of
+# relying on a characters-per-token heuristic (which badly underestimates dense
+# content like code, JSON and VTT transcripts).
+_TOKEN_ENCODER = None
+
+def _get_token_encoder():
+    global _TOKEN_ENCODER
+    if _TOKEN_ENCODER is not None:
+        return _TOKEN_ENCODER
+    try:
+        import tiktoken
+        try:
+            _TOKEN_ENCODER = tiktoken.encoding_for_model(CHAT_COMPLETIONS_MODEL)
+        except Exception:
+            # o200k_base is the encoding used by gpt-4o / gpt-4o-mini.
+            _TOKEN_ENCODER = tiktoken.get_encoding('o200k_base')
+    except Exception as e:
+        print(f"tiktoken unavailable, falling back to heuristic token counting: {e}")
+        _TOKEN_ENCODER = False  # Sentinel: use heuristic.
+    return _TOKEN_ENCODER
 
 def estimate_tokens(text):
     """
-    Estimate the number of tokens in a text string.
-    This is a rough approximation: ~4 characters per token for English text.
+    Count the number of tokens in a text string.
+
+    Uses tiktoken for an accurate count when available, and falls back to a
+    conservative ~3 characters/token heuristic otherwise.
     """
     if not text:
         return 0
-    return len(text) // 4
+    encoder = _get_token_encoder()
+    if encoder:
+        try:
+            return len(encoder.encode(text))
+        except Exception:
+            pass
+    # Conservative fallback (dense content can be well under 4 chars/token).
+    return len(text) // 3 + 1
 
 def estimate_messages_tokens(messages):
     """
@@ -89,51 +125,72 @@ def estimate_messages_tokens(messages):
         total_tokens += 2
     return total_tokens
 
-def chunk_content(content, max_chunk_size=80000, overlap=1000):
+def chunk_content(content, max_chunk_tokens, overlap=200):
     """
-    Split large content into overlapping chunks.
-    
+    Split large content into chunks that each fit within a token budget.
+
+    Splitting is performed on real token boundaries (via tiktoken when
+    available) so every chunk is guaranteed to be at or below
+    ``max_chunk_tokens``. When tiktoken is unavailable we fall back to a
+    character-based split using the same conservative ratio as
+    ``estimate_tokens``.
+
     Args:
         content: The content to chunk
-        max_chunk_size: Maximum tokens per chunk
-        overlap: Number of tokens to overlap between chunks
-    
+        max_chunk_tokens: Maximum tokens allowed per chunk
+        overlap: Number of tokens to overlap between consecutive chunks
+
     Returns:
         List of content chunks
     """
     if not content:
         return ['']
-    
-    # Convert token limit to character limit (rough approximation)
-    max_chars = max_chunk_size * 4
-    overlap_chars = overlap * 4
-    
+
+    max_chunk_tokens = max(1, int(max_chunk_tokens))
+    overlap = max(0, min(int(overlap), max_chunk_tokens - 1))
+
+    encoder = _get_token_encoder()
+
+    if encoder:
+        tokens = encoder.encode(content)
+        if len(tokens) <= max_chunk_tokens:
+            return [content]
+        chunks = []
+        start = 0
+        step = max_chunk_tokens - overlap
+        while start < len(tokens):
+            window = tokens[start:start + max_chunk_tokens]
+            chunk = encoder.decode(window).strip()
+            if chunk:
+                chunks.append(chunk)
+            if start + max_chunk_tokens >= len(tokens):
+                break
+            start += step
+        return chunks if chunks else [content]
+
+    # Heuristic fallback: approximate the token budget in characters.
+    max_chars = max_chunk_tokens * 3
+    overlap_chars = overlap * 3
+
     if len(content) <= max_chars:
         return [content]
-    
+
     chunks = []
     start = 0
-    
     while start < len(content):
         end = start + max_chars
-        
-        # If this isn't the last chunk, try to break at a sentence boundary
         if end < len(content):
-            # Look for sentence endings within the last 1000 characters
             search_start = max(start, end - 1000)
             sentence_end = content.rfind('. ', search_start, end)
             if sentence_end > start:
                 end = sentence_end + 1
-        
         chunk = content[start:end].strip()
         if chunk:
             chunks.append(chunk)
-        
-        # Move start position, accounting for overlap
-        start = end - overlap_chars
-        if start >= len(content):
+        if end >= len(content):
             break
-    
+        start = end - overlap_chars
+
     return chunks
 
 def create_chunked_messages(system_content, user_content, max_input_tokens=GPT4O_MAX_INPUT_TOKENS):
@@ -166,14 +223,14 @@ def create_chunked_messages(system_content, user_content, max_input_tokens=GPT4O
     # Estimate tokens for system message
     system_tokens = estimate_tokens(system_content) + 10  # Add overhead
     
-    # Calculate available tokens for user content
+    # Calculate available tokens for user content (budget is in TOKENS).
     available_tokens = max_input_tokens - system_tokens - 20  # Buffer for message structure
+    if available_tokens < 1000:
+        # System prompt alone is large; keep a minimal floor so we still split.
+        available_tokens = 1000
     
-    # Convert to character limit
-    max_chars = available_tokens * 4
-    
-    # Chunk the user content
-    chunks = chunk_content(user_content, max_chars, overlap=1000)
+    # Chunk the user content on real token boundaries.
+    chunks = chunk_content(user_content, available_tokens, overlap=200)
     
     # Create message arrays for each chunk
     message_arrays = []
@@ -236,10 +293,83 @@ def call_openai_with_context_management(messages, **kwargs):
     if not all_responses:
         raise Exception("All chunks failed to process")
     
-    # For now, return the first successful response
-    # In a more sophisticated implementation, you might want to combine results
-    # based on the specific use case (e.g., merging learning objectives, combining questions)
-    return all_responses[0]
+    if len(all_responses) == 1:
+        return all_responses[0]
+    
+    # Merge the JSON payloads from every chunk into a single response so callers
+    # see the combined result (e.g. all learning objectives / all questions).
+    contents = []
+    for response in all_responses:
+        try:
+            contents.append(response.choices[0].message.content)
+        except Exception:
+            continue
+    
+    merged_content = _merge_json_contents(contents)
+    print(f"Merged {len(all_responses)} chunk responses into a single result.")
+    return _build_synthetic_response(merged_content)
+
+def _merge_json_contents(contents):
+    """
+    Merge the JSON string payloads returned for each content chunk.
+
+    List-valued keys (e.g. ``objectives``, ``questions_choices``) are
+    concatenated across chunks; identical string entries are de-duplicated while
+    preserving order. Scalar keys (e.g. ``title``) take the first non-empty
+    value. If nothing parses as JSON, the first raw payload is returned.
+    """
+    parsed = []
+    for content in contents:
+        if not content:
+            continue
+        cleaned = content.replace('```json', '').replace('```', '').strip()
+        try:
+            parsed.append(json.loads(cleaned))
+        except Exception:
+            continue
+    
+    if not parsed:
+        return contents[0] if contents else '{}'
+    if len(parsed) == 1:
+        return json.dumps(parsed[0])
+    
+    merged = {}
+    for obj in parsed:
+        if not isinstance(obj, dict):
+            continue
+        for key, value in obj.items():
+            if isinstance(value, list):
+                bucket = merged.setdefault(key, [])
+                if isinstance(bucket, list):
+                    bucket.extend(value)
+                else:
+                    merged[key] = value
+            elif key not in merged or merged[key] in (None, '', [], {}):
+                merged[key] = value
+    
+    # De-duplicate plain string lists (e.g. learning objectives) in place.
+    for key, value in merged.items():
+        if isinstance(value, list) and value and all(isinstance(x, str) for x in value):
+            seen = set()
+            deduped = []
+            for item in value:
+                if item not in seen:
+                    seen.add(item)
+                    deduped.append(item)
+            merged[key] = deduped
+    
+    return json.dumps(merged)
+
+def _build_synthetic_response(content):
+    """
+    Wrap a content string in an object that mimics the parts of the OpenAI
+    chat-completion response that callers in this codebase actually read
+    (``response.choices[0].message.content``).
+    """
+    from types import SimpleNamespace
+    message = SimpleNamespace(content=content, role='assistant', tool_calls=None, function_call=None)
+    choice = SimpleNamespace(message=message, finish_reason='stop', index=0, logprobs=None)
+    return SimpleNamespace(choices=[choice], usage=None, id='chunked-merged-response', object='chat.completion')
 
 def call_openai_with_fallback(messages, **kwargs):
     """
@@ -265,7 +395,10 @@ def call_openai_with_fallback(messages, **kwargs):
         error_message = str(e).lower()
         
         # Check if it's a context length error
-        if any(keyword in error_message for keyword in ['context_length', 'token_limit', 'too many tokens']):
+        if any(keyword in error_message for keyword in [
+            'context_length', 'context length', 'maximum context',
+            'token_limit', 'too many tokens', 'reduce the length',
+        ]):
             print(f"Context length exceeded, attempting to chunk content: {e}")
             
             try:
@@ -284,33 +417,59 @@ def call_openai_with_fallback(messages, **kwargs):
             # Not a context length error, re-raise
             raise e
 
-def _call_openai_with_truncated_content(messages, max_tokens_per_message=50000, **kwargs):
+def _truncate_text_to_tokens(text, max_tokens):
+    """Truncate text to at most ``max_tokens`` tokens, on real token boundaries."""
+    encoder = _get_token_encoder()
+    if encoder:
+        tokens = encoder.encode(text)
+        if len(tokens) <= max_tokens:
+            return text
+        return encoder.decode(tokens[:max_tokens])
+    # Heuristic fallback mirrors estimate_tokens (~3 chars/token).
+    return text[:max_tokens * 3]
+
+def _call_openai_with_truncated_content(messages, max_tokens_per_message=None, **kwargs):
     """
-    Fallback method that truncates content to fit within token limits.
+    Last-resort fallback that truncates content to fit within token limits.
+
+    Truncation loses information, so this only runs after chunking has failed.
+    The budget is derived from the model's input limit minus the other (e.g.
+    system) messages so the request is guaranteed to fit.
     
     Args:
         messages: List of message dictionaries
-        max_tokens_per_message: Maximum tokens to allow per message
+        max_tokens_per_message: Optional explicit cap for the largest message
         **kwargs: Additional arguments for the OpenAI API call
     
     Returns:
         OpenAI API response
     """
-    truncated_messages = []
+    # Tokens consumed by everything except the single largest message.
+    non_max_tokens = estimate_messages_tokens(messages)
+    largest_idx = None
+    largest_tokens = -1
+    for idx, message in enumerate(messages):
+        tokens = estimate_tokens(message.get('content', ''))
+        if tokens > largest_tokens:
+            largest_tokens = tokens
+            largest_idx = idx
     
-    for message in messages:
+    if largest_idx is not None:
+        non_max_tokens -= largest_tokens
+    
+    budget = GPT4O_MAX_INPUT_TOKENS - max(0, non_max_tokens)
+    if max_tokens_per_message is not None:
+        budget = min(budget, max_tokens_per_message)
+    budget = max(500, budget)
+    
+    truncated_messages = []
+    for idx, message in enumerate(messages):
         content = message.get('content', '')
-        estimated_tokens = estimate_tokens(content)
-        
-        if estimated_tokens > max_tokens_per_message:
-            # Truncate content
-            max_chars = max_tokens_per_message * 4
-            truncated_content = content[:max_chars] + "\n\n[Content truncated due to length...]"
-            truncated_messages.append({
-                'role': message['role'],
-                'content': truncated_content
-            })
-            print(f"Truncated {message['role']} message from {estimated_tokens} to ~{max_tokens_per_message} tokens")
+        estimated = estimate_tokens(content)
+        if idx == largest_idx and estimated > budget:
+            truncated_content = _truncate_text_to_tokens(content, budget) + "\n\n[Content truncated due to length...]"
+            truncated_messages.append({'role': message['role'], 'content': truncated_content})
+            print(f"Truncated {message['role']} message from {estimated} to ~{budget} tokens")
         else:
             truncated_messages.append(message)
     

@@ -18,6 +18,9 @@ plotly>=5.15.0
 # Machine Learning & AI
 openai>=1.0.0
 
+# Accurate token counting for context-length chunking
+tiktoken>=0.7.0
+
 # HTTP Requests
 requests>=2.31.0
 
