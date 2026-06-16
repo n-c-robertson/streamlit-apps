@@ -37,6 +37,14 @@ import settings
 import prompts
 
 #========================================
+# CONSTANTS
+#========================================
+
+# Tables with one row per attempt can grow very large. Show this many rows in the
+# UI preview and offer a download button for the full dataset.
+_TABLE_PREVIEW_ROWS = 100
+
+#========================================
 # FUNCTIONS
 #========================================
 
@@ -1274,8 +1282,20 @@ def plot_question_analysis(results_df):
     }
     display_df = display_df.rename(columns=rename_map)
     display_df = display_df.sort_values('Discrimination', ascending=False)
-    st.caption("Question performance data")
-    st.dataframe(display_df, use_container_width=True)
+    total_rows = len(display_df)
+    preview_df = display_df.head(_TABLE_PREVIEW_ROWS)
+    if total_rows > _TABLE_PREVIEW_ROWS:
+        st.caption(f"Question performance data — showing {_TABLE_PREVIEW_ROWS} of {total_rows} rows")
+    else:
+        st.caption("Question performance data")
+    st.dataframe(preview_df, use_container_width=True)
+    if total_rows > _TABLE_PREVIEW_ROWS:
+        st.download_button(
+            label=f"Download full question data ({total_rows} rows)",
+            data=display_df.to_csv(index=False).encode("utf-8"),
+            file_name="question_performance.csv",
+            mime="text/csv",
+        )
 
 def plot_total_score_histogram(results_df):
     """
@@ -1371,35 +1391,51 @@ def plot_total_score_histogram(results_df):
             attempt_df['assessmentId'].dropna().astype(str).unique().tolist()
         )
 
+    # Sort first so the preview covers the most-recent attempts
+    _ts_sort = pd.to_datetime(attempt_rows['createdAt'], utc=True, errors='coerce')
+    attempt_rows = attempt_rows.assign(_ts_sort=_ts_sort).sort_values('_ts_sort', ascending=False, na_position='last').drop(columns=['_ts_sort'])
+
+    # Fetch emails only for the preview slice to keep the UI fast
+    preview_user_ids = attempt_rows.head(_TABLE_PREVIEW_ROWS)['userId'].tolist()
     with st.spinner("Loading learner emails..."):
-        email_map = fetch_emails_for_user_ids(attempt_rows['userId'].tolist())
+        email_map = fetch_emails_for_user_ids(preview_user_ids)
         title_map = fetch_assessment_titles_map(unique_aids) if unique_aids else {}
 
-    attempt_rows['Email'] = attempt_rows['userId'].map(lambda u: email_map.get(u, u))
-    _ts = pd.to_datetime(attempt_rows['createdAt'], utc=True, errors='coerce')
-    attempt_rows['Attempt time'] = _ts.dt.strftime('%Y-%m-%d %H:%M:%S UTC')
-    attempt_rows.loc[_ts.isna(), 'Attempt time'] = ''
-    attempt_rows = attempt_rows.sort_values('createdAt', ascending=False, na_position='last')
-    attempt_rows['Overall Score'] = (attempt_rows['totalScore'] * 100).round(1).astype(str) + '%'
+    def _build_display_df(rows, include_email=True):
+        out = rows.copy()
+        if include_email:
+            out['Email'] = out['userId'].map(lambda u: email_map.get(u, u))
+        else:
+            out['Email'] = out['userId']  # fall back to User ID in downloads
+        _ts = pd.to_datetime(out['createdAt'], utc=True, errors='coerce')
+        out['Attempt time'] = _ts.dt.strftime('%Y-%m-%d %H:%M:%S UTC')
+        out.loc[_ts.isna(), 'Attempt time'] = ''
+        out['Overall Score'] = (out['totalScore'] * 100).round(1).astype(str) + '%'
+        if 'assessmentId' in out.columns:
+            out['Assessment ID'] = out['assessmentId'].astype(str)
+            out['Assessment title'] = out['Assessment ID'].map(
+                lambda x: (title_map.get(x) or '').strip() or '—'
+            )
+            cols = ['Assessment ID', 'Assessment title', 'Attempt time', 'Email', 'Overall Score']
+        else:
+            cols = ['Attempt time', 'Email', 'Overall Score']
+        return out[cols]
 
-    if 'assessmentId' in attempt_rows.columns:
-        attempt_rows['Assessment ID'] = attempt_rows['assessmentId'].astype(str)
-        attempt_rows['Assessment title'] = attempt_rows['Assessment ID'].map(
-            lambda x: (title_map.get(x) or '').strip() or '—'
-        )
-        display_cols = [
-            'Assessment ID',
-            'Assessment title',
-            'Attempt time',
-            'Email',
-            'Overall Score',
-        ]
+    total_rows = len(attempt_rows)
+    preview_display = _build_display_df(attempt_rows.head(_TABLE_PREVIEW_ROWS), include_email=True)
+    if total_rows > _TABLE_PREVIEW_ROWS:
+        st.caption(f"Total score distribution data (one row per attempt) — showing {_TABLE_PREVIEW_ROWS} of {total_rows} rows. Download includes all rows (User ID shown in place of email).")
     else:
-        display_cols = ['Attempt time', 'Email', 'Overall Score']
-
-    user_scores = attempt_rows[display_cols]
-    st.caption("Total score distribution data (one row per attempt)")
-    st.dataframe(user_scores, use_container_width=True)
+        st.caption("Total score distribution data (one row per attempt)")
+    st.dataframe(preview_display, use_container_width=True)
+    if total_rows > _TABLE_PREVIEW_ROWS:
+        full_display = _build_display_df(attempt_rows, include_email=False)
+        st.download_button(
+            label=f"Download full scores table ({total_rows} rows)",
+            data=full_display.to_csv(index=False).encode("utf-8"),
+            file_name="total_scores.csv",
+            mime="text/csv",
+        )
 
 def plot_section_scores(results_df):
     """
@@ -1549,31 +1585,55 @@ def plot_section_scores(results_df):
     st.pyplot(fig)
     
     # Table: one row per attempt, attempt time and email first, then one column per section
-    with st.spinner("Loading learner emails..."):
-        email_map = fetch_emails_for_user_ids(section_scores['userId'].tolist())
     per_attempt = section_scores.groupby('id', as_index=False).agg({
         'createdAt': 'first',
         'userId': 'first',
     })
-    per_attempt['Email'] = per_attempt['userId'].map(lambda u: email_map.get(u, u))
-    _pts = pd.to_datetime(per_attempt['createdAt'], utc=True, errors='coerce')
-    per_attempt['Attempt time'] = _pts.dt.strftime('%Y-%m-%d %H:%M:%S UTC')
-    per_attempt.loc[_pts.isna(), 'Attempt time'] = ''
     pivot_scores = section_scores.pivot_table(
         index='id', columns='sectionTitle', values='sectionScore', aggfunc='first'
     )
     pivot_scores = pivot_scores.reset_index()
     section_table = per_attempt.merge(pivot_scores, on='id', how='inner')
-    section_table = section_table.sort_values('createdAt', ascending=False, na_position='last')
-    section_table = section_table.drop(columns=['id', 'createdAt', 'userId'])
-    for col in section_table.columns:
-        if col in ('Attempt time', 'Email'):
-            continue
-        section_table[col] = (section_table[col] * 100).round(1)
-    ordered = ['Attempt time', 'Email'] + [c for c in section_table.columns if c not in ('Attempt time', 'Email')]
-    section_table = section_table[ordered]
-    st.caption("Section performance data (one row per attempt, one column per section)")
-    st.dataframe(section_table, use_container_width=True)
+    _pts = pd.to_datetime(section_table['createdAt'], utc=True, errors='coerce')
+    section_table = section_table.assign(_pts=_pts).sort_values('_pts', ascending=False, na_position='last').drop(columns=['_pts'])
+
+    # Fetch emails only for the preview slice
+    preview_user_ids = section_table.head(_TABLE_PREVIEW_ROWS)['userId'].tolist()
+    with st.spinner("Loading learner emails..."):
+        email_map = fetch_emails_for_user_ids(preview_user_ids)
+
+    def _build_section_display(rows, include_email=True):
+        out = rows.copy()
+        _ts = pd.to_datetime(out['createdAt'], utc=True, errors='coerce')
+        out['Attempt time'] = _ts.dt.strftime('%Y-%m-%d %H:%M:%S UTC')
+        out.loc[_ts.isna(), 'Attempt time'] = ''
+        if include_email:
+            out['Email'] = out['userId'].map(lambda u: email_map.get(u, u))
+        else:
+            out['Email'] = out['userId']
+        out = out.drop(columns=['id', 'createdAt', 'userId'])
+        for col in out.columns:
+            if col in ('Attempt time', 'Email'):
+                continue
+            out[col] = (out[col] * 100).round(1)
+        ordered = ['Attempt time', 'Email'] + [c for c in out.columns if c not in ('Attempt time', 'Email')]
+        return out[ordered]
+
+    total_rows = len(section_table)
+    preview_display = _build_section_display(section_table.head(_TABLE_PREVIEW_ROWS), include_email=True)
+    if total_rows > _TABLE_PREVIEW_ROWS:
+        st.caption(f"Section performance data (one row per attempt, one column per section) — showing {_TABLE_PREVIEW_ROWS} of {total_rows} rows. Download includes all rows (User ID shown in place of email).")
+    else:
+        st.caption("Section performance data (one row per attempt, one column per section)")
+    st.dataframe(preview_display, use_container_width=True)
+    if total_rows > _TABLE_PREVIEW_ROWS:
+        full_display = _build_section_display(section_table, include_email=False)
+        st.download_button(
+            label=f"Download full section data ({total_rows} rows)",
+            data=full_display.to_csv(index=False).encode("utf-8"),
+            file_name="section_scores.csv",
+            mime="text/csv",
+        )
 
 def plot_recommendation_charts(recommendations_df):
     """
