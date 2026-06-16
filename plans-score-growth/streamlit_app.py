@@ -251,8 +251,15 @@ def _dataframe_wide_for_csv_download(df: pd.DataFrame) -> pd.DataFrame:
         wide = wide.join(ql, how="left")
 
     out = wide.reset_index()
-    # Long-format `score` duplicates sheet pre_score/post_score on each row — keep sheet columns only
-    for c in ("pre_attempt_score", "post_attempt_score"):
+    # Long-format `score` duplicates sheet pre_score/post_score on each row — keep sheet columns only.
+    # Raw sheet skill columns (pre_strong_skills etc.) are also duplicated by the renamed wide columns
+    # (pre_skills_strong etc.) — drop the raw ones to avoid redundant columns in the download.
+    _drop_always = ("pre_attempt_score", "post_attempt_score")
+    _drop_skill_dupes = (
+        "pre_strong_skills", "pre_needs_improvement_skills",
+        "post_strong_skills", "post_needs_improvement_skills",
+    )
+    for c in _drop_always + _drop_skill_dupes:
         if c in out.columns:
             out = out.drop(columns=[c])
     return out
