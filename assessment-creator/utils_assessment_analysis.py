@@ -653,19 +653,21 @@ def fetch_and_build_dataframes(assessment_id, limit=50, progress_bar=None, statu
     """
     def fetch_and_process(page):
         page_data = fetch_page(assessment_id, limit, page)
-        return _process_page_attempts(page_data["attempts"])
+        slim_rows, qdetails = _process_page_attempts(page_data["attempts"])
+        return slim_rows, qdetails, len(page_data["attempts"])
 
     # Page 1 reveals pagination metadata; process it immediately
     page1_data = fetch_page(assessment_id, limit, 1)
     total_pages = page1_data["totalPages"]
     total_count = page1_data["totalCount"]
     all_slim_rows, all_qdetails = _process_page_attempts(page1_data["attempts"])
+    attempts_fetched = len(page1_data["attempts"])
     del page1_data  # release raw JSON
 
     if progress_bar is not None:
         progress_bar.progress(1 / max(total_pages, 1))
     if status_text is not None:
-        status_text.text(f"Fetched page 1 of {total_pages} — {total_count:,} total responses...")
+        status_text.text(f"Fetched page 1 of {total_pages} — {total_count:,} total attempts...")
 
     if total_pages > 1:
         completed = 1
@@ -675,8 +677,9 @@ def fetch_and_build_dataframes(assessment_id, limit=50, progress_bar=None, statu
                 for p in range(2, total_pages + 1)
             }
             for future in concurrent.futures.as_completed(future_to_page):
-                slim_rows, qdetails = future.result()
+                slim_rows, qdetails, page_attempt_count = future.result()
                 all_slim_rows.extend(slim_rows)
+                attempts_fetched += page_attempt_count
                 # First-seen wins for question details (avoids overwriting with duplicates)
                 for qid, detail in qdetails.items():
                     if qid not in all_qdetails:
@@ -687,11 +690,11 @@ def fetch_and_build_dataframes(assessment_id, limit=50, progress_bar=None, statu
                 if status_text is not None:
                     status_text.text(
                         f"Fetched page {completed} of {total_pages} "
-                        f"({len(all_slim_rows):,} rows so far)..."
+                        f"({attempts_fetched:,} attempts so far)..."
                     )
 
     if status_text is not None:
-        status_text.text(f"Done — {len(all_slim_rows):,} rows fetched.")
+        status_text.text(f"Done — {attempts_fetched:,} attempts fetched.")
 
     slim_df = pd.DataFrame(all_slim_rows)
     question_details_df = pd.DataFrame.from_dict(all_qdetails, orient='index')
