@@ -1551,18 +1551,16 @@ def plot_total_score_histogram(results_df):
     _ts_sort = pd.to_datetime(attempt_rows['createdAt'], utc=True, errors='coerce')
     attempt_rows = attempt_rows.assign(_ts_sort=_ts_sort).sort_values('_ts_sort', ascending=False, na_position='last').drop(columns=['_ts_sort'])
 
-    # Fetch emails only for the preview slice to keep the UI fast
-    preview_user_ids = attempt_rows.head(_TABLE_PREVIEW_ROWS)['userId'].tolist()
+    # Fetch emails for all rows so the download CSV contains real addresses.
+    # fetch_emails_for_user_ids uses lru_cache internally, so any IDs already
+    # resolved for the preview cost no additional HTTP requests.
     with st.spinner("Loading learner emails..."):
-        email_map = fetch_emails_for_user_ids(preview_user_ids)
+        email_map = fetch_emails_for_user_ids(attempt_rows['userId'].tolist())
         title_map = fetch_assessment_titles_map(unique_aids) if unique_aids else {}
 
-    def _build_display_df(rows, include_email=True):
+    def _build_display_df(rows):
         out = rows.copy()
-        if include_email:
-            out['Email'] = out['userId'].map(lambda u: email_map.get(u, u))
-        else:
-            out['Email'] = out['userId']  # fall back to User ID in downloads
+        out['Email'] = out['userId'].map(lambda u: email_map.get(u, u))
         _ts = pd.to_datetime(out['createdAt'], utc=True, errors='coerce')
         out['Attempt time'] = _ts.dt.strftime('%Y-%m-%d %H:%M:%S UTC')
         out.loc[_ts.isna(), 'Attempt time'] = ''
@@ -1578,14 +1576,14 @@ def plot_total_score_histogram(results_df):
         return out[cols]
 
     total_rows = len(attempt_rows)
-    preview_display = _build_display_df(attempt_rows.head(_TABLE_PREVIEW_ROWS), include_email=True)
+    preview_display = _build_display_df(attempt_rows.head(_TABLE_PREVIEW_ROWS))
     if total_rows > _TABLE_PREVIEW_ROWS:
-        st.caption(f"Total score distribution data (one row per attempt) — showing {_TABLE_PREVIEW_ROWS} of {total_rows} rows. Download includes all rows (User ID shown in place of email).")
+        st.caption(f"Total score distribution data (one row per attempt) — showing {_TABLE_PREVIEW_ROWS} of {total_rows} rows.")
     else:
         st.caption("Total score distribution data (one row per attempt)")
     st.dataframe(preview_display, use_container_width=True)
     if total_rows > _TABLE_PREVIEW_ROWS:
-        full_display = _build_display_df(attempt_rows, include_email=False)
+        full_display = _build_display_df(attempt_rows)
         st.download_button(
             label=f"Download full scores table ({total_rows} rows)",
             data=full_display.to_csv(index=False).encode("utf-8"),
@@ -1753,20 +1751,16 @@ def plot_section_scores(results_df):
     _pts = pd.to_datetime(section_table['createdAt'], utc=True, errors='coerce')
     section_table = section_table.assign(_pts=_pts).sort_values('_pts', ascending=False, na_position='last').drop(columns=['_pts'])
 
-    # Fetch emails only for the preview slice
-    preview_user_ids = section_table.head(_TABLE_PREVIEW_ROWS)['userId'].tolist()
+    # Fetch emails for all rows so the download CSV contains real addresses.
     with st.spinner("Loading learner emails..."):
-        email_map = fetch_emails_for_user_ids(preview_user_ids)
+        email_map = fetch_emails_for_user_ids(section_table['userId'].tolist())
 
-    def _build_section_display(rows, include_email=True):
+    def _build_section_display(rows):
         out = rows.copy()
         _ts = pd.to_datetime(out['createdAt'], utc=True, errors='coerce')
         out['Attempt time'] = _ts.dt.strftime('%Y-%m-%d %H:%M:%S UTC')
         out.loc[_ts.isna(), 'Attempt time'] = ''
-        if include_email:
-            out['Email'] = out['userId'].map(lambda u: email_map.get(u, u))
-        else:
-            out['Email'] = out['userId']
+        out['Email'] = out['userId'].map(lambda u: email_map.get(u, u))
         out = out.drop(columns=['id', 'createdAt', 'userId'])
         for col in out.columns:
             if col in ('Attempt time', 'Email'):
@@ -1776,14 +1770,14 @@ def plot_section_scores(results_df):
         return out[ordered]
 
     total_rows = len(section_table)
-    preview_display = _build_section_display(section_table.head(_TABLE_PREVIEW_ROWS), include_email=True)
+    preview_display = _build_section_display(section_table.head(_TABLE_PREVIEW_ROWS))
     if total_rows > _TABLE_PREVIEW_ROWS:
-        st.caption(f"Section performance data (one row per attempt, one column per section) — showing {_TABLE_PREVIEW_ROWS} of {total_rows} rows. Download includes all rows (User ID shown in place of email).")
+        st.caption(f"Section performance data (one row per attempt, one column per section) — showing {_TABLE_PREVIEW_ROWS} of {total_rows} rows.")
     else:
         st.caption("Section performance data (one row per attempt, one column per section)")
     st.dataframe(preview_display, use_container_width=True)
     if total_rows > _TABLE_PREVIEW_ROWS:
-        full_display = _build_section_display(section_table, include_email=False)
+        full_display = _build_section_display(section_table)
         st.download_button(
             label=f"Download full section data ({total_rows} rows)",
             data=full_display.to_csv(index=False).encode("utf-8"),
