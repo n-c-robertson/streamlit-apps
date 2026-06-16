@@ -1566,7 +1566,7 @@ def plot_section_scores(results_df):
     ax_divider = make_axes_locatable(ax)
     cax = ax_divider.append_axes("right", size="5%", pad="2%")
     norm = mcolors.Normalize(vmin=0, vmax=100)
-    cb = matplotlib.colorbar.ColorbarBase(cax, cmap=matplotlib.cm.get_cmap(cmap),
+    cb = matplotlib.colorbar.ColorbarBase(cax, cmap=matplotlib.colormaps[cmap],
                                         norm=norm, orientation='vertical')
     cb.set_ticks([0, 25, 50, 75, 100])
     cb.set_ticklabels(['Poor', 'Fair', 'Good', 'Very Good', 'Excellent'])
