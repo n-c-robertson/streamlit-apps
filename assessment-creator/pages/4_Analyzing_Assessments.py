@@ -20,7 +20,7 @@ st.set_page_config(
 # SESSION STATE INIT
 #========================================
 
-for _key in ["results_df", "user_skills_df", "assessment_id_loaded", "reco_filter_state"]:
+for _key in ["results_df", "user_skills_df", "assessment_id_loaded", "reco_filter_state", "question_details_df", "was_capped", "total_count"]:
     if _key not in st.session_state:
         st.session_state[_key] = None
 
@@ -72,6 +72,17 @@ with st.form("Analyze Assessments"):
                 placeholder="e.g., ud1110, cd2841",
                 help="Enter specific program keys separated by commas (leave empty to include all)"
             )
+
+    with st.expander("Performance Settings", expanded=False):
+        st.info("**Max Attempts**: For very large assessments, cap the number of attempts loaded to keep the app responsive. Increase or remove the cap if you need the full dataset.")
+        max_attempts_input = st.number_input(
+            "Max attempts to load (0 = no limit)",
+            min_value=0,
+            max_value=500_000,
+            value=20_000,
+            step=5_000,
+            help="Caps how many attempt records are fetched. The most recent data is always included first. Set to 0 to disable the cap."
+        )
     
     st.markdown('#### Staff Password')
     password = st.text_input("Staff Password", type="password", help="Enter the required staff password")
@@ -84,19 +95,37 @@ if submitted:
         fetch_progress = st.progress(0)
         fetch_status = st.empty()
 
+        max_attempts = int(max_attempts_input) if max_attempts_input else None
+        if max_attempts == 0:
+            max_attempts = None
+
         results_df = utils_assessment_analysis.get_results(
             assessment_id,
             progress_bar=fetch_progress,
             status_text=fetch_status,
+            max_attempts=max_attempts,
         )
+
+        # Extract question text/choices (one row per unique question) BEFORE
+        # slimming so they aren't lost. This small DataFrame is stored separately.
+        question_details_df = utils_assessment_analysis.extract_question_details(results_df)
+
+        # Drop heavy text columns and downcast numerics to shrink memory.
+        results_df = utils_assessment_analysis.slim_results_df(results_df)
+
         user_skills_df = utils_assessment_analysis.user_skills(results_df)
+
+        # Detect whether the fetch was capped
+        total_rows = len(results_df['id'].dropna().unique()) if 'id' in results_df.columns else 0
+        was_capped = max_attempts is not None and total_rows >= max_attempts
 
         # Store in session state so charts survive reruns
         st.session_state.results_df = results_df
         st.session_state.user_skills_df = user_skills_df
+        st.session_state.question_details_df = question_details_df
         st.session_state.assessment_id_loaded = assessment_id
-        # Stash recommendation filter values alongside the loaded data so the
-        # "Load Recommendations" button can use them even after a rerun.
+        st.session_state.was_capped = was_capped
+        st.session_state.total_count = total_rows
         st.session_state.reco_filter_state = {
             "difficulties": selected_difficulties,
             "program_types": selected_program_types,
@@ -111,6 +140,14 @@ if submitted:
 if st.session_state.results_df is not None and not st.session_state.results_df.empty:
     results_df = st.session_state.results_df
     user_skills_df = st.session_state.user_skills_df
+    question_details_df = st.session_state.question_details_df
+
+    if st.session_state.was_capped:
+        st.warning(
+            f"⚠️ This assessment has a very large number of responses. "
+            f"Analysis is based on the first **{st.session_state.total_count:,}** attempts loaded. "
+            f"Increase or remove the **Max attempts** limit in Performance Settings to load more."
+        )
 
     # Skills Analysis Expander
     with st.expander("Skills Analysis", expanded=False):
@@ -121,7 +158,7 @@ if st.session_state.results_df is not None and not st.session_state.results_df.e
     # Assessment Performance Expander
     with st.expander("Assessment Performance Analysis", expanded=False):
         st.info("**Assessment Performance Analysis**: These charts analyze question quality, score distributions, and section performance. The question analysis shows which questions are most effective, while the histogram and section charts show overall performance patterns.")
-        utils_assessment_analysis.plot_question_analysis(results_df)
+        utils_assessment_analysis.plot_question_analysis(results_df, question_details=question_details_df)
         utils_assessment_analysis.plot_total_score_histogram(results_df)
         utils_assessment_analysis.plot_section_scores(results_df)
 

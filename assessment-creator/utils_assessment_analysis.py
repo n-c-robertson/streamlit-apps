@@ -7,6 +7,7 @@ import ast
 import concurrent.futures
 import hashlib
 import json
+import math
 import os
 import pickle
 import random
@@ -47,6 +48,41 @@ _TABLE_PREVIEW_ROWS = 100
 #========================================
 # FUNCTIONS
 #========================================
+
+def extract_question_details(df):
+    """Return a small per-question metadata DataFrame indexed by questionId.
+
+    This must be called BEFORE slim_results_df() because slimming drops
+    the text columns this function depends on.
+    """
+    text_cols = ['questionId', 'questionContent', 'questionChoices', 'conceptTitle']
+    available = [c for c in text_cols if c in df.columns]
+    if 'questionId' not in available:
+        return pd.DataFrame()
+    return (
+        df[available]
+        .drop_duplicates(subset='questionId')
+        .set_index('questionId')
+    )
+
+
+def slim_results_df(df):
+    """Drop large text columns and downcast numeric types to shrink memory.
+
+    questionContent and questionChoices are repeated once per row (one row
+    per question per attempt), so they scale with attempts × questions and
+    dominate memory for large datasets. After calling extract_question_details()
+    they are no longer needed in the main DataFrame.
+    """
+    drop_cols = ['questionContent', 'questionChoices']
+    df = df.drop(columns=[c for c in drop_cols if c in df.columns])
+    for col in ['questionScore', 'totalScore', 'sectionScore']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').astype('float32')
+    for col in ['sectionTitle', 'difficultyLabel', 'skillsTitle']:
+        if col in df.columns:
+            df[col] = df[col].astype('category')
+    return df
 
 # Query template
 ATTEMPTS_QUERY = """
@@ -323,13 +359,18 @@ def fetch_page(assessment_id, limit, page):
     return response.json()["data"]["attempts"]
 
 
-def fetch_attempts(assessment_id, limit=50, progress_bar=None, status_text=None):
+def fetch_attempts(assessment_id, limit=50, progress_bar=None, status_text=None, max_attempts=None):
     """Fetch all attempt pages in parallel using ThreadPoolExecutor.
 
     Page 1 is fetched first to discover totalPages. Remaining pages are
     dispatched in parallel and results are collected via as_completed so
     the optional Streamlit progress_bar and status_text placeholders can
     be updated in the main thread without any thread-safety issues.
+
+    If max_attempts is set and the total exceeds it, only the first
+    ceil(max_attempts / limit) pages are fetched.  A (was_truncated,
+    total_count) tuple is NOT returned — callers receive the raw list and
+    can inspect len() vs the progress_bar status text for truncation info.
     """
     # Page 1 reveals pagination metadata
     page1_data = fetch_page(assessment_id, limit, 1)
@@ -337,16 +378,23 @@ def fetch_attempts(assessment_id, limit=50, progress_bar=None, status_text=None)
     total_count = page1_data["totalCount"]
     all_attempts = list(page1_data["attempts"])
 
-    if progress_bar is not None:
-        progress_bar.progress(1 / max(total_pages, 1))
-    if status_text is not None:
-        status_text.text(f"Fetched page 1 of {total_pages} ({total_count} total responses)...")
+    # Apply cap: only fetch the first max_pages pages (oldest-first order)
+    if max_attempts and total_count > max_attempts:
+        max_pages = min(total_pages, math.ceil(max_attempts / limit))
+    else:
+        max_pages = total_pages
 
-    if total_pages <= 1:
+    if progress_bar is not None:
+        progress_bar.progress(1 / max(max_pages, 1))
+    if status_text is not None:
+        cap_note = f" (capped at {max_attempts:,})" if max_attempts and total_count > max_attempts else ""
+        status_text.text(f"Fetched page 1 of {max_pages} — {total_count:,} total responses{cap_note}...")
+
+    if max_pages <= 1:
         if progress_bar is not None:
             progress_bar.progress(1.0)
         if status_text is not None:
-            status_text.text(f"Fetched {total_count} responses.")
+            status_text.text(f"Fetched {len(all_attempts):,} responses.")
         return all_attempts
 
     completed = 1
@@ -354,7 +402,7 @@ def fetch_attempts(assessment_id, limit=50, progress_bar=None, status_text=None)
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         future_to_page = {
             executor.submit(fetch_page, assessment_id, limit, p): p
-            for p in range(2, total_pages + 1)
+            for p in range(2, max_pages + 1)
         }
 
         for future in concurrent.futures.as_completed(future_to_page):
@@ -363,12 +411,12 @@ def fetch_attempts(assessment_id, limit=50, progress_bar=None, status_text=None)
             completed += 1
 
             if progress_bar is not None:
-                progress_bar.progress(completed / total_pages)
+                progress_bar.progress(completed / max_pages)
             if status_text is not None:
-                status_text.text(f"Fetched page {completed} of {total_pages} ({len(all_attempts)} responses so far)...")
+                status_text.text(f"Fetched page {completed} of {max_pages} ({len(all_attempts):,} responses so far)...")
 
     if status_text is not None:
-        status_text.text(f"Done — {len(all_attempts)} responses fetched.")
+        status_text.text(f"Done — {len(all_attempts):,} responses fetched.")
 
     return all_attempts
 
@@ -507,8 +555,8 @@ def flatten_attempt(attempt):
 
     return questions or [flat]
 
-def get_attempts_dataframe(assessment_id, progress_bar=None, status_text=None):
-    raw_attempts = fetch_attempts(assessment_id, progress_bar=progress_bar, status_text=status_text)
+def get_attempts_dataframe(assessment_id, progress_bar=None, status_text=None, max_attempts=None):
+    raw_attempts = fetch_attempts(assessment_id, progress_bar=progress_bar, status_text=status_text, max_attempts=max_attempts)
     flattened = []
     for attempt in raw_attempts:
         try:
@@ -572,8 +620,8 @@ def get_skills():
     skills_map.columns = ['skillsTitle','skillsCategory','skillsExternalId']
     return skills_map
 
-def get_results(assessment_id, progress_bar=None, status_text=None):
-    df = get_attempts_dataframe(assessment_id, progress_bar=progress_bar, status_text=status_text)
+def get_results(assessment_id, progress_bar=None, status_text=None, max_attempts=None):
+    df = get_attempts_dataframe(assessment_id, progress_bar=progress_bar, status_text=status_text, max_attempts=max_attempts)
     difficulty_map = get_difficulty_levels()
     skills_map = get_skills()
     df = df.merge(difficulty_map, how='left', left_on='difficultyLevelId', right_index=True)
@@ -967,18 +1015,32 @@ def plot_skill_correlation_heatmap(user_skills_df: pd.DataFrame):
     plt.tight_layout()
     st.pyplot(fig)
 
-def calculate_question_statistics(results_df):
+def calculate_question_statistics(results_df, question_details=None):
     """
     Calculate difficulty and discrimination indices for each question using classical test theory.
     
     Difficulty = proportion of students who answered correctly
     Discrimination = correlation between question score and total score
+
+    question_details: optional DataFrame indexed by questionId with columns
+        questionContent, questionChoices, conceptTitle — used as a fallback
+        when those columns have been dropped from results_df by slim_results_df().
     """
     question_stats = {}
     has_assessment = (
         'assessmentId' in results_df.columns
         and results_df['assessmentId'].notna().any()
     )
+
+    def _qdetail(question_data, col, default):
+        """Read a text field from the row data or from question_details lookup."""
+        if col in question_data.columns:
+            return question_data[col].iloc[0]
+        if question_details is not None and not question_details.empty:
+            qid = question_data['questionId'].iloc[0] if 'questionId' in question_data.columns else None
+            if qid is not None and qid in question_details.index and col in question_details.columns:
+                return question_details.loc[qid, col]
+        return default
 
     def stats_for_slice(question_data, dict_key, assessment_id_val=None, question_id_val=None):
         if len(question_data) == 0:
@@ -990,9 +1052,9 @@ def calculate_question_statistics(results_df):
             discrimination = 0.0
         skill_title = question_data['skillsTitle'].iloc[0] if 'skillsTitle' in question_data.columns else 'Unknown'
         difficulty_level = question_data['difficultyLabel'].iloc[0] if 'difficultyLabel' in question_data.columns else 'Unknown'
-        concept_title = question_data['conceptTitle'].iloc[0] if 'conceptTitle' in question_data.columns else 'Unknown'
-        question_content = question_data['questionContent'].iloc[0] if 'questionContent' in question_data.columns else 'No content available'
-        question_choices = question_data['questionChoices'].iloc[0] if 'questionChoices' in question_data.columns else '[]'
+        concept_title = _qdetail(question_data, 'conceptTitle', 'Unknown')
+        question_content = _qdetail(question_data, 'questionContent', 'No content available')
+        question_choices = _qdetail(question_data, 'questionChoices', '[]')
         qid = question_id_val if question_id_val is not None else dict_key
         row = {
             'question_id': qid,
@@ -1154,11 +1216,11 @@ def plot_assessment_level_summary_scatter(summary_df):
 
     st.pyplot(fig)
 
-def plot_question_analysis(results_df):
+def plot_question_analysis(results_df, question_details=None):
     """
     Create a scatter plot of question difficulty vs discrimination using matplotlib/seaborn.
     """
-    question_stats = calculate_question_statistics(results_df)
+    question_stats = calculate_question_statistics(results_df, question_details=question_details)
     
     if not question_stats:
         return
