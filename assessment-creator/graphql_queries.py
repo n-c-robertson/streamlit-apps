@@ -162,6 +162,139 @@ def query_component(key, locale="en-us"):
         return None
 
 
+def query_construction_release(key, locale="en-us"):
+    """Fallback resolver for keys that have no published RELEASE branch.
+
+    classroom-content is branch-based (RELEASE / BUGFIX / CONSTRUCTION).
+    `component(key:).latest_release` only returns the latest RELEASE branch,
+    so it is null for a program that has never been published. The unreleased
+    work lives on the CONSTRUCTION branch, which is reachable by passing
+    `version: "construction"` to any node query (resolveRef returns the latest
+    construction branch for that magic version string).
+
+    `Nanodegree`, `Course`, and `Part` all implement `Node` and expose
+    `branch { component { metadata { ... } } }`, so this recovers the same
+    `difficulty_level` / `teaches_skills` / `prerequisite_skills` metadata the
+    release path reads off `latest_release.component.metadata`.
+
+    Returns a dict shaped exactly like `query_component`'s `latest_release`
+    return (so callers can use it without branching), plus an `_unreleased`
+    marker so the UI can flag draft content:
+
+        {
+          "root_node_id": <int>,
+          "root_node": {"id": <int>, "title": <str>},
+          "component": {"metadata": {...} | None},
+          "_unreleased": True,
+        }
+
+    Returns None on failure (no construction branch, auth gate, or transport
+    error), printing structured diagnostics in the same style as the other
+    queries here.
+    """
+    metadata_fields = """
+                metadata {
+                  difficulty_level {
+                    name
+                    uri
+                  }
+                  teaches_skills {
+                    name
+                    uri
+                  }
+                  prerequisite_skills {
+                    name
+                    uri
+                  }
+                }
+    """
+    branch_fragment = f"""
+            id
+            title
+            branch {{
+              major
+              minor
+              patch
+              has_staged_changes
+              component {{
+{metadata_fields}
+              }}
+            }}
+    """
+    payload = {
+        "query": f"""
+        query AssessmentsAPI_ConstructionQuery($key: String!, $locale: String!) {{
+          node(key: $key, locale: $locale, version: "construction") {{
+            ... on Nanodegree {{{branch_fragment}}}
+            ... on Course {{{branch_fragment}}}
+            ... on Part {{{branch_fragment}}}
+          }}
+        }}
+        """,
+        "variables": {"key": key, "locale": locale},
+    }
+
+    try:
+        resp = requests.post(
+            settings.CLASSROOM_CONTENT_API_URL,
+            headers=settings.production_headers(),
+            json=payload,
+            timeout=60,
+        )
+    except Exception as e:
+        print(
+            f"\n\nERROR [query_construction_release] {key} locale={locale!r}: "
+            f"network/request failure: {type(e).__name__}: {e}"
+        )
+        return None
+
+    if resp.status_code != 200:
+        preview = (resp.text or "")[:500]
+        print(
+            f"\n\nERROR [query_construction_release] {key} locale={locale!r}: "
+            f"HTTP {resp.status_code} from classroom-content. Preview: {preview!r}"
+        )
+        return None
+
+    try:
+        body = resp.json()
+    except Exception as e:
+        preview = (resp.text or "")[:500]
+        print(
+            f"\n\nERROR [query_construction_release] {key} locale={locale!r}: "
+            f"non-JSON response ({type(e).__name__}: {e}). Preview: {preview!r}"
+        )
+        return None
+
+    errors = body.get("errors")
+    if errors:
+        try:
+            errs_dump = json.dumps(errors, indent=2)[:2000]
+        except Exception:
+            errs_dump = str(errors)[:2000]
+        print(
+            f"\n\nERROR [query_construction_release] {key} locale={locale!r}: "
+            f"GraphQL returned {len(errors)} error(s):\n{errs_dump}"
+        )
+
+    node = (body.get("data") or {}).get("node")
+    if not node:
+        print(
+            f"\n[query_construction_release] {key} locale={locale!r}: "
+            "node(version:'construction') returned null. Either there is no "
+            "construction branch in this locale, or the JWT cannot read it."
+        )
+        return None
+
+    branch = node.get("branch") or {}
+    return {
+        "root_node_id": node.get("id"),
+        "root_node": {"id": node.get("id"), "title": node.get("title")},
+        "component": {"metadata": (branch.get("component") or {}).get("metadata")},
+        "_unreleased": True,
+    }
+
+
 def query_nd_full(nd_key, locale="en-us"):
     """Fetch an ND's part list + full content tree (modules > lessons > concepts
     > atoms) in a single round-trip.

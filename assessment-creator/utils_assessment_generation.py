@@ -183,13 +183,26 @@ def _resolve_nd_to_parts(nd_key, locale="en-us"):
     # Step 1: ND-level Component release (metadata + root_node_id pointer).
     nd_release = graphql_queries.query_component(nd_key, locale=chosen_locale)
     if not nd_release:
+        # Fallback: the ND has no published RELEASE branch. Try the unreleased
+        # CONSTRUCTION branch via node(version:"construction") so draft programs
+        # can still be assessed. Returns the same dict shape as query_component
+        # plus an `_unreleased` marker that flows through to the UI.
+        print(
+            f"[_resolve_nd_to_parts] {nd_key}: no latest_release in "
+            f"locale={chosen_locale!r}; trying CONSTRUCTION branch fallback."
+        )
+        nd_release = graphql_queries.query_construction_release(
+            nd_key, locale=chosen_locale
+        )
+    if not nd_release:
         return None, [], None, (
             f"components(key:{nd_key!r}) reports the key exists in locales "
-            f"{available_locales} (picked {chosen_locale!r}), but "
-            f"component(key:{nd_key!r}, locale:{chosen_locale!r}) returned "
-            "no latest_release. The Component row exists but has no "
-            "published release in that locale, or the JWT cannot read "
-            "its release. Verify the ND is published in Studio."
+            f"{available_locales} (picked {chosen_locale!r}), but neither "
+            f"component(key:{nd_key!r}, locale:{chosen_locale!r}).latest_release "
+            "nor a CONSTRUCTION branch could be resolved. The Component row "
+            "exists but has no published release or readable construction "
+            "branch in that locale, or the JWT cannot read it. Verify the ND "
+            "exists in Studio."
         )
 
     root_id = (
@@ -495,11 +508,21 @@ def add_program_data(section_content_definitions, assessment_type="placement"):
                 )
                 release = graphql_queries.query_component(key)
                 if not release:
+                    # Fallback to the unreleased CONSTRUCTION branch so draft
+                    # programs can still be assessed (same dict shape, plus an
+                    # `_unreleased` marker).
+                    print(
+                        f"[add_program_data] {key}: no latest_release; trying "
+                        "CONSTRUCTION branch fallback."
+                    )
+                    release = graphql_queries.query_construction_release(key)
+                if not release:
                     _add_diagnostic(
                         section, "ERROR", key,
-                        "query_component returned no 'latest_release' — the key may not exist, "
-                        "may be unpublished, or the classroom-content API call failed. "
-                        "Check the key spelling and confirm it has a published release."
+                        "query_component returned no 'latest_release' and no "
+                        "CONSTRUCTION branch could be resolved — the key may not "
+                        "exist, or the classroom-content API call failed. "
+                        "Check the key spelling and confirm it exists in Studio."
                     )
                     continue
                 root_id = release.get('root_node_id') \
@@ -510,6 +533,14 @@ def add_program_data(section_content_definitions, assessment_type="placement"):
                     "latest_release has no component.metadata — cannot determine "
                     "difficulty_level / teaches_skills / prerequisite_skills. "
                     "Check that program metadata is populated in Studio."
+                )
+
+            if release.get('_unreleased'):
+                _add_diagnostic(
+                    section, "WARNING", key,
+                    "Resolved from an unreleased CONSTRUCTION branch — these "
+                    "questions are based on draft content that has not been "
+                    "published in Studio and may change before release."
                 )
 
             if root_id is None:

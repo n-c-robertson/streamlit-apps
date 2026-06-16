@@ -284,7 +284,23 @@ def main():
         progress_data = st.session_state.get('progress_data', {})
         
         st.success(f"✅ Successfully generated {len(questions_choices_df)} assessment items!")
-        
+
+        # Flag any sections that were resolved from an unreleased CONSTRUCTION
+        # branch (no published release). Questions are based on draft content.
+        unreleased_sections = []
+        for sd in (progress_data or {}).get('section_diagnostics', []):
+            for d in sd.get('diagnostics', []):
+                if 'unreleased CONSTRUCTION branch' in (d.get('message') or ''):
+                    unreleased_sections.append(sd.get('title') or ', '.join(sd.get('content_keys', [])) or '<no-title>')
+                    break
+        if unreleased_sections:
+            st.warning(
+                "⚠️ **Unreleased content**: the following program(s) have no published "
+                "release, so questions were generated from their draft (CONSTRUCTION) "
+                "content and may change before release: "
+                + ", ".join(f"**{t}**" for t in unreleased_sections)
+            )
+
         # Show summary statistics
         st.markdown("### 📊 Generation Summary")
         col1, col2, col3, col4 = st.columns(4)
