@@ -79,18 +79,11 @@ if submitted:
         fetch_progress = st.progress(0)
         fetch_status = st.empty()
 
-        results_df = utils_assessment_analysis.get_results(
+        results_df, question_details_df = utils_assessment_analysis.get_results(
             assessment_id,
             progress_bar=fetch_progress,
             status_text=fetch_status,
         )
-
-        # Extract question text/choices (one row per unique question) BEFORE
-        # slimming so they aren't lost. This small DataFrame is stored separately.
-        question_details_df = utils_assessment_analysis.extract_question_details(results_df)
-
-        # Drop heavy text columns and downcast numerics to shrink memory.
-        results_df = utils_assessment_analysis.slim_results_df(results_df)
 
         user_skills_df = utils_assessment_analysis.user_skills(results_df)
 

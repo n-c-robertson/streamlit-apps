@@ -607,14 +607,118 @@ def get_skills():
     skills_map.columns = ['skillsTitle','skillsCategory','skillsExternalId']
     return skills_map
 
+def _process_page_attempts(attempts):
+    """Flatten a list of raw attempt objects and immediately split off text blobs.
+
+    Returns:
+        slim_rows     – list of row dicts with questionContent / questionChoices removed
+        question_details – dict keyed by questionId with the text fields we stripped
+    """
+    slim_rows = []
+    question_details = {}
+    for attempt in attempts:
+        try:
+            rows = flatten_attempt(attempt)
+            for row in rows:
+                qid = row.get('questionId')
+                if qid is not None and qid not in question_details:
+                    question_details[qid] = {
+                        'questionContent': row.pop('questionContent', ''),
+                        'questionChoices': row.pop('questionChoices', '[]'),
+                        'conceptTitle': row.get('conceptTitle', ''),
+                    }
+                else:
+                    row.pop('questionContent', None)
+                    row.pop('questionChoices', None)
+                slim_rows.append(row)
+        except Exception:
+            pass
+    return slim_rows, question_details
+
+
+def fetch_and_build_dataframes(assessment_id, limit=50, progress_bar=None, status_text=None):
+    """Streaming fetch-and-process pipeline.
+
+    Each page is processed immediately as it arrives from the executor:
+    attempts are flattened, text blobs extracted into a question-details
+    dict, and the blob columns dropped before the rows are accumulated.
+    This keeps peak memory proportional to (slim rows) + (unique questions)
+    rather than (all raw JSON) + (all flattened rows with blobs).
+
+    Returns:
+        slim_df           – DataFrame without questionContent / questionChoices,
+                            with score columns downcasted to float32
+        question_details_df – small DataFrame indexed by questionId containing
+                              the text fields that were stripped
+    """
+    def fetch_and_process(page):
+        page_data = fetch_page(assessment_id, limit, page)
+        return _process_page_attempts(page_data["attempts"])
+
+    # Page 1 reveals pagination metadata; process it immediately
+    page1_data = fetch_page(assessment_id, limit, 1)
+    total_pages = page1_data["totalPages"]
+    total_count = page1_data["totalCount"]
+    all_slim_rows, all_qdetails = _process_page_attempts(page1_data["attempts"])
+    del page1_data  # release raw JSON
+
+    if progress_bar is not None:
+        progress_bar.progress(1 / max(total_pages, 1))
+    if status_text is not None:
+        status_text.text(f"Fetched page 1 of {total_pages} — {total_count:,} total responses...")
+
+    if total_pages > 1:
+        completed = 1
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_page = {
+                executor.submit(fetch_and_process, p): p
+                for p in range(2, total_pages + 1)
+            }
+            for future in concurrent.futures.as_completed(future_to_page):
+                slim_rows, qdetails = future.result()
+                all_slim_rows.extend(slim_rows)
+                # First-seen wins for question details (avoids overwriting with duplicates)
+                for qid, detail in qdetails.items():
+                    if qid not in all_qdetails:
+                        all_qdetails[qid] = detail
+                completed += 1
+                if progress_bar is not None:
+                    progress_bar.progress(completed / total_pages)
+                if status_text is not None:
+                    status_text.text(
+                        f"Fetched page {completed} of {total_pages} "
+                        f"({len(all_slim_rows):,} rows so far)..."
+                    )
+
+    if status_text is not None:
+        status_text.text(f"Done — {len(all_slim_rows):,} rows fetched.")
+
+    slim_df = pd.DataFrame(all_slim_rows)
+    question_details_df = pd.DataFrame.from_dict(all_qdetails, orient='index')
+    question_details_df.index.name = 'questionId'
+
+    # Downcast score columns that exist at this stage
+    for col in ['questionScore', 'totalScore', 'sectionScore']:
+        if col in slim_df.columns:
+            slim_df[col] = pd.to_numeric(slim_df[col], errors='coerce').astype('float32')
+
+    return slim_df, question_details_df
+
+
 def get_results(assessment_id, progress_bar=None, status_text=None):
-    df = get_attempts_dataframe(assessment_id, progress_bar=progress_bar, status_text=status_text)
+    slim_df, question_details_df = fetch_and_build_dataframes(
+        assessment_id, progress_bar=progress_bar, status_text=status_text
+    )
     difficulty_map = get_difficulty_levels()
     skills_map = get_skills()
-    df = df.merge(difficulty_map, how='left', left_on='difficultyLevelId', right_index=True)
-    df = df.merge(skills_map, how='left', left_on='skillId', right_index=True)
-    df['assessmentId'] = str(assessment_id).strip()
-    return df
+    slim_df = slim_df.merge(difficulty_map, how='left', left_on='difficultyLevelId', right_index=True)
+    slim_df = slim_df.merge(skills_map, how='left', left_on='skillId', right_index=True)
+    slim_df['assessmentId'] = str(assessment_id).strip()
+    # Downcast columns that only exist after the merge
+    for col in ['sectionTitle', 'difficultyLabel', 'skillsTitle']:
+        if col in slim_df.columns:
+            slim_df[col] = slim_df[col].astype('category')
+    return slim_df, question_details_df
 
 def _enrich_attempts_df(df, difficulty_map, skills_map, assessment_id):
     """Merge difficulty/skills maps and tag rows with assessment_id."""
