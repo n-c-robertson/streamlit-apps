@@ -511,7 +511,7 @@ def fetch_user_email(user_id: str) -> str:
         return cached
 
     email = None
-    for attempt in range(3):
+    for attempt in range(6):
         email, retryable = _request_user_email(user_id)
         if email is not None or not retryable:
             break
