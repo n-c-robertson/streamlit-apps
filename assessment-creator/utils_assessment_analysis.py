@@ -13,10 +13,10 @@ import random
 import re
 import requests
 import sys
+import threading
 import time
 import traceback
 from collections import Counter
-from functools import lru_cache
 import numpy as np
 import pandas as pd
 from openai import OpenAI
@@ -461,25 +461,72 @@ def fetch_assessment_titles_map(assessment_ids):
 STUDENTS_USER_API = "https://students.udacity.com/api/user/users/{user_id}?projection=full"
 
 
-@lru_cache(maxsize=4096)
+# Cache ONLY successful email resolutions. A previous implementation wrapped
+# fetch_user_email in @lru_cache, which also cached the user_id fallback returned
+# on transient failures (timeouts, 429 rate-limits from the parallel burst,
+# network blips). That permanently poisoned the cache, so the Email column ended
+# up with a mix of real addresses and raw learner IDs that reproduced on every
+# re-download within the session.
+_EMAIL_CACHE = {}
+_EMAIL_CACHE_LOCK = threading.Lock()
+
+
+def _request_user_email(user_id: str):
+    """Single resolution attempt.
+
+    Returns a (email_or_None, retryable) tuple. ``retryable`` flags whether an
+    unresolved result is worth retrying (transient errors) versus terminal
+    (e.g. 404 user not found, malformed response).
+    """
+    url = STUDENTS_USER_API.format(user_id=user_id)
+    try:
+        response = requests.get(url, headers=settings.production_headers(), timeout=30)
+    except requests.RequestException:
+        return None, True
+    if response.status_code == 200:
+        try:
+            payload = response.json()
+        except ValueError:
+            return None, False
+        email = (payload.get("email") or "").strip()
+        return (email or None), False
+    # 429 (rate limited) and 5xx are transient and worth retrying; other 4xx
+    # responses (e.g. 404) are terminal.
+    retryable = response.status_code == 429 or response.status_code >= 500
+    return None, retryable
+
+
 def fetch_user_email(user_id: str) -> str:
-    """Resolve learner email via Students API; falls back to user_id on failure."""
+    """Resolve learner email via Students API; falls back to user_id on failure.
+
+    Only successful resolutions are cached, and transient failures are retried
+    with backoff so a single hiccup doesn't bake the learner ID into the output.
+    """
     if not user_id:
         return ""
-    try:
-        url = STUDENTS_USER_API.format(user_id=user_id)
-        response = requests.get(url, headers=settings.production_headers(), timeout=30)
-        if response.status_code != 200:
-            return user_id
-        payload = response.json()
-        email = payload.get("email")
-        return email if email else user_id
-    except Exception:
-        return user_id
+
+    with _EMAIL_CACHE_LOCK:
+        cached = _EMAIL_CACHE.get(user_id)
+    if cached:
+        return cached
+
+    email = None
+    for attempt in range(3):
+        email, retryable = _request_user_email(user_id)
+        if email is not None or not retryable:
+            break
+        # Backoff with jitter to ease off rate limits before the next attempt.
+        time.sleep(0.5 * (attempt + 1) + random.uniform(0, 0.25))
+
+    if email:
+        with _EMAIL_CACHE_LOCK:
+            _EMAIL_CACHE[user_id] = email
+        return email
+    return user_id
 
 
 def fetch_emails_for_user_ids(user_ids):
-    """Parallel fetch for unique user IDs; lru_cache avoids duplicate HTTP for repeated IDs."""
+    """Parallel fetch for unique user IDs; the email cache avoids duplicate HTTP for repeated IDs."""
     unique = list(dict.fromkeys(uid for uid in user_ids if uid))
     if not unique:
         return {}
@@ -1552,8 +1599,8 @@ def plot_total_score_histogram(results_df):
     attempt_rows = attempt_rows.assign(_ts_sort=_ts_sort).sort_values('_ts_sort', ascending=False, na_position='last').drop(columns=['_ts_sort'])
 
     # Fetch emails for all rows so the download CSV contains real addresses.
-    # fetch_emails_for_user_ids uses lru_cache internally, so any IDs already
-    # resolved for the preview cost no additional HTTP requests.
+    # Resolved emails are cached, so any IDs already resolved for the preview
+    # cost no additional HTTP requests.
     with st.spinner("Loading learner emails..."):
         email_map = fetch_emails_for_user_ids(attempt_rows['userId'].tolist())
         title_map = fetch_assessment_titles_map(unique_aids) if unique_aids else {}
