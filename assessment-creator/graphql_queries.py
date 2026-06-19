@@ -149,14 +149,34 @@ def query_component(key, locale="en-us"):
         resp = requests.post(
             settings.CLASSROOM_CONTENT_API_URL,
             headers=settings.production_headers(),
-            json=payload
+            json=payload,
+            timeout=60,
         )
         resp.raise_for_status()
         data = resp.json()
-        return ((data.get("data") or {}).get("component") or {}).get("latest_release")
     except Exception as e:
-        print(f"\n\nERROR querying node for key {key}: {e}")
+        print(f"\n\nERROR [query_component] {key} locale={locale!r}: {type(e).__name__}: {e}")
         return None
+
+    errors = data.get("errors")
+    if errors:
+        print(f"\n\nERROR [query_component] {key} locale={locale!r}: GraphQL errors: {json.dumps(errors)[:1000]}")
+
+    component = (data.get("data") or {}).get("component")
+    if component is None:
+        print(
+            f"\n[query_component] {key} locale={locale!r}: component is null. "
+            "Key/locale not found in classroom-content, or JWT has no visibility."
+        )
+        return None
+
+    latest = component.get("latest_release")
+    if latest is None:
+        print(
+            f"\n[query_component] {key} locale={locale!r}: component found but "
+            "latest_release is null — no published RELEASE branch for this component."
+        )
+    return latest
 
 
 def query_construction_release(key, locale="en-us"):
@@ -201,9 +221,10 @@ def query_construction_release(key, locale="en-us"):
         "query": """
         query AssessmentsAPI_ConstructionQuery($key: String!, $locale: String!) {
           node(key: $key, locale: $locale, version: "construction") {
-            ... on Nanodegree { id title }
-            ... on Course { id title }
-            ... on Part { id title }
+            id
+            key
+            title
+            semantic_type
           }
           component(key: $key, locale: $locale) {
             metadata {
