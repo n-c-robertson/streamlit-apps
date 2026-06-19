@@ -492,13 +492,14 @@ def add_program_data(section_content_definitions, assessment_type="placement"):
                     f"\n=== ADD_PROGRAM_DATA: Fetching component for key '{key}' "
                     f"({assessment_type}) ==="
                 )
-                release = graphql_queries.query_component(key)
+                release = graphql_queries.query_component_any_locale(key)
                 if not release:
                     _add_diagnostic(
                         section, "ERROR", key,
-                        "query_component returned no 'latest_release' — the key "
-                        "may not exist or has no published release. Check the key "
-                        "spelling and confirm it exists in Studio."
+                        "component(key:, locale:) returned no 'latest_release' in "
+                        "any locale (checked every locale via components(key:)). "
+                        "The key may not exist or has no published release. Check "
+                        "the key spelling and confirm it exists in Studio."
                     )
                     continue
                 root_id = release.get('root_node_id') \

@@ -179,6 +179,54 @@ def query_component(key, locale="en-us"):
     return latest
 
 
+def _pick_released_locale(components):
+    """Pick the best locale from a components(key:) result.
+
+    Prefers a locale that actually has a published release (non-null
+    latest_release.root_node_id), then en-us, then non-deprecated, then
+    whatever's left. Returns the locale string or None.
+    """
+    if not components:
+        return None
+    has_release = lambda c: bool((c.get("latest_release") or {}).get("root_node_id"))
+    pool = [c for c in components if has_release(c)] or components
+    chosen = next((c for c in pool if c.get("locale") == "en-us"), None) \
+        or next((c for c in pool if not c.get("deprecated")), None) \
+        or pool[0]
+    return chosen.get("locale")
+
+
+def query_component_any_locale(key, requested_locale="en-us"):
+    """Resolve a key's latest_release regardless of which locale it lives in.
+
+    `component(key:, locale:)` is an exact key+locale match (Component.findOne),
+    so a hardcoded 'en-us' returns null for any live program whose Component
+    row is in a different locale. `components(key:)` is NOT locale-gated, so we
+    use it to discover the locale that actually has a published release, then
+    fetch the full release (metadata + root_node) in that locale.
+
+    Fast path: try `requested_locale` directly first (most cd* are en-us, one
+    round-trip). Only enumerate if that misses.
+
+    Returns the latest_release dict (same shape as query_component) or None.
+    """
+    release = query_component(key, locale=requested_locale)
+    if release:
+        return release
+
+    components = query_components_by_key(key)
+    chosen_locale = _pick_released_locale(components)
+    if not chosen_locale or chosen_locale == requested_locale:
+        return None
+
+    print(
+        f"[query_component_any_locale] {key}: no release in "
+        f"{requested_locale!r}; resolved via components(key:) -> locale "
+        f"{chosen_locale!r}."
+    )
+    return query_component(key, locale=chosen_locale)
+
+
 def query_nd_full(nd_key, locale="en-us"):
     """Fetch an ND's part list + full content tree (modules > lessons > concepts
     > atoms) in a single round-trip.
@@ -662,3 +710,27 @@ def query_node(node_id):
     except Exception as e:
         print(f"\n\nERROR querying node {node_id}: {e}")
         return None
+
+
+if __name__ == "__main__":
+    # Self-check for the locale picker (the bug: en-us hardcoded missed
+    # live programs whose release lives in another locale).
+    _rel = {"latest_release": {"root_node_id": 1}}
+    _norel = {"latest_release": None}
+    assert _pick_released_locale([]) is None
+    # en-us has no release, fr-fr does -> pick the one with a release.
+    assert _pick_released_locale([
+        {"locale": "en-us", **_norel},
+        {"locale": "fr-fr", **_rel},
+    ]) == "fr-fr"
+    # multiple with releases -> prefer en-us.
+    assert _pick_released_locale([
+        {"locale": "de-de", **_rel},
+        {"locale": "en-us", **_rel},
+    ]) == "en-us"
+    # none have releases, no en-us -> prefer non-deprecated.
+    assert _pick_released_locale([
+        {"locale": "de-de", "deprecated": True, **_norel},
+        {"locale": "pt-br", "deprecated": False, **_norel},
+    ]) == "pt-br"
+    print("graphql_queries self-check OK")
