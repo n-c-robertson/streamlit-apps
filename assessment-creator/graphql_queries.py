@@ -115,7 +115,6 @@ def query_component(key, locale="en-us"):
               minor
               patch
               root_node_id
-              type
               component {
                 metadata {
                   difficulty_level {
