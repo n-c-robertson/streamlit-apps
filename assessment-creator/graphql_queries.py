@@ -152,10 +152,31 @@ def query_component(key, locale="en-us"):
             json=payload,
             timeout=60,
         )
-        resp.raise_for_status()
+    except Exception as e:
+        print(f"\n\nERROR [query_component] {key} locale={locale!r}: network/request failure: {type(e).__name__}: {e}")
+        return None
+
+    # Surface auth/transport failures explicitly. A 401 here used to be
+    # swallowed and reported downstream as "no latest_release / key may not
+    # exist", which masks an expired/revoked JWT. Make it unmissable.
+    if resp.status_code in (401, 403):
+        print(
+            f"\n\nAUTH ERROR [query_component] {key}: HTTP {resp.status_code} "
+            f"from classroom-content — the staff JWT is invalid, expired, or "
+            f"revoked. Refresh st.secrets['jwt_token']. Response: {resp.text[:200]!r}"
+        )
+        return None
+    if resp.status_code != 200:
+        print(
+            f"\n\nERROR [query_component] {key} locale={locale!r}: HTTP "
+            f"{resp.status_code} from classroom-content. Preview: {(resp.text or '')[:300]!r}"
+        )
+        return None
+
+    try:
         data = resp.json()
     except Exception as e:
-        print(f"\n\nERROR [query_component] {key} locale={locale!r}: {type(e).__name__}: {e}")
+        print(f"\n\nERROR [query_component] {key} locale={locale!r}: non-JSON response: {type(e).__name__}: {e}")
         return None
 
     errors = data.get("errors")
