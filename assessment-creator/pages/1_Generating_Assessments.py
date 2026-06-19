@@ -20,7 +20,7 @@ import utils_assessment_generation
 # commit that touches assessment-creator. The git SHA below is a "nice to
 # have" - the tag is the source of truth.
 
-BUILD_TAG = '2026-05-21-nd-shape-detection'
+BUILD_TAG = '2026-06-18-construction-branch-fix'
 
 
 def _safe_jwt_fingerprint():
