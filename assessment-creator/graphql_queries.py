@@ -248,6 +248,145 @@ def query_component_any_locale(key, requested_locale="en-us"):
     return query_component(key, locale=chosen_locale)
 
 
+def query_construction_release(key, locale="en-us"):
+    """Fallback resolver for keys that have no published RELEASE branch.
+
+    classroom-content is branch-based (RELEASE / BUGFIX / CONSTRUCTION).
+    `component(key:).latest_release` only returns the latest RELEASE branch,
+    so it is null for a program that has never been published. The unreleased
+    work lives on the CONSTRUCTION branch.
+
+    Two root fields in a single query:
+      - `node(key:, locale:, version:"construction")` — resolveRef maps the
+        magic version string "construction" to the latest CONSTRUCTION branch
+        ref for that key, returning the root node. We read Node-interface
+        fields directly (id/key/title/semantic_type) instead of type
+        fragments, because a `... on Nanodegree`-style fragment silently
+        returns {} for any other concrete type (Lab/Module/Project/etc).
+      - `component(key:, locale:).metadata` — top-level Component metadata
+        (difficulty_level / teaches_skills / prerequisite_skills) is populated
+        regardless of release state.
+
+    Returns a dict shaped like `query_component`'s latest_release return, plus
+    an `_unreleased` marker so the UI can flag draft content. None on failure.
+    """
+    payload = {
+        "query": """
+        query AssessmentsAPI_ConstructionQuery($key: String!, $locale: String!) {
+          node(key: $key, locale: $locale, version: "construction") {
+            id
+            key
+            title
+            semantic_type
+          }
+          component(key: $key, locale: $locale) {
+            metadata {
+              difficulty_level {
+                name
+                uri
+              }
+              teaches_skills {
+                name
+                uri
+              }
+              prerequisite_skills {
+                name
+                uri
+              }
+            }
+          }
+        }
+        """,
+        "variables": {"key": key, "locale": locale},
+    }
+
+    try:
+        resp = requests.post(
+            settings.CLASSROOM_CONTENT_API_URL,
+            headers=settings.production_headers(),
+            json=payload,
+            timeout=60,
+        )
+    except Exception as e:
+        print(
+            f"\n\nERROR [query_construction_release] {key} locale={locale!r}: "
+            f"network/request failure: {type(e).__name__}: {e}"
+        )
+        return None
+
+    if resp.status_code in (401, 403):
+        print(
+            f"\n\nAUTH ERROR [query_construction_release] {key}: HTTP "
+            f"{resp.status_code} — staff JWT invalid/expired/revoked. "
+            f"Refresh st.secrets['jwt_token']."
+        )
+        return None
+    if resp.status_code != 200:
+        preview = (resp.text or "")[:500]
+        print(
+            f"\n\nERROR [query_construction_release] {key} locale={locale!r}: "
+            f"HTTP {resp.status_code} from classroom-content. Preview: {preview!r}"
+        )
+        return None
+
+    try:
+        body = resp.json()
+    except Exception as e:
+        preview = (resp.text or "")[:500]
+        print(
+            f"\n\nERROR [query_construction_release] {key} locale={locale!r}: "
+            f"non-JSON response ({type(e).__name__}: {e}). Preview: {preview!r}"
+        )
+        return None
+
+    errors = body.get("errors")
+    if errors:
+        try:
+            errs_dump = json.dumps(errors, indent=2)[:2000]
+        except Exception:
+            errs_dump = str(errors)[:2000]
+        print(
+            f"\n\nERROR [query_construction_release] {key} locale={locale!r}: "
+            f"GraphQL returned {len(errors)} error(s):\n{errs_dump}"
+        )
+
+    data_field = body.get("data") or {}
+    node = data_field.get("node")
+    component = data_field.get("component")
+
+    if not node or not node.get("id"):
+        print(
+            f"\n[query_construction_release] {key} locale={locale!r}: "
+            "node(key:, version:'construction') returned null or has no id. "
+            "Either there is no CONSTRUCTION branch in this locale, the JWT "
+            "cannot read it, or the key does not exist."
+        )
+        return None
+
+    return {
+        "root_node_id": node.get("id"),
+        "root_node": {"id": node.get("id"), "title": node.get("title")},
+        "component": {"metadata": (component or {}).get("metadata")},
+        "_unreleased": True,
+    }
+
+
+def query_construction_any_locale(key, requested_locale="en-us"):
+    """query_construction_release, but locale-robust (mirror of
+    query_component_any_locale). Draft programs can live in a non-en-us locale
+    too, so try the requested locale, then any locale the key exists in."""
+    rel = query_construction_release(key, locale=requested_locale)
+    if rel:
+        return rel
+    for loc in sorted({c.get("locale") for c in query_components_by_key(key) if c.get("locale")}):
+        if loc == requested_locale:
+            continue
+        rel = query_construction_release(key, locale=loc)
+        if rel:
+            return rel
+    return None
+
+
 def query_nd_full(nd_key, locale="en-us"):
     """Fetch an ND's part list + full content tree (modules > lessons > concepts
     > atoms) in a single round-trip.

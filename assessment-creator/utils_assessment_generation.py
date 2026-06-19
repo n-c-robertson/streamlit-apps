@@ -183,12 +183,23 @@ def _resolve_nd_to_parts(nd_key, locale="en-us"):
     # Step 1: ND-level Component release (metadata + root_node_id pointer).
     nd_release = graphql_queries.query_component(nd_key, locale=chosen_locale)
     if not nd_release:
+        # Fall back to the unreleased CONSTRUCTION branch so not-yet-launched
+        # NDs can still be assessed (same dict shape, plus `_unreleased`).
+        print(
+            f"[_resolve_nd_to_parts] {nd_key}: no latest_release in "
+            f"locale={chosen_locale!r}; trying CONSTRUCTION branch fallback."
+        )
+        nd_release = graphql_queries.query_construction_release(
+            nd_key, locale=chosen_locale
+        )
+    if not nd_release:
         return None, [], None, (
             f"components(key:{nd_key!r}) reports the key exists in locales "
-            f"{available_locales} (picked {chosen_locale!r}), but "
+            f"{available_locales} (picked {chosen_locale!r}), but neither "
             f"component(key:{nd_key!r}, locale:{chosen_locale!r}).latest_release "
-            "is null. The Component row exists but has no published release in "
-            "that locale, or the JWT cannot read it. Verify the ND exists in Studio."
+            "nor a CONSTRUCTION branch could be resolved. No published release "
+            "or readable construction branch in that locale, or auth failed "
+            "(check for AUTH ERROR above). Verify the ND exists in Studio."
         )
 
     root_id = (
@@ -494,12 +505,21 @@ def add_program_data(section_content_definitions, assessment_type="placement"):
                 )
                 release = graphql_queries.query_component_any_locale(key)
                 if not release:
+                    # No published RELEASE in any locale — fall back to the
+                    # unreleased CONSTRUCTION branch so not-yet-launched
+                    # programs can still be assessed (carries `_unreleased`).
+                    print(
+                        f"[add_program_data] {key}: no latest_release in any "
+                        "locale; trying CONSTRUCTION branch fallback."
+                    )
+                    release = graphql_queries.query_construction_any_locale(key)
+                if not release:
                     _add_diagnostic(
                         section, "ERROR", key,
                         "component(key:, locale:) returned no 'latest_release' in "
-                        "any locale (checked every locale via components(key:)). "
-                        "The key may not exist or has no published release. Check "
-                        "the key spelling and confirm it exists in Studio."
+                        "any locale and no CONSTRUCTION branch could be resolved. "
+                        "The key may not exist, or auth failed (check for AUTH "
+                        "ERROR above). Confirm the key exists in Studio."
                     )
                     continue
                 root_id = release.get('root_node_id') \
@@ -510,6 +530,14 @@ def add_program_data(section_content_definitions, assessment_type="placement"):
                     "latest_release has no component.metadata — cannot determine "
                     "difficulty_level / teaches_skills / prerequisite_skills. "
                     "Check that program metadata is populated in Studio."
+                )
+
+            if release.get('_unreleased'):
+                _add_diagnostic(
+                    section, "WARNING", key,
+                    "Resolved from an unreleased CONSTRUCTION branch — these "
+                    "questions are based on draft content that has not been "
+                    "published in Studio and may change before release."
                 )
 
             if root_id is None:
