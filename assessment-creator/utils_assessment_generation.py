@@ -4,6 +4,7 @@
 
 import ast
 import concurrent.futures
+import difflib
 import hashlib
 import json
 import os
@@ -2408,9 +2409,308 @@ def tune_distractors(section_content_definitions, tuning_percentage=0.20):
         "reason": f"Tuned {tuned_count} out of {len(questions_to_tune)} selected questions"
     }
 
+def run_post_pipeline(
+    section_content_definitions,
+    QUESTION_TYPES,
+    QUESTION_LIMIT,
+    CUSTOMIZED_PROMPT_INSTRUCTIONS,
+    include_case_study,
+    include_coding,
+    progress_bar=None,
+    progress_text=None,
+    step_offset=0,
+    total_steps=18,
+    missing_prerequisite_skills=None,
+    extra_progress_data=None,
+    debug_outputs=None,
+):
+    """Shared tail of the generation pipeline.
+
+    Consumes section_content_definitions whose `questions_choices` are already
+    populated, then runs redistribute -> evaluate -> dataframe -> filter ->
+    dedupe -> specificity -> case study -> coding -> distractor -> selection.
+
+    step_offset/total_steps drive the progress bar so callers (CD/ND flow vs
+    uploaded-content flow) can prefix their own pre-steps.
+    """
+    if missing_prerequisite_skills is None:
+        missing_prerequisite_skills = []
+    if extra_progress_data is None:
+        extra_progress_data = {}
+    if debug_outputs is None:
+        debug_outputs = {}
+
+    post_steps = [
+        "Redistributing order indices...",
+        "Evaluating questions...",
+        "Converting to DataFrame...",
+        "Filtering failed evaluations...",
+        "Deduplicating questions...",
+        "Filtering content-specific questions...",
+        "Converting 15 percent of questions to case studies..." if include_case_study else "Skipping case study conversion (disabled)...",
+        "Converting 30 percent of coding questions to include code markdown..." if include_coding else "Skipping coding question conversion (disabled)...",
+        "Tuning distractors for 20 percent of questions...",
+        "Selecting best questions (if limit specified)...",
+        "Finalizing results...",
+    ]
+
+    def update_progress(i):
+        if progress_bar:
+            progress_bar.progress((step_offset + i + 1) / total_steps)
+        if progress_text:
+            progress_text.text(post_steps[i])
+
+    question_counts = []
+
+    # Count questions after processing concepts
+    total_questions = sum(len(section.get('questions_choices', [])) for section in section_content_definitions)
+    estimated_choices = total_questions * 4
+    question_counts.append(("After Processing Concepts", total_questions, estimated_choices))
+
+    # Collect per-section diagnostics so every return path can include them.
+    section_diagnostics = []
+    for i, section in enumerate(section_content_definitions):
+        section_diagnostics.append({
+            'section_index': i,
+            'title': section.get('title') or '<no-title>',
+            'content_keys': list(section.get('content_keys', [])),
+            'content_ids': list(section.get('content_ids', [])),
+            'nodes_loaded': sorted(list(section.get('nodes', {}).keys())),
+            'skills_per_key': {
+                k: [s.get('name') for s in (v or []) if s and s.get('name')]
+                for k, v in (section.get('skills') or {}).items()
+            },
+            'difficulty_per_key': {
+                k: ((v or {}).get('name') if v else None)
+                for k, v in (section.get('difficulty_level') or {}).items()
+            },
+            'questions_generated': len(section.get('questions_choices', [])),
+            'diagnostics': list(section.get('_diagnostics', [])),
+        })
+    debug_outputs['section_diagnostics'] = {
+        'output': f"Captured diagnostics for {len(section_diagnostics)} section(s)",
+        'type': 'list',
+        'section_diagnostics': section_diagnostics,
+    }
+
+    if total_questions == 0:
+        print("\n" + "="*80)
+        print("WARNING: No questions were generated during concept processing!")
+        print("="*80)
+        print("Per-section diagnostics:")
+        for sd in section_diagnostics:
+            print(f"\nSection {sd['section_index']+1}: '{sd['title']}'")
+            print(f"  Content keys:        {sd['content_keys']}")
+            print(f"  Content ids:         {sd['content_ids']}")
+            print(f"  Nodes loaded ({len(sd['nodes_loaded'])}): {sd['nodes_loaded']}")
+            print(f"  Skills per key:      {sd['skills_per_key']}")
+            print(f"  Difficulty per key:  {sd['difficulty_per_key']}")
+            print(f"  Questions generated: {sd['questions_generated']}")
+            diags = sd['diagnostics']
+            if not diags:
+                print("  (no diagnostics captured — questions may have been generated but later filtered downstream)")
+            else:
+                print(f"  Diagnostics ({len(diags)}):")
+                for d in diags:
+                    print(f"    - [{d['level']}] key={d['key']}: {d['message']}")
+        print("="*80)
+
+        questions_choices_df = pd.DataFrame(columns=[
+            'sectionId', 'difficultyLevelId', 'difficultyLevelUri', 'skillId', 'skillUri',
+            'category', 'question_status', 'question_content', 'sourceCategory', 'source',
+            'choice_status', 'choice_content', 'choice_isCorrect', 'choice_orderIndex',
+            'questionEvaluation', 'relevanceAndClarity', 'questionTypeDiversity',
+            'choiceQuality', 'generalAdherence'
+        ])
+        progress_data = {
+            'question_counts': question_counts,
+            'evaluation_stats': {'initial_unique_questions': 0, 'after_evaluation_unique_questions': 0, 'failed_questions': 0},
+            'intermediate_counts': {'initial_unique_questions': 0, 'after_tfidf_unique_questions': 0, 'after_semantic_unique_questions': 0},
+            'filtering_stats': {'initial_unique_questions': 0, 'after_filtering_unique_questions': 0, 'filtered_out_questions': 0},
+            'selection_stats': {'selection_needed': False, 'reason': 'No questions generated'},
+            'conversion_stats': {'initial_unique_questions': 0, 'successfully_converted': 0},
+            'code_conversion_stats': {'converted_questions': 0, 'total_questions': 0},
+            'tuning_stats': {'tuned_questions': 0, 'total_questions': 0},
+            'missing_prerequisite_skills': missing_prerequisite_skills,
+            'section_diagnostics': section_diagnostics,
+            'debug_outputs': debug_outputs,
+            **extra_progress_data,
+        }
+        return questions_choices_df, progress_data
+
+    i = 0
+    update_progress(i)
+    section_content_definitions = redistribute_order_indices(section_content_definitions)
+    debug_outputs['redistribute_order_indices'] = {'output': 'Order indices redistributed', 'type': 'list'}
+
+    i += 1
+    update_progress(i)
+    section_content_definitions = evaluate_questions(section_content_definitions, QUESTION_TYPES)
+    debug_outputs['evaluate_questions'] = {
+        'output': f"Evaluated questions for {len(section_content_definitions)} sections",
+        'type': 'list'
+    }
+
+    i += 1
+    update_progress(i)
+    questions_choices_df = json_to_dataframe(section_content_definitions)
+    debug_outputs['json_to_dataframe'] = {
+        'output': f"DataFrame with {len(questions_choices_df)} rows, {questions_choices_df['question_content'].nunique()} unique questions",
+        'type': 'DataFrame',
+        'shape': questions_choices_df.shape
+    }
+    total_choices = len(questions_choices_df)
+    unique_questions = questions_choices_df['question_content'].nunique()
+    question_counts.append(("After Converting to DataFrame", unique_questions, total_choices))
+    print(f"\n=== DATAFRAME CONVERSION DEBUG ===")
+    print(f"Questions after dataframe conversion: {unique_questions} unique questions, {total_choices} total choices")
+    if unique_questions == 0:
+        print("ERROR: No questions in dataframe after conversion!")
+    print(f"=== END DATAFRAME CONVERSION DEBUG ===\n")
+
+    i += 1
+    update_progress(i)
+    questions_choices_df, evaluation_stats = filter_questions_by_evaluation(questions_choices_df, evaluation_col="questionEvaluation")
+    debug_outputs['filter_questions_by_evaluation'] = {
+        'output': f"Filtered to {questions_choices_df['question_content'].nunique()} unique questions",
+        'type': 'DataFrame',
+        'evaluation_stats': evaluation_stats
+    }
+    question_counts.append(("After Evaluation Filtering", questions_choices_df['question_content'].nunique(), len(questions_choices_df)))
+
+    i += 1
+    update_progress(i)
+    questions_choices_df, intermediate_counts = dedupe_questions_keep_choices(questions_choices_df, question_col="question_content", similarity_threshold=0.75)
+    debug_outputs['dedupe_questions_keep_choices'] = {
+        'output': f"Deduplicated to {questions_choices_df['question_content'].nunique()} unique questions",
+        'type': 'DataFrame',
+        'intermediate_counts': intermediate_counts
+    }
+    question_counts.append(("After Deduplication", questions_choices_df['question_content'].nunique(), len(questions_choices_df)))
+
+    i += 1
+    update_progress(i)
+    questions_choices_df, filtering_stats = filter_content_specific_questions(questions_choices_df, question_col="question_content", batch_size=50)
+    debug_outputs['filter_content_specific_questions'] = {
+        'output': f"Filtered to {questions_choices_df['question_content'].nunique()} unique questions",
+        'type': 'DataFrame',
+        'filtering_stats': filtering_stats
+    }
+    question_counts.append(("After Filtering", questions_choices_df['question_content'].nunique(), len(questions_choices_df)))
+
+    i += 1
+    update_progress(i)
+    if include_case_study:
+        questions_choices_df, conversion_stats = convert_questions_to_case_studies(questions_choices_df, question_col="question_content", conversion_percentage=0.15, batch_size=50, customized_prompt_instructions=CUSTOMIZED_PROMPT_INSTRUCTIONS)
+        debug_outputs['convert_questions_to_case_studies'] = {
+            'output': f"Converted {conversion_stats.get('successfully_converted', 0)} questions to case studies",
+            'type': 'DataFrame',
+            'conversion_stats': conversion_stats
+        }
+    else:
+        conversion_stats = {
+            'successfully_converted': 0,
+            'questions_selected_for_conversion': 0,
+            'skipped': True,
+            'reason': 'Case study conversion disabled via Advanced Settings toggle'
+        }
+        debug_outputs['convert_questions_to_case_studies'] = {
+            'output': 'Skipped - case study conversion disabled via Advanced Settings toggle',
+            'type': 'skipped',
+            'conversion_stats': conversion_stats
+        }
+    question_counts.append(("After Case Study Conversion", questions_choices_df['question_content'].nunique(), len(questions_choices_df)))
+
+    i += 1
+    update_progress(i)
+    if include_coding:
+        questions_choices_df, code_conversion_stats = convert_questions_to_code_format_dataframe(
+            questions_choices_df,
+            conversion_percentage=0.30,
+            customized_prompt_instructions=CUSTOMIZED_PROMPT_INSTRUCTIONS
+        )
+        debug_outputs['convert_questions_to_code_format'] = {
+            'output': f"Converted {code_conversion_stats.get('converted_questions', 0)} questions to code format",
+            'type': 'DataFrame',
+            'code_conversion_stats': code_conversion_stats
+        }
+    else:
+        code_conversion_stats = {
+            'converted_questions': 0,
+            'total_coding_questions': 0,
+            'skipped': True,
+            'reason': 'Coding question conversion disabled via Advanced Settings toggle'
+        }
+        debug_outputs['convert_questions_to_code_format'] = {
+            'output': 'Skipped - coding question conversion disabled via Advanced Settings toggle',
+            'type': 'skipped',
+            'code_conversion_stats': code_conversion_stats
+        }
+    question_counts.append(("After Code Format Conversion", questions_choices_df['question_content'].nunique(), len(questions_choices_df)))
+
+    i += 1
+    update_progress(i)
+    questions_choices_df, tuning_stats = tune_distractors_dataframe(questions_choices_df, tuning_percentage=0.20)
+    debug_outputs['tune_distractors'] = {
+        'output': f"Tuned {tuning_stats.get('tuned_questions', 0)} questions",
+        'type': 'DataFrame',
+        'tuning_stats': tuning_stats
+    }
+    question_counts.append(("After Distractor Tuning", questions_choices_df['question_content'].nunique(), len(questions_choices_df)))
+
+    i += 1
+    update_progress(i)
+    if QUESTION_LIMIT != "No Limit":
+        questions_choices_df, selection_stats = intelligent_question_selection(questions_choices_df, QUESTION_LIMIT, question_col="question_content")
+        debug_outputs['intelligent_question_selection'] = {
+            'output': f"Selected {questions_choices_df['question_content'].nunique()} questions",
+            'type': 'DataFrame',
+            'selection_stats': selection_stats
+        }
+        question_counts.append(("After Question Selection", questions_choices_df['question_content'].nunique(), len(questions_choices_df)))
+    else:
+        selection_stats = {'selection_needed': False, 'reason': 'No question limit specified'}
+        debug_outputs['intelligent_question_selection'] = {
+            'output': 'Skipped - no question limit specified',
+            'type': 'skipped',
+            'selection_stats': selection_stats
+        }
+
+    i += 1
+    update_progress(i)
+    final_unique = questions_choices_df['question_content'].nunique() if len(questions_choices_df) else 0
+    final_rows = len(questions_choices_df)
+    print("\n" + "="*80)
+    print(f"FINAL PIPELINE SUMMARY: {final_unique} unique questions / {final_rows} choice rows")
+    print("Per-step question counts:")
+    for label, q_count, c_count in question_counts:
+        print(f"  - {label}: {q_count} unique questions, {c_count} choices")
+    if final_unique == 0:
+        print("WARNING: Pipeline finished with 0 questions. If questions existed at 'After Processing Concepts' "
+              "but not here, look for the step where the count dropped to 0 above (typical culprits: "
+              "evaluation filtering, content-specificity filtering, intelligent_question_selection).")
+    print("="*80 + "\n")
+
+    progress_data = {
+        'question_counts': question_counts,
+        'evaluation_stats': evaluation_stats,
+        'intermediate_counts': intermediate_counts,
+        'filtering_stats': filtering_stats,
+        'selection_stats': selection_stats,
+        'conversion_stats': conversion_stats,
+        'code_conversion_stats': code_conversion_stats,
+        'tuning_stats': tuning_stats,
+        'missing_prerequisite_skills': missing_prerequisite_skills,
+        'section_diagnostics': section_diagnostics,
+        'debug_outputs': debug_outputs,
+        **extra_progress_data,
+    }
+    return questions_choices_df, progress_data
+
+
 def generate_assessments(
-    PROGRAM_KEYS, 
-    QUESTION_TYPES, 
+    PROGRAM_KEYS,
+    QUESTION_TYPES,
     QUESTION_LIMIT, 
     CUSTOMIZED_DIFFICULTY, 
     CUSTOMIZED_PROMPT_INSTRUCTIONS, 
@@ -2533,303 +2833,23 @@ def generate_assessments(
         'type': 'list',
         'total_questions': sum(len(s.get('questions_choices', [])) for s in section_content_definitions)
     }
-    
-    # Count questions after processing concepts
-    total_questions = sum(len(section.get('questions_choices', [])) for section in section_content_definitions)
-    # Estimate total choices (assuming average 4 choices per question)
-    estimated_choices = total_questions * 4
-    question_counts.append(("After Processing Concepts", total_questions, estimated_choices))
-    
-    # Collect per-section diagnostics now so every return path can include them.
-    section_diagnostics = []
-    for i, section in enumerate(section_content_definitions):
-        section_diagnostics.append({
-            'section_index': i,
-            'title': section.get('title') or '<no-title>',
-            'content_keys': list(section.get('content_keys', [])),
-            'content_ids': list(section.get('content_ids', [])),
-            'nodes_loaded': sorted(list(section.get('nodes', {}).keys())),
-            'skills_per_key': {
-                k: [s.get('name') for s in (v or []) if s and s.get('name')]
-                for k, v in (section.get('skills') or {}).items()
-            },
-            'difficulty_per_key': {
-                k: ((v or {}).get('name') if v else None)
-                for k, v in (section.get('difficulty_level') or {}).items()
-            },
-            'questions_generated': len(section.get('questions_choices', [])),
-            'diagnostics': list(section.get('_diagnostics', [])),
-        })
-    debug_outputs['section_diagnostics'] = {
-        'output': f"Captured diagnostics for {len(section_diagnostics)} section(s)",
-        'type': 'list',
-        'section_diagnostics': section_diagnostics,
-    }
 
-    # Add debugging for empty questions
-    if total_questions == 0:
-        print("\n" + "="*80)
-        print("WARNING: No questions were generated during concept processing!")
-        print("="*80)
-        print("Per-section diagnostics (use these to identify where the CD/ND key fell short):")
-        for sd in section_diagnostics:
-            print(f"\nSection {sd['section_index']+1}: '{sd['title']}'")
-            print(f"  Content keys:        {sd['content_keys']}")
-            print(f"  Content ids:         {sd['content_ids']}")
-            print(f"  Nodes loaded ({len(sd['nodes_loaded'])}): {sd['nodes_loaded']}")
-            print(f"  Skills per key:      {sd['skills_per_key']}")
-            print(f"  Difficulty per key:  {sd['difficulty_per_key']}")
-            print(f"  Questions generated: {sd['questions_generated']}")
-            diags = sd['diagnostics']
-            if not diags:
-                print("  (no diagnostics captured — questions may have been generated but later filtered "
-                      "downstream; check evaluate_questions / dedupe / content-specific filtering logs)")
-            else:
-                print(f"  Diagnostics ({len(diags)}):")
-                for d in diags:
-                    print(f"    - [{d['level']}] key={d['key']}: {d['message']}")
-        print("="*80)
-        
-        # Continue with empty dataset to avoid crashes
-        questions_choices_df = pd.DataFrame(columns=[
-            'sectionId', 'difficultyLevelId', 'difficultyLevelUri', 'skillId', 'skillUri',
-            'category', 'question_status', 'question_content', 'sourceCategory', 'source',
-            'choice_status', 'choice_content', 'choice_isCorrect', 'choice_orderIndex',
-            'questionEvaluation', 'relevanceAndClarity', 'questionTypeDiversity', 
-            'choiceQuality', 'generalAdherence'
-        ])
-        
-        # Return early with empty results
-        progress_data = {
-            'question_counts': question_counts,
-            'evaluation_stats': {'initial_unique_questions': 0, 'after_evaluation_unique_questions': 0, 'failed_questions': 0},
-            'intermediate_counts': {'initial_unique_questions': 0, 'after_tfidf_unique_questions': 0, 'after_semantic_unique_questions': 0},
-            'filtering_stats': {'initial_unique_questions': 0, 'after_filtering_unique_questions': 0, 'filtered_out_questions': 0},
-            'selection_stats': {'selection_needed': False, 'reason': 'No questions generated'},
-            'conversion_stats': {'initial_unique_questions': 0, 'successfully_converted': 0},
-            'code_conversion_stats': {'converted_questions': 0, 'total_questions': 0},
-            'tuning_stats': {'tuned_questions': 0, 'total_questions': 0},
-            'missing_prerequisite_skills': missing_prerequisite_skills,
-            'section_diagnostics': section_diagnostics,
-            'debug_outputs': debug_outputs
-        }
-        return questions_choices_df, progress_data
-
-    step += 1
-    update_progress(step)
-    section_content_definitions = redistribute_order_indices(section_content_definitions)
-    debug_outputs['redistribute_order_indices'] = {
-        'output': 'Order indices redistributed',
-        'type': 'list'
-    }
-
-    step += 1
-    update_progress(step)
-    section_content_definitions = evaluate_questions(section_content_definitions, QUESTION_TYPES)
-    debug_outputs['evaluate_questions'] = {
-        'output': f"Evaluated questions for {len(section_content_definitions)} sections",
-        'type': 'list'
-    }
-
-    step += 1
-    update_progress(step)
-    questions_choices_df = json_to_dataframe(section_content_definitions)
-    debug_outputs['json_to_dataframe'] = {
-        'output': f"DataFrame with {len(questions_choices_df)} rows, {questions_choices_df['question_content'].nunique()} unique questions",
-        'type': 'DataFrame',
-        'shape': questions_choices_df.shape
-    }
-    
-    # Count questions after converting to dataframe
-    total_choices = len(questions_choices_df)
-    unique_questions = questions_choices_df['question_content'].nunique()
-    question_counts.append(("After Converting to DataFrame", unique_questions, total_choices))
-    
-    print(f"\n=== DATAFRAME CONVERSION DEBUG ===")
-    print(f"Questions after dataframe conversion: {unique_questions} unique questions, {total_choices} total choices")
-    if unique_questions == 0:
-        print("ERROR: No questions in dataframe after conversion!")
-    print(f"=== END DATAFRAME CONVERSION DEBUG ===\n")
-
-    step += 1
-    update_progress(step)
-    questions_choices_df, evaluation_stats = filter_questions_by_evaluation(questions_choices_df, evaluation_col="questionEvaluation")
-    debug_outputs['filter_questions_by_evaluation'] = {
-        'output': f"Filtered to {questions_choices_df['question_content'].nunique()} unique questions",
-        'type': 'DataFrame',
-        'evaluation_stats': evaluation_stats
-    }
-    
-    # Count questions after evaluation filtering
-    total_choices_after_eval = len(questions_choices_df)
-    unique_questions_after_eval = questions_choices_df['question_content'].nunique()
-    question_counts.append(("After Evaluation Filtering", unique_questions_after_eval, total_choices_after_eval))
-
-    step += 1
-    update_progress(step)
-    questions_choices_df, intermediate_counts = dedupe_questions_keep_choices(questions_choices_df, question_col="question_content", similarity_threshold=0.75)
-    debug_outputs['dedupe_questions_keep_choices'] = {
-        'output': f"Deduplicated to {questions_choices_df['question_content'].nunique()} unique questions",
-        'type': 'DataFrame',
-        'intermediate_counts': intermediate_counts
-    }
-    
-    # Count questions after deduplication
-    total_choices_final = len(questions_choices_df)
-    unique_questions_final = questions_choices_df['question_content'].nunique()
-    question_counts.append(("After Deduplication", unique_questions_final, total_choices_final))
-
-    step += 1
-    update_progress(step)
-    questions_choices_df, filtering_stats = filter_content_specific_questions(questions_choices_df, question_col="question_content", batch_size=50)
-    debug_outputs['filter_content_specific_questions'] = {
-        'output': f"Filtered to {questions_choices_df['question_content'].nunique()} unique questions",
-        'type': 'DataFrame',
-        'filtering_stats': filtering_stats
-    }
-    
-    # Count questions after filtering
-    total_choices_final_filtered = len(questions_choices_df)
-    unique_questions_final_filtered = questions_choices_df['question_content'].nunique()
-    question_counts.append(("After Filtering", unique_questions_final_filtered, total_choices_final_filtered))
-
-    step += 1
-    update_progress(step)
-    if include_case_study:
-        questions_choices_df, conversion_stats = convert_questions_to_case_studies(questions_choices_df, question_col="question_content", conversion_percentage=0.15, batch_size=50, customized_prompt_instructions=CUSTOMIZED_PROMPT_INSTRUCTIONS)
-        debug_outputs['convert_questions_to_case_studies'] = {
-            'output': f"Converted {conversion_stats.get('successfully_converted', 0)} questions to case studies",
-            'type': 'DataFrame',
-            'conversion_stats': conversion_stats
-        }
-    else:
-        conversion_stats = {
-            'successfully_converted': 0,
-            'questions_selected_for_conversion': 0,
-            'skipped': True,
-            'reason': 'Case study conversion disabled via Advanced Settings toggle'
-        }
-        debug_outputs['convert_questions_to_case_studies'] = {
-            'output': 'Skipped - case study conversion disabled via Advanced Settings toggle',
-            'type': 'skipped',
-            'conversion_stats': conversion_stats
-        }
-    
-    # Count questions after case study conversion
-    total_choices_final_converted = len(questions_choices_df)
-    unique_questions_final_converted = questions_choices_df['question_content'].nunique()
-    question_counts.append(("After Case Study Conversion", unique_questions_final_converted, total_choices_final_converted))
-
-    step += 1
-    update_progress(step)
-    if include_coding:
-        # Convert code format questions directly on the filtered dataframe
-        questions_choices_df, code_conversion_stats = convert_questions_to_code_format_dataframe(
-            questions_choices_df, 
-            conversion_percentage=0.30, 
-            customized_prompt_instructions=CUSTOMIZED_PROMPT_INSTRUCTIONS
-        )
-        debug_outputs['convert_questions_to_code_format'] = {
-            'output': f"Converted {code_conversion_stats.get('converted_questions', 0)} questions to code format",
-            'type': 'DataFrame',
-            'code_conversion_stats': code_conversion_stats
-        }
-    else:
-        code_conversion_stats = {
-            'converted_questions': 0,
-            'total_coding_questions': 0,
-            'skipped': True,
-            'reason': 'Coding question conversion disabled via Advanced Settings toggle'
-        }
-        debug_outputs['convert_questions_to_code_format'] = {
-            'output': 'Skipped - coding question conversion disabled via Advanced Settings toggle',
-            'type': 'skipped',
-            'code_conversion_stats': code_conversion_stats
-        }
-    
-    # Count questions after code conversion
-    unique_questions_after_code = questions_choices_df['question_content'].nunique()
-    total_choices_after_code = len(questions_choices_df)
-    question_counts.append(("After Code Format Conversion", unique_questions_after_code, total_choices_after_code))
-
-    step += 1
-    update_progress(step)
-    # Tune distractors directly on the filtered dataframe
-    questions_choices_df, tuning_stats = tune_distractors_dataframe(
-        questions_choices_df, 
-        tuning_percentage=0.20
+    # Delegate the shared tail (redistribute -> evaluate -> ... -> selection)
+    # to run_post_pipeline so the uploaded-content flow can reuse it.
+    questions_choices_df, progress_data = run_post_pipeline(
+        section_content_definitions,
+        QUESTION_TYPES=QUESTION_TYPES,
+        QUESTION_LIMIT=QUESTION_LIMIT,
+        CUSTOMIZED_PROMPT_INSTRUCTIONS=CUSTOMIZED_PROMPT_INSTRUCTIONS,
+        include_case_study=include_case_study,
+        include_coding=include_coding,
+        progress_bar=progress_bar,
+        progress_text=progress_text,
+        step_offset=step + 1,
+        total_steps=total_steps,
+        missing_prerequisite_skills=missing_prerequisite_skills,
+        debug_outputs=debug_outputs,
     )
-    debug_outputs['tune_distractors'] = {
-        'output': f"Tuned {tuning_stats.get('tuned_questions', 0)} questions",
-        'type': 'DataFrame',
-        'tuning_stats': tuning_stats
-    }
-    
-    # Count questions after distractor tuning
-    unique_questions_after_tuning = questions_choices_df['question_content'].nunique()
-    total_choices_after_tuning = len(questions_choices_df)
-    question_counts.append(("After Distractor Tuning", unique_questions_after_tuning, total_choices_after_tuning))
-
-    step += 1
-    update_progress(step)
-    # Apply intelligent question selection if limit is specified and not "No Limit"
-    if QUESTION_LIMIT != "No Limit":
-        questions_choices_df, selection_stats = intelligent_question_selection(questions_choices_df, QUESTION_LIMIT, question_col="question_content")
-        debug_outputs['intelligent_question_selection'] = {
-            'output': f"Selected {questions_choices_df['question_content'].nunique()} questions",
-            'type': 'DataFrame',
-            'selection_stats': selection_stats
-        }
-        
-        # Count questions after selection
-        total_choices_after_selection = len(questions_choices_df)
-        unique_questions_after_selection = questions_choices_df['question_content'].nunique()
-        question_counts.append(("After Question Selection", unique_questions_after_selection, total_choices_after_selection))
-    else:
-        # No selection needed
-        selection_stats = {
-            'selection_needed': False,
-            'reason': 'No question limit specified'
-        }
-        debug_outputs['intelligent_question_selection'] = {
-            'output': 'Skipped - no question limit specified',
-            'type': 'skipped',
-            'selection_stats': selection_stats
-        }
-
-    step += 1
-    update_progress(step)
-
-    # Final summary log — if we ended up empty after downstream filtering, surface that
-    # explicitly so the user can see which step zeroed it out.
-    final_unique = questions_choices_df['question_content'].nunique() if len(questions_choices_df) else 0
-    final_rows = len(questions_choices_df)
-    print("\n" + "="*80)
-    print(f"FINAL PIPELINE SUMMARY: {final_unique} unique questions / {final_rows} choice rows")
-    print("Per-step question counts:")
-    for label, q_count, c_count in question_counts:
-        print(f"  - {label}: {q_count} unique questions, {c_count} choices")
-    if final_unique == 0:
-        print("WARNING: Pipeline finished with 0 questions. If questions existed at 'After Processing Concepts' "
-              "but not here, look for the step where the count dropped to 0 above (typical culprits: "
-              "evaluation filtering, content-specificity filtering, intelligent_question_selection).")
-    print("="*80 + "\n")
-
-    # Return both the dataframe and the progress data
-    progress_data = {
-        'question_counts': question_counts,
-        'evaluation_stats': evaluation_stats,
-        'intermediate_counts': intermediate_counts,
-        'filtering_stats': filtering_stats,
-        'selection_stats': selection_stats,
-        'conversion_stats': conversion_stats,
-        'code_conversion_stats': code_conversion_stats,
-        'tuning_stats': tuning_stats,
-        'missing_prerequisite_skills': missing_prerequisite_skills,
-        'section_diagnostics': section_diagnostics,
-        'debug_outputs': debug_outputs
-    }
-
     return questions_choices_df, progress_data
 
 def intelligent_question_selection(questions_choices_df, question_limit, question_col="question_content"):
@@ -3239,3 +3259,491 @@ def tune_distractors_dataframe(df: pd.DataFrame, tuning_percentage=0.20) -> tupl
         "tuning_percentage": (tuned_count / total_questions * 100) if total_questions > 0 else 0,
         "reason": f"Tuned {tuned_count} out of {len(questions_to_tune)} selected questions"
     }
+
+
+# ===========================================================================
+# Arbitrary-content flow (uploaded PDF / free text).
+#
+# This flow does NOT query the Classroom Content GraphQL API. Instead it:
+#   1. extracts text from an uploaded PDF and/or free-text description,
+#   2. builds a throwaway hierarchical skills taxonomy (domains > subdomains >
+#      leaf topics) via OpenAI,
+#   3. maps each leaf topic to an EXISTING Udacity taxonomy skill (Assessments
+#      API) so upload never creates throwaway skills,
+#   4. generates N questions per leaf topic by calling process_concept directly
+#      (one concept per leaf, single-skill constraint),
+#   5. delegates the shared tail (evaluate -> dedupe -> ... -> selection) to
+#      run_post_pipeline.
+# The taxonomy itself is discarded after question generation.
+# ===========================================================================
+
+def fetch_difficulty_levels():
+    """Fetch all difficulty levels from the Assessments API.
+
+    Mirrors the query in pages/3_Uploading Assessments.py so the upload page
+    does not need to change. Returns a list of {id, externalId, label, ...}.
+    """
+    query = """
+    query {
+      difficultyLevels {
+        id
+        externalId
+        label
+        labelValue
+        category
+        status
+      }
+    }
+    """
+    r = requests.post(
+        settings.ASSESSMENTS_API_URL,
+        headers=settings.production_headers(),
+        json={"query": query},
+    )
+    return r.json()['data']['difficultyLevels']
+
+
+def fetch_taxonomy_skills():
+    """Fetch all existing skills from the Assessments API taxonomy.
+
+    Used to map arbitrary leaf topics onto real skills so the upload flow never
+    has to create throwaway UTAXONOMY skills. Returns list of
+    {id, externalId, title, category, status}.
+    """
+    query = """
+    query {
+      skills {
+        id
+        externalId
+        title
+        category
+        status
+      }
+    }
+    """
+    r = requests.post(
+        settings.ASSESSMENTS_API_URL,
+        headers=settings.production_headers(),
+        json={"query": query},
+    )
+    return r.json()['data']['skills']
+
+
+def extract_uploaded_text(uploaded_file, free_text):
+    """Extract text from an uploaded PDF and concatenate with free-text.
+
+    `uploaded_file` is a Streamlit UploadedFile or None. Returns the combined
+    text. Raises ValueError if neither source yields any text.
+    """
+    parts = []
+
+    if free_text:
+        parts.append(free_text.strip())
+
+    if uploaded_file is not None:
+        try:
+            from pypdf import PdfReader
+        except ImportError as e:
+            raise ImportError(
+                "pypdf is required to read uploaded PDFs. Add `pypdf` to "
+                "requirements.txt and reinstall."
+            ) from e
+
+        reader = PdfReader(uploaded_file)
+        page_texts = []
+        for page in reader.pages:
+            try:
+                page_texts.append(page.extract_text() or "")
+            except Exception as e:
+                print(f"[extract_uploaded_text] page extract failed: {e}")
+        pdf_text = "\n\n".join(p for p in page_texts if p.strip())
+        if not pdf_text.strip():
+            print("[extract_uploaded_text] PDF yielded no text layer (scanned image?)")
+        else:
+            parts.append(pdf_text)
+
+    combined = "\n\n".join(p for p in parts if p).strip()
+    if not combined:
+        raise ValueError(
+            "No text could be extracted. Provide a PDF with a text layer and/or "
+            "a free-text description. Scanned-image PDFs are not supported (no OCR)."
+        )
+    return combined
+
+
+def _flatten_taxonomy_leaves(taxonomy):
+    """Walk the taxonomy JSON and return the ordered list of leaf topic names."""
+    leaves = []
+    for domain in taxonomy.get('domains', []):
+        for subdomain in domain.get('subdomains', []):
+            for topic in subdomain.get('topics', []):
+                name = topic.get('name')
+                if name:
+                    leaves.append(name)
+    return leaves
+
+
+def build_skills_taxonomy(full_text, description, target_skill_count, difficulty):
+    """Build a throwaway skills taxonomy and return flat leaf topic names.
+
+    If target_skill_count is set and the first pass yields fewer leaves than
+    requested, leaf topics are split into finer sub-topics (up to 2 rounds) to
+    meet the target. Avoids infinite loops.
+    """
+    messages = prompts.get_skills_taxonomy_prompt(full_text, description, target_skill_count, difficulty)
+    response = settings.call_openai_with_fallback(
+        model=settings.CHAT_COMPLETIONS_MODEL,
+        response_format=settings.CHAT_COMPLETIONS_RESPONSE_FORMAT,
+        messages=messages,
+    )
+    taxonomy = json.loads(response.choices[0].message.content)
+    leaves = _flatten_taxonomy_leaves(taxonomy)
+
+    # De-duplicate leaf names while preserving order.
+    seen = set()
+    leaves = [l for l in leaves if not (l in seen or seen.add(l))]
+
+    if target_skill_count is None:
+        return leaves, taxonomy
+
+    rounds = 0
+    while len(leaves) < target_skill_count and rounds < 2:
+        rounds += 1
+        deficit = target_skill_count - len(leaves)
+        # Split the most general-sounding leaves first (longest names tend to
+        # be compound); fall back to the first few.
+        candidates = sorted(leaves, key=len, reverse=True)[: max(1, deficit)]
+        new_leaves = []
+        for topic in candidates:
+            split_messages = prompts.get_topic_split_prompt(topic, full_text, max(2, deficit))
+            split_response = settings.call_openai_with_fallback(
+                model=settings.CHAT_COMPLETIONS_MODEL,
+                response_format=settings.CHAT_COMPLETIONS_RESPONSE_FORMAT,
+                messages=split_messages,
+            )
+            sub = json.loads(split_response.choices[0].message.content)
+            sub_names = [t.get('name') for t in sub.get('topics', []) if t.get('name')]
+            if len(sub_names) >= 2:
+                new_leaves.extend(sub_names)
+            else:
+                new_leaves.append(topic)
+            deficit = target_skill_count - (len(leaves) - 1 + len(new_leaves))
+            if deficit <= 0:
+                break
+        # Replace the split candidates with the new finer leaves.
+        for topic in candidates:
+            if topic in leaves:
+                leaves.remove(topic)
+        for name in new_leaves:
+            if name not in leaves:
+                leaves.append(name)
+
+    if len(leaves) < target_skill_count:
+        print(
+            f"[build_skills_taxonomy] could only reach {len(leaves)} leaf topics "
+            f"after {rounds} split round(s); target was {target_skill_count}."
+        )
+    return leaves, taxonomy
+
+
+def map_topics_to_taxonomy_skills(leaf_topics):
+    """Map each leaf topic to the nearest EXISTING Udacity taxonomy skill.
+
+    Uses difflib title similarity; always returns the nearest match even when
+    loose (per product decision), so skillUri is never empty and the upload
+    flow never creates throwaway skills. Returns (mapped_skills, mapping_debug)
+    where mapped_skills is a list of {topic, name, uri, score, loose} and
+    mapping_debug is a list of human-readable rows for the review UI.
+    """
+    skills = fetch_taxonomy_skills()
+    if not skills:
+        raise ValueError(
+            "Skills API returned no existing skills to map onto. Cannot attach "
+            "real skill URIs without polluting the taxonomy; aborting."
+        )
+
+    # Only match against active skills with a usable externalId + title.
+    candidates = [
+        s for s in skills
+        if s.get('externalId') and s.get('title')
+    ]
+    if not candidates:
+        raise ValueError(
+            "Skills API returned skills but none have both an externalId and a "
+            "title; cannot map leaf topics to real skill URIs."
+        )
+
+    titles = [s['title'] for s in candidates]
+    title_lower = [t.lower() for t in titles]
+
+    mapped = []
+    mapping_debug = []
+    cache = {}
+    for topic in leaf_topics:
+        key = topic.strip().lower()
+        if key in cache:
+            best = cache[key]
+        else:
+            scorer = difflib.get_close_matches(key, title_lower, n=1, cutoff=0.0)
+            if scorer:
+                idx = title_lower.index(scorer[0])
+            else:
+                # get_close_matches can return [] despite cutoff=0 for very
+                # short queries; fall back to brute-force ratio.
+                best_idx = max(
+                    range(len(title_lower)),
+                    key=lambda i: difflib.SequenceMatcher(None, key, title_lower[i]).ratio(),
+                )
+                idx = best_idx
+            score = difflib.SequenceMatcher(None, key, title_lower[idx]).ratio()
+            best = {
+                'topic': topic,
+                'name': candidates[idx]['title'],
+                'uri': candidates[idx]['externalId'],
+                'score': round(score, 3),
+                'loose': score < 0.6,
+            }
+            cache[key] = best
+        mapped.append(best)
+        mapping_debug.append({
+            'leaf_topic': best['topic'],
+            'matched_skill': best['name'],
+            'skill_uri': best['uri'],
+            'match_score': best['score'],
+            'loose_match': best['loose'],
+        })
+
+    return mapped, mapping_debug
+
+
+def build_synthetic_section(title, full_text, mapped_skills, difficulty_name, difficulty_uri):
+    """Build a section_content_definition shaped like the CD/ND flow's output.
+
+    One synthetic key ('uploaded-content'); skills are the mapped existing
+    taxonomy skills. Concepts (one per leaf topic) are attached as a node so
+    generate_assessments_from_content can iterate them, but process_concepts is
+    NOT used for this flow - process_concept is called per leaf directly so each
+    leaf is constrained to its single mapped skill.
+    """
+    section_key = 'uploaded-content'
+    doc_node = {
+        'title': title or 'Uploaded Content',
+        'key': section_key,
+        'locale': 'en-us',
+        'version': '1',
+        'semantic_type': 'Part',
+        'modules': [],
+    }
+
+    concepts = []
+    for ms in mapped_skills:
+        concepts.append({
+            'title': ms['topic'],
+            'key': f"topic-{abs(hash(ms['topic'])) % (10 ** 12)}",
+            'locale': 'en-us',
+            'version': '1',
+            'progress_key': section_key,
+            'atoms': [{'semantic_type': 'TextAtom', 'text': full_text}],
+            '_mapped_skill': ms,
+        })
+
+    doc_node['modules'] = [{'title': title or 'Uploaded Content',
+                            'key': section_key,
+                            'locale': 'en-us',
+                            'version': '1',
+                            'lessons': [{
+                                'title': title or 'Uploaded Content',
+                                'key': section_key,
+                                'locale': 'en-us',
+                                'version': '1',
+                                'concepts': concepts,
+                            }]}]
+
+    return {
+        'title': title or 'Uploaded Content',
+        'content_keys': [section_key],
+        'content_ids': [],
+        'nodes': {section_key: doc_node},
+        'content': {section_key: full_text},
+        'skills': {section_key: [{'name': ms['name'], 'uri': ms['uri']} for ms in mapped_skills]},
+        'difficulty_level': {section_key: {'name': difficulty_name, 'uri': difficulty_uri}},
+        'learning_objectives': {},
+        'questions_choices': [],
+        '_diagnostics': [],
+        '_uploaded_concepts': concepts,  # used by the orchestrator only
+    }
+
+
+def generate_assessments_from_content(
+    uploaded_file,
+    free_text,
+    title,
+    n_questions_per_topic,
+    skill_cap,
+    difficulty_name,
+    difficulty_uri,
+    question_types,
+    question_limit,
+    customized_difficulty,
+    customized_prompt_instructions,
+    include_case_study=True,
+    include_coding=True,
+    progress_bar=None,
+    progress_text=None,
+):
+    """Orchestrator for the arbitrary-content assessment flow.
+
+    skill_cap is None ("let AI decide") or an int target leaf-topic count.
+    Returns (questions_choices_df, progress_data) matching generate_assessments.
+    """
+    pre_steps = [
+        "Extracting uploaded content...",
+        "Building skills taxonomy...",
+        "Mapping topics to taxonomy skills...",
+        "Generating learning objectives...",
+        "Generating questions per topic...",
+    ]
+    total_steps = len(pre_steps) + 11  # 11 post-pipeline steps in run_post_pipeline
+
+    def update_pre(i):
+        if progress_bar:
+            progress_bar.progress((i + 1) / total_steps)
+        if progress_text:
+            progress_text.text(pre_steps[i])
+
+    debug_outputs = {}
+
+    # 1. Extract
+    update_pre(0)
+    full_text = extract_uploaded_text(uploaded_file, free_text)
+    debug_outputs['extract_uploaded_text'] = {
+        'output': f"Extracted {len(full_text)} chars",
+        'type': 'str',
+    }
+
+    # 2. Taxonomy
+    update_pre(1)
+    leaf_topics, taxonomy = build_skills_taxonomy(
+        full_text, free_text, skill_cap, difficulty_name
+    )
+    debug_outputs['build_skills_taxonomy'] = {
+        'output': f"Built taxonomy with {len(leaf_topics)} leaf topics",
+        'type': 'list',
+        'leaf_topics': leaf_topics,
+        'taxonomy': taxonomy,
+    }
+    if not leaf_topics:
+        raise ValueError("Skills taxonomy generation produced 0 leaf topics.")
+
+    # 3. Map leaf topics -> existing taxonomy skills
+    update_pre(2)
+    mapped_skills, mapping_debug = map_topics_to_taxonomy_skills(leaf_topics)
+    debug_outputs['map_topics_to_taxonomy_skills'] = {
+        'output': f"Mapped {len(mapped_skills)} topics to existing skills",
+        'type': 'list',
+        'skill_mapping': mapping_debug,
+    }
+
+    # 4. Build synthetic section + learning objectives
+    update_pre(3)
+    section_content_definitions = [
+        build_synthetic_section(title, full_text, mapped_skills, difficulty_name, difficulty_uri)
+    ]
+    section_content_definitions = learning_objective_generator(section_content_definitions)
+    debug_outputs['learning_objective_generator'] = {
+        'output': str([s.get('learning_objectives', {}) for s in section_content_definitions])[:1000],
+        'type': 'list',
+    }
+
+    # 5. Generate N questions per leaf topic. Call process_concept directly so
+    #    each leaf is constrained to its single mapped skill (process_concepts
+    #    would pass the full skill list to every concept).
+    update_pre(4)
+    section = section_content_definitions[0]
+    section['questions_choices'] = []
+    section.setdefault('_diagnostics', [])
+    learning_objectives = section.get('learning_objectives')
+    section_key = section['content_keys'][0]
+    difficulty_level = section['difficulty_level'][section_key]['name']
+    difficulty_level_uri = section['difficulty_level'][section_key].get('uri', '')
+
+    futures = []
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        for concept in section['_uploaded_concepts']:
+            ms = concept['_mapped_skill']
+            skills_for_concept = [ms['name']]
+            futures.append(
+                executor.submit(
+                    process_concept,
+                    section_key,
+                    section['nodes'][section_key],
+                    section['nodes'][section_key]['modules'][0]['lessons'][0],
+                    concept,
+                    difficulty_level,
+                    difficulty_level_uri,
+                    skills_for_concept,
+                    learning_objectives,
+                    n_questions_per_topic,
+                    question_types,
+                    customized_difficulty,
+                    customized_prompt_instructions,
+                    "placement",
+                )
+            )
+
+        questions_from_ai = 0
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                qcs = future.result()
+                for qc in qcs:
+                    # Override provenance: this came from an upload, not Udacity
+                    # classroom content. Keep the concept title the AI attached.
+                    original_source = qc.get('question', {}).get('source', {}) or {}
+                    qc['question']['sourceCategory'] = 'UPLOADED'
+                    qc['question']['source'] = {
+                        'uploaded': True,
+                        'topic': original_source.get('conceptTitle', ''),
+                        'difficultyName': difficulty_level,
+                    }
+                section['questions_choices'].extend(qcs)
+                questions_from_ai += len(qcs)
+            except Exception as e:
+                print(f"[generate_assessments_from_content] concept future failed: {type(e).__name__}: {e}")
+                continue
+
+    # Hash-based dedupe within the section (mirrors process_concepts tail).
+    unique_qcs = {}
+    for qc in section['questions_choices']:
+        qc_id = get_qc_id(qc)
+        if qc_id not in unique_qcs:
+            unique_qcs[qc_id] = qc
+    section['questions_choices'] = list(unique_qcs.values())
+
+    debug_outputs['process_concepts'] = {
+        'output': f"Generated {len(section['questions_choices'])} questions across {len(mapped_skills)} topics",
+        'type': 'list',
+        'total_questions': len(section['questions_choices']),
+    }
+
+    extra_progress_data = {
+        'taxonomy': taxonomy,
+        'leaf_topics': leaf_topics,
+        'skill_mapping': mapping_debug,
+    }
+
+    questions_choices_df, progress_data = run_post_pipeline(
+        section_content_definitions,
+        QUESTION_TYPES=question_types,
+        QUESTION_LIMIT=question_limit,
+        CUSTOMIZED_PROMPT_INSTRUCTIONS=customized_prompt_instructions,
+        include_case_study=include_case_study,
+        include_coding=include_coding,
+        progress_bar=progress_bar,
+        progress_text=progress_text,
+        step_offset=len(pre_steps),
+        total_steps=total_steps,
+        missing_prerequisite_skills=[],
+        extra_progress_data=extra_progress_data,
+        debug_outputs=debug_outputs,
+    )
+    return questions_choices_df, progress_data

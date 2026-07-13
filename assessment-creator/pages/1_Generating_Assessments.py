@@ -116,6 +116,16 @@ print(
 #UI
 #========================================
 
+@st.cache_data(show_spinner=False)
+def _load_difficulty_levels():
+    """Cached Assessments API difficulty levels for the uploaded-content flow."""
+    try:
+        return utils_assessment_generation.fetch_difficulty_levels()
+    except Exception as e:
+        print(f"[difficulty levels] fetch failed: {e}")
+        return []
+
+
 def main():
     st.title("Generating Assessments")
     env_caption = (
@@ -145,26 +155,89 @@ def main():
     st.info("**Processing Time**: Expect this to take 3-5~ minutes per program.")
 
     with st.form('Generate Assessments'):
-        st.markdown('#### Required Parameters')
-        PROGRAM_KEYS = st.text_input(
-            'Program Keys (comma separated)',
-            value='cd13303,cd13318,cd13267,cd1827,nd1827',
-            placeholder='Enter program keys (comma separated). CD and ND keys are both supported.',
-            help=(
-                "Enter program keys for the content you want to generate questions for. "
-                "Mix CD and ND keys freely (e.g. `cd13303, nd1827`). "
-                "Each CD key produces its own assessment. Each ND key is automatically "
-                "expanded into its parts and produces a single assessment, with skills "
-                "and difficulty sourced from each part's component metadata."
-            )
+        MODE = st.radio(
+            'Content source',
+            ['CD/ND Program Keys', 'Uploaded Content'],
+            horizontal=True,
+            help="CD/ND Program Keys: generate from Udacity classroom content via GraphQL. "
+                 "Uploaded Content: generate from an uploaded PDF and/or free-text description.",
         )
-        
-        with st.expander("Advanced Settings"):
-            ASSESSMENT_TYPE = st.selectbox(
-                'Assessment Type',
-                ['Placement', 'Readiness'],
-                help="Placement: Test skills taught by the content. Readiness: Test prerequisite skills needed to understand the content."
+
+        st.markdown('#### Required Parameters')
+
+        if MODE == 'CD/ND Program Keys':
+            PROGRAM_KEYS = st.text_input(
+                'Program Keys (comma separated)',
+                value='cd13303,cd13318,cd13267,cd1827,nd1827',
+                placeholder='Enter program keys (comma separated). CD and ND keys are both supported.',
+                help=(
+                    "Enter program keys for the content you want to generate questions for. "
+                    "Mix CD and ND keys freely (e.g. `cd13303, nd1827`). "
+                    "Each CD key produces its own assessment. Each ND key is automatically "
+                    "expanded into its parts and produces a single assessment, with skills "
+                    "and difficulty sourced from each part's component metadata."
+                )
             )
+        else:
+            PROGRAM_KEYS = ''
+            UPLOADED_FILE = st.file_uploader(
+                'Upload PDF (optional)',
+                type=['pdf'],
+                help="PDF with a text layer. Scanned-image PDFs are not supported (no OCR)."
+            )
+            FREE_TEXT = st.text_area(
+                'Describe the content / what you want assessed',
+                height=120,
+                help="Free-text description of the material. Used alongside the PDF, or on its own if no PDF is uploaded."
+            )
+            UPLOAD_TITLE = st.text_input(
+                'Assessment title',
+                value='',
+                placeholder='e.g. Intro to Data Engineering Placement Assessment'
+            )
+            N_QUESTIONS_PER_TOPIC = st.number_input(
+                'Questions per topic (N)',
+                min_value=1,
+                max_value=10,
+                value=3,
+                step=1,
+                help="Number of questions to generate for each leaf topic in the taxonomy."
+            )
+            SKILL_CAP = st.select_slider(
+                'Number of skills (leaf topics)',
+                options=['Let AI decide', 5, 10, 15, 20, 30, 50],
+                value='Let AI decide',
+                help="Cap the number of leaf topics (skills). If the document naturally has fewer, "
+                     "topics are split into finer sub-topics until the target is met. 'Let AI decide' "
+                     "uses the natural count the content supports."
+            )
+            difficulty_levels = _load_difficulty_levels()
+            if difficulty_levels:
+                diff_labels = [dl.get('label') or dl.get('externalId') or dl.get('id') for dl in difficulty_levels]
+                diff_choice = st.selectbox(
+                    'Difficulty',
+                    options=diff_labels,
+                    help="One difficulty level for the whole assessment (Placement only for uploaded content)."
+                )
+                diff_match = next((dl for dl in difficulty_levels
+                                   if (dl.get('label') or dl.get('externalId') or dl.get('id')) == diff_choice), None)
+                DIFFICULTY_NAME = diff_match.get('label') or diff_match.get('externalId') if diff_match else ''
+                DIFFICULTY_URI = diff_match.get('externalId') if diff_match else ''
+            else:
+                st.warning("Could not load difficulty levels from the API. Enter a difficulty externalId manually.")
+                DIFFICULTY_NAME = st.text_input('Difficulty label', value='Beginner')
+                DIFFICULTY_URI = st.text_input('Difficulty externalId (URI)', value='')
+
+        with st.expander("Advanced Settings"):
+            if MODE == 'CD/ND Program Keys':
+                ASSESSMENT_TYPE = st.selectbox(
+                    'Assessment Type',
+                    ['Placement', 'Readiness'],
+                    help="Placement: Test skills taught by the content. Readiness: Test prerequisite skills needed to understand the content."
+                )
+            else:
+                ASSESSMENT_TYPE = 'Placement'
+                st.info("Uploaded-content assessments are Placement only.")
 
             QUESTION_TYPES = st.multiselect(
             'Question Types', 
@@ -222,35 +295,57 @@ def main():
         if submitted:
             if password != utils_assessment_generation.settings.PASSWORD:
                 st.error("❌ Incorrect password. Please try again.")
-            elif not PROGRAM_KEYS.strip():
+            elif MODE == 'CD/ND Program Keys' and not PROGRAM_KEYS.strip():
                 st.error("❌ Please enter at least one program key.")
+            elif MODE == 'Uploaded Content' and not UPLOADED_FILE and not (FREE_TEXT or '').strip():
+                st.error("❌ Please upload a PDF and/or provide a free-text description.")
             elif not QUESTION_TYPES:
                 st.error("❌ Please select at least one question type.")
             else:
                 # Create progress bar and text elements
                 progress_bar = st.progress(0)
                 progress_text = st.empty()
-                
+
                 try:
                     with st.spinner("Generating assessments..."):
-                        questions_choices_df, progress_data = utils_assessment_generation.generate_assessments(
-                            PROGRAM_KEYS, 
-                            QUESTION_TYPES, 
-                            QUESTION_LIMIT, 
-                            CUSTOMIZED_DIFFICULTY, 
-                            CUSTOMIZED_PROMPT_INSTRUCTIONS, 
-                            #TEMPERATURE,  # removed in GPT5, replacing with dummy below.
-                            1,
-                            ASSESSMENT_TYPE, # Pass the selected assessment type
-                            QUESTIONS_PER_CONCEPT,
-                            progress_bar, 
-                            progress_text,
-                            include_case_study=INCLUDE_CASE_STUDY,
-                            include_coding=INCLUDE_CODING,
-                        )
-                    
-                    # Check for missing prerequisite skills warning
-                    if ASSESSMENT_TYPE == "Readiness" and 'missing_prerequisite_skills' in progress_data:
+                        if MODE == 'Uploaded Content':
+                            skill_cap_arg = None if SKILL_CAP == 'Let AI decide' else int(SKILL_CAP)
+                            questions_choices_df, progress_data = utils_assessment_generation.generate_assessments_from_content(
+                                UPLOADED_FILE,
+                                FREE_TEXT,
+                                UPLOAD_TITLE,
+                                int(N_QUESTIONS_PER_TOPIC),
+                                skill_cap_arg,
+                                DIFFICULTY_NAME,
+                                DIFFICULTY_URI,
+                                QUESTION_TYPES,
+                                QUESTION_LIMIT,
+                                CUSTOMIZED_DIFFICULTY,
+                                CUSTOMIZED_PROMPT_INSTRUCTIONS,
+                                include_case_study=INCLUDE_CASE_STUDY,
+                                include_coding=INCLUDE_CODING,
+                                progress_bar=progress_bar,
+                                progress_text=progress_text,
+                            )
+                        else:
+                            questions_choices_df, progress_data = utils_assessment_generation.generate_assessments(
+                                PROGRAM_KEYS,
+                                QUESTION_TYPES,
+                                QUESTION_LIMIT,
+                                CUSTOMIZED_DIFFICULTY,
+                                CUSTOMIZED_PROMPT_INSTRUCTIONS,
+                                #TEMPERATURE,  # removed in GPT5, replacing with dummy below.
+                                1,
+                                ASSESSMENT_TYPE, # Pass the selected assessment type
+                                QUESTIONS_PER_CONCEPT,
+                                progress_bar,
+                                progress_text,
+                                include_case_study=INCLUDE_CASE_STUDY,
+                                include_coding=INCLUDE_CODING,
+                            )
+
+                    # Check for missing prerequisite skills warning (CD/ND readiness only)
+                    if MODE == 'CD/ND Program Keys' and ASSESSMENT_TYPE == "Readiness" and 'missing_prerequisite_skills' in progress_data:
                         missing_skills = progress_data['missing_prerequisite_skills']
                         if missing_skills:
                             st.warning("⚠️ **No prerequisite skills found on some programs. Falling back to skills tagged on the program, this may affect the results.**")
@@ -258,12 +353,33 @@ def main():
                                 for item in missing_skills:
                                     st.write(f"**{item['title']}** (Key: {item['key']})")
                                     st.write(f"Teaches skills: {', '.join(item['teaches_skills'])}")
-                    
+
+                    # Uploaded-content flow: surface loose skill mappings so the
+                    # human can catch wrong-tagged questions at review, before upload.
+                    if MODE == 'Uploaded Content' and progress_data.get('skill_mapping'):
+                        loose = [m for m in progress_data['skill_mapping'] if m.get('loose_match')]
+                        if loose:
+                            st.warning(
+                                f"⚠️ **{len(loose)} topic(s) mapped loosely to existing skills. "
+                                "Review the skill tags before uploading - these are best-effort matches."
+                            )
+                            with st.expander("📋 Skill mapping (leaf topic -> existing skill)"):
+                                st.dataframe(
+                                    progress_data['skill_mapping'],
+                                    use_container_width=True,
+                                )
+                        elif progress_data.get('skill_mapping'):
+                            with st.expander("📋 Skill mapping (leaf topic -> existing skill)"):
+                                st.dataframe(
+                                    progress_data['skill_mapping'],
+                                    use_container_width=True,
+                                )
+
                     # Store results in session state
                     st.session_state.generated_questions_df = questions_choices_df
                     st.session_state.progress_data = progress_data
                     st.rerun()
-                        
+
                 except ValueError as e:
                     # Handle specific ValueError for missing prerequisite skills
                     error_message = str(e)
@@ -276,7 +392,7 @@ def main():
                 except Exception as e:
                     st.error(f"❌ An error occurred during generation: {str(e)}")
                     st.error(utils_assessment_generation.format_exception_details(e))
-                    st.error("Please check your program keys and try again.")
+                    st.error("Please check your inputs and try again.")
 
     # Display results outside the form
     if st.session_state.generated_questions_df is not None and not st.session_state.generated_questions_df.empty:

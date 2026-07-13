@@ -1268,3 +1268,123 @@ def get_question_selection_prompt(skill, candidate_questions):
         question_selection_prompt[0],
         {'role': 'user', 'content': user_prompt}
     ]
+
+
+# ---------------------------------------------------------------------------
+# Arbitrary-content flow: throwaway skills taxonomy built from uploaded
+# PDF / free-text. Taxonomy is domains > subdomains > leaf topics. Leaf topics
+# are later mapped to existing Udacity taxonomy skills (see
+# map_topics_to_taxonomy_skills). The taxonomy itself is discarded after use.
+# ---------------------------------------------------------------------------
+
+skills_taxonomy_prompt = [
+    {
+        'role': 'system',
+        'content': """You are an AI assistant for Udacity tasked with deriving a hierarchical skills taxonomy from an arbitrary piece of content (such as a PDF or a free-text description).
+Analyse the content and organise the knowledge it covers into a hierarchy of domains, subdomains, and leaf topics.
+Leaf topics (the bottom of the hierarchy) are the assessable skills a placement assessment can test.
+Return only valid JSON with no extra commentary or markdown formatting.
+
+JSON Schema:
+{{
+  "domains": [
+    {{
+      "name": string,
+      "subdomains": [
+        {{
+          "name": string,
+          "topics": [
+            {{ "name": string }}
+          ]
+        }}
+      ]
+    }}
+  ]
+}}
+
+Rules:
+- Every domain must contain at least one subdomain, and every subdomain must contain at least one topic.
+- Topic names must be specific and assessable (e.g. "One-hot encoding of categorical variables", not "Data").
+- Topic names must be unique across the whole taxonomy.
+- Do NOT use generic filler topics like "Other" or "Miscellaneous".
+"""
+    },
+    {
+        'role': 'user',
+        'content': """Derive a skills taxonomy from the content below.
+
+Author description of what they want assessed:
+{description}
+
+Target difficulty for the eventual assessment: {difficulty}
+
+Target number of leaf topics (skills): {target_skill_count}
+
+Content:
+{full_text}
+
+If the target number of leaf topics is given as a number: produce AT LEAST that many leaf topics. If the content naturally yields fewer, keep splitting topics into finer, still-assessable sub-topics until you meet or exceed the target. Do not invent content that is not supported by the text; split existing topics into more granular skills instead.
+If the target is "AUTO", choose the natural number of leaf topics the content supports (typically between 5 and 30).
+"""
+    }
+]
+
+
+def get_skills_taxonomy_prompt(full_text, description, target_skill_count, difficulty):
+    if target_skill_count is None:
+        target_label = "AUTO (you decide the natural count)"
+    else:
+        target_label = f"{target_skill_count} (meet or exceed this; split finer if needed)"
+    user_prompt = skills_taxonomy_prompt[1]['content'].format(
+        description=description or '(none provided)',
+        difficulty=difficulty or 'unspecified',
+        target_skill_count=target_label,
+        full_text=full_text,
+    )
+    return [
+        skills_taxonomy_prompt[0],
+        {'role': 'user', 'content': user_prompt},
+    ]
+
+
+topic_split_prompt = [
+    {
+        'role': 'system',
+        'content': """You are an AI assistant for Udacity. You will be given a single topic from a skills taxonomy and the source content it was derived from. Your job is to split that topic into finer, still-assessable sub-topics so the taxonomy can reach a required leaf-topic count.
+Return only valid JSON with no extra commentary or markdown formatting.
+
+JSON Schema:
+{{
+  "topics": [ {{ "name": string }} ]
+}}
+
+Rules:
+- Produce at least 2 sub-topics.
+- Sub-topic names must be specific and assessable.
+- Sub-topic names must be unique.
+- Only split based on content actually present in the source text; do not invent new subject matter.
+"""
+    },
+    {
+        'role': 'user',
+        'content': """Split the topic below into {count_needed} or more finer, assessable sub-topics.
+
+Topic to split: {topic}
+
+Source content:
+{full_text}
+"""
+    }
+]
+
+
+def get_topic_split_prompt(topic, full_text, count_needed):
+    user_prompt = topic_split_prompt[1]['content'].format(
+        topic=topic,
+        full_text=full_text,
+        count_needed=count_needed,
+    )
+    return [
+        topic_split_prompt[0],
+        {'role': 'user', 'content': user_prompt},
+    ]

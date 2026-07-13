@@ -18,6 +18,9 @@ plotly>=5.15.0
 # Machine Learning & AI
 openai>=1.0.0
 
+# PDF text extraction (uploaded-content assessment flow)
+pypdf>=4.0.0
+
 # Accurate token counting for context-length chunking
 tiktoken>=0.7.0
 
@@ -25,7 +28,7 @@ tiktoken>=0.7.0
 requests>=2.31.0
 
 # Standard Library (included with Python)
-# ast, concurrent.futures, hashlib, json, os, pickle, random, re, sys, time, traceback, collections
+# ast, concurrent.futures, difflib, hashlib, json, os, pickle, random, re, sys, time, traceback, collections
 # These are part of Python's standard library and don't need to be installed separately
 
 #========================================
