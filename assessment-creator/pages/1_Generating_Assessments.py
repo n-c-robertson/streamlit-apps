@@ -152,7 +152,7 @@ def main():
         st.session_state.progress_data = {}
     
     # Processing time information
-    st.info("**Processing Time**: Expect this to take 3-5~ minutes per program.")
+    st.info("**Processing Time**: Expect this to take 3-5~ minutes per program (CD/ND) or a few minutes for uploaded content, depending on PDF size and number of skills.")
 
     with st.form('Generate Assessments'):
         MODE = st.radio(
@@ -235,29 +235,29 @@ def main():
                     ['Placement', 'Readiness'],
                     help="Placement: Test skills taught by the content. Readiness: Test prerequisite skills needed to understand the content."
                 )
+                QUESTIONS_PER_CONCEPT = st.selectbox(
+                    'Questions per Concept',
+                    options=[1, 2, 3, 4, 5],
+                    help="Generates multiple questions per page in a Udacity course. Significantly increases run time."
+                )
             else:
                 ASSESSMENT_TYPE = 'Placement'
-                st.info("Uploaded-content assessments are Placement only.")
+                st.info("Uploaded-content assessments are Placement only. "
+                        "Questions-per-topic is set above; difficulty is set above.")
 
             QUESTION_TYPES = st.multiselect(
-            'Question Types', 
-            ['MULTIPLE_CHOICE', 'SINGLE_CHOICE'], 
+            'Question Types',
+            ['MULTIPLE_CHOICE', 'SINGLE_CHOICE'],
             default=['MULTIPLE_CHOICE', 'SINGLE_CHOICE'],
             help="Select the types of questions you want to generate. Only SINGLE CHOICE and MULTIPLE CHOICE problems are supported."
         )
 
             # Add question limit slider
             QUESTION_LIMIT = st.select_slider(
-                'Question Limit', 
-                options=[10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 'No Limit'], 
+                'Question Limit',
+                options=[10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 'No Limit'],
                 value='No Limit',
                 help="Set a maximum number of questions in the final assessment. If the limit is higher than available questions, an AI agent will select the best questions for each skill."
-            )
-
-            QUESTIONS_PER_CONCEPT = st.selectbox(
-                'Questions per Concept',
-                options=[1,2,3,4,5], 
-                help="generates multiple questions per page in a Udacity course. Significantly increases run time."
             )
 
             CUSTOMIZED_DIFFICULTY = st.select_slider('Custom Difficulty', options=['Much Easier', 'Easier', 'A Little Easier', 'No Change', 'A Little Harder', 'Harder', 'Much Harder'], value='No Change', help="Adjust the base difficulty of the questions.")
