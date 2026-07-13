@@ -132,7 +132,11 @@ if st.session_state.results_df is not None and not st.session_state.results_df.e
                 for u in results_df['userId'].dropna().unique()
             ) if d
         })
-        selected_domains = st.multiselect("Filter by email domain(s)", options=_domains) if _domains else []
+        selected_domains = []
+        with st.form("domain_filter_form"):
+            selected_domains = st.multiselect("Filter by email domain(s)", options=_domains) if _domains else []
+            st.form_submit_button("Apply")
+
         if selected_domains:
             _sel = set(selected_domains)
             cohort_scores = results_df.loc[
