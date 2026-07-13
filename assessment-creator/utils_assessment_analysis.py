@@ -542,6 +542,32 @@ def fetch_emails_for_user_ids(user_ids):
     return out
 
 
+def attempt_scores(results_df):
+    """One row per attempt: id, userId, totalScore (dropna)."""
+    if results_df is None or results_df.empty:
+        return pd.DataFrame(columns=['id', 'userId', 'totalScore'])
+    return (
+        results_df.dropna(subset=['totalScore'])
+        .groupby('id', as_index=False)
+        .agg({'userId': 'first', 'totalScore': 'first'})
+    )
+
+
+def domain_of(email):
+    """Lowercased domain after '@', or None for unresolved/invalid emails."""
+    if not email or '@' not in email:
+        return None
+    return email.split('@')[-1].lower().strip() or None
+
+
+def benchmark_stats(scores):
+    """count, mean, p75 (0-1 scale) for a score series. None when empty."""
+    s = pd.Series(scores).dropna()
+    if s.empty:
+        return {'count': 0, 'mean': None, 'p75': None}
+    return {'count': int(len(s)), 'mean': float(s.mean()), 'p75': float(s.quantile(0.75))}
+
+
 def flatten_attempt(attempt):
     flat = {
         "id": attempt.get("id"),
@@ -1600,10 +1626,17 @@ def plot_total_score_histogram(results_df):
 
     # Fetch emails for all rows so the download CSV contains real addresses.
     # Resolved emails are cached, so any IDs already resolved for the preview
-    # cost no additional HTTP requests.
-    with st.spinner("Loading learner emails..."):
-        email_map = fetch_emails_for_user_ids(attempt_rows['userId'].tolist())
-        title_map = fetch_assessment_titles_map(unique_aids) if unique_aids else {}
+    # cost no additional HTTP requests. Reuse the session_state map populated
+    # by the Benchmarks section when present to avoid a second resolution pass.
+    cached_email_map = st.session_state.get('email_map') if hasattr(st, 'session_state') else None
+    needed_uids = [u for u in attempt_rows['userId'].tolist() if u and u not in (cached_email_map or {})]
+    if needed_uids:
+        with st.spinner("Loading learner emails..."):
+            fetched = fetch_emails_for_user_ids(needed_uids)
+    else:
+        fetched = {}
+    email_map = {**(cached_email_map or {}), **fetched}
+    title_map = fetch_assessment_titles_map(unique_aids) if unique_aids else {}
 
     def _build_display_df(rows):
         out = rows.copy()
@@ -1637,6 +1670,45 @@ def plot_total_score_histogram(results_df):
             file_name="total_scores.csv",
             mime="text/csv",
         )
+
+def plot_benchmark_distribution(overall_scores, cohort_scores=None):
+    """Overlay histogram of overall vs selected-domain cohort total scores.
+
+    Both series share axes; dashed vlines mark mean + 75th percentile of each.
+    Cohort omitted when empty/None.
+    """
+    overall = pd.Series(overall_scores).dropna()
+    cohort = pd.Series(cohort_scores).dropna() if cohort_scores is not None else pd.Series(dtype=float)
+
+    if overall.empty:
+        st.info("No scored attempts to display.")
+        return
+
+    fig, ax = plt.subplots(figsize=(10, 6), dpi=200)
+
+    bins = 20
+    ax.hist(overall, bins=bins, alpha=0.5, color='grey', edgecolor='black', linewidth=0.4, label='Overall')
+
+    o_mean, o_p75 = overall.mean(), overall.quantile(0.75)
+    ax.axvline(o_mean, color='grey', linestyle='--', linewidth=1.5, label=f'Overall mean ({o_mean*100:.1f}%)')
+    ax.axvline(o_p75, color='grey', linestyle=':', linewidth=1.5, label=f'Overall 75th %ile ({o_p75*100:.1f}%)')
+
+    if not cohort.empty:
+        ax.hist(cohort, bins=bins, alpha=0.6, color='#1f77b4', edgecolor='black', linewidth=0.4, label='Selected domain(s)')
+        c_mean, c_p75 = cohort.mean(), cohort.quantile(0.75)
+        ax.axvline(c_mean, color='#1f77b4', linestyle='--', linewidth=1.5, label=f'Cohort mean ({c_mean*100:.1f}%)')
+        ax.axvline(c_p75, color='#1f77b4', linestyle=':', linewidth=1.5, label=f'Cohort 75th %ile ({c_p75*100:.1f}%)')
+    elif cohort_scores is not None:
+        st.info("No attempts match the selected domain(s).")
+
+    ax.set_xlabel('Total Score', color='black')
+    ax.set_ylabel('Number of Attempts', color='black')
+    ax.set_title('Score Distribution — Overall vs Selected Domain(s)', color='black')
+    ax.grid(True, alpha=0.3)
+    ax.tick_params(axis='both', colors='black')
+    legend = ax.legend()
+    plt.setp(legend.get_texts(), color='black')
+    st.pyplot(fig)
 
 def plot_section_scores(results_df):
     """
