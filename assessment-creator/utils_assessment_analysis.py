@@ -542,30 +542,11 @@ def fetch_emails_for_user_ids(user_ids):
     return out
 
 
-def attempt_scores(results_df):
-    """One row per attempt: id, userId, totalScore (dropna)."""
-    if results_df is None or results_df.empty:
-        return pd.DataFrame(columns=['id', 'userId', 'totalScore'])
-    return (
-        results_df.dropna(subset=['totalScore'])
-        .groupby('id', as_index=False)
-        .agg({'userId': 'first', 'totalScore': 'first'})
-    )
-
-
 def domain_of(email):
     """Lowercased domain after '@', or None for unresolved/invalid emails."""
     if not email or '@' not in email:
         return None
     return email.split('@')[-1].lower().strip() or None
-
-
-def benchmark_stats(scores):
-    """count, mean, p75 (0-1 scale) for a score series. None when empty."""
-    s = pd.Series(scores).dropna()
-    if s.empty:
-        return {'count': 0, 'mean': None, 'p75': None}
-    return {'count': int(len(s)), 'mean': float(s.mean()), 'p75': float(s.quantile(0.75))}
 
 
 def flatten_attempt(attempt):
@@ -1526,47 +1507,84 @@ def plot_question_analysis(results_df, question_details=None):
             mime="text/csv",
         )
 
-def plot_total_score_histogram(results_df):
+def plot_total_score_histogram(results_df, cohort_scores=None, cohort_label=""):
     """
     Creates a histogram of total scores, including all attempts made.
+
+    When ``cohort_scores`` is provided (scores for a selected email-domain
+    cohort), an additional row of metric cards is shown for the cohort and the
+    chart replaces the middle-50% grey band with reference lines: black solid
+    = overall mean, black dotted = overall 75th percentile, red solid = cohort
+    mean, red dotted = cohort 75th percentile.
     """
     # Get all total scores (including multiple attempts per learner)
     all_scores = results_df['totalScore'].dropna()
-    
+
     if len(all_scores) == 0:
         return
-    
+
+    cohort = pd.Series(cohort_scores).dropna() if cohort_scores is not None else pd.Series(dtype=float)
+    has_cohort = not cohort.empty
+
     st.subheader("Total Score Distribution")
-    
-    # Add summary statistics
+
+    # Overall summary statistics
+    st.markdown("**Overall**")
     col1, col2, col3, col4 = st.columns(4)
-    
+
     with col1:
         st.metric("Question Attempts", len(all_scores))
         st.metric("Mean Score", f"{all_scores.mean() * 100:.1f}%")
-    
+
     with col2:
         st.metric("Median Score", f"{all_scores.median() * 100:.1f}%")
         st.metric("Standard Deviation", f"{all_scores.std() * 100:.1f}%")
-    
+
     with col3:
         st.metric("Min Score", f"{all_scores.min() * 100:.1f}%")
         st.metric("Max Score", f"{all_scores.max() * 100:.1f}%")
-    
+
     with col4:
-        # Calculate percentiles
         p25 = all_scores.quantile(0.25)
         p75 = all_scores.quantile(0.75)
         st.metric("25th Percentile", f"{p25 * 100:.1f}%")
         st.metric("75th Percentile", f"{p75 * 100:.1f}%")
-    
+
+    # Cohort summary statistics (only when a domain cohort is selected)
+    if has_cohort:
+        st.markdown(f"**Selected domain(s): {cohort_label or 'cohort'}**")
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric("Question Attempts", len(cohort))
+            st.metric("Mean Score", f"{cohort.mean() * 100:.1f}%")
+        with c2:
+            st.metric("Median Score", f"{cohort.median() * 100:.1f}%")
+            st.metric("Standard Deviation", f"{cohort.std() * 100:.1f}%")
+        with c3:
+            st.metric("Min Score", f"{cohort.min() * 100:.1f}%")
+            st.metric("Max Score", f"{cohort.max() * 100:.1f}%")
+        with c4:
+            st.metric("25th Percentile", f"{cohort.quantile(0.25) * 100:.1f}%")
+            st.metric("75th Percentile", f"{cohort.quantile(0.75) * 100:.1f}%")
+
     # Create the histogram using matplotlib
     fig, ax = plt.subplots(figsize=(10, 6), dpi=200)
-    
-    # Add light grey overlay for 25th-75th percentile range
-    p25 = all_scores.quantile(0.25)
-    p75 = all_scores.quantile(0.75)
-    ax.axvspan(p25, p75, alpha=.5, color='lightgrey', label='Middle 50 percent')
+
+    if has_cohort:
+        # Replace the middle-50% grey band with reference lines.
+        o_mean = all_scores.mean()
+        o_p75 = all_scores.quantile(0.75)
+        ax.axvline(o_mean, color='black', linestyle='-', linewidth=1.8, label=f'Overall mean ({o_mean*100:.1f}%)')
+        ax.axvline(o_p75, color='black', linestyle=':', linewidth=1.8, label=f'Overall 75th %ile ({o_p75*100:.1f}%)')
+        c_mean = cohort.mean()
+        c_p75 = cohort.quantile(0.75)
+        ax.axvline(c_mean, color='red', linestyle='-', linewidth=1.8, label=f'Cohort mean ({c_mean*100:.1f}%)')
+        ax.axvline(c_p75, color='red', linestyle=':', linewidth=1.8, label=f'Cohort 75th %ile ({c_p75*100:.1f}%)')
+    else:
+        # Add light grey overlay for 25th-75th percentile range
+        p25 = all_scores.quantile(0.25)
+        p75 = all_scores.quantile(0.75)
+        ax.axvspan(p25, p75, alpha=.5, color='lightgrey', label='Middle 50 percent')
     
     # Create histogram with color gradient based on score values
     n, bins, patches = ax.hist(all_scores, bins=20, alpha=0.8, edgecolor='black', linewidth=0.5)
@@ -1670,45 +1688,6 @@ def plot_total_score_histogram(results_df):
             file_name="total_scores.csv",
             mime="text/csv",
         )
-
-def plot_benchmark_distribution(overall_scores, cohort_scores=None):
-    """Overlay histogram of overall vs selected-domain cohort total scores.
-
-    Both series share axes; dashed vlines mark mean + 75th percentile of each.
-    Cohort omitted when empty/None.
-    """
-    overall = pd.Series(overall_scores).dropna()
-    cohort = pd.Series(cohort_scores).dropna() if cohort_scores is not None else pd.Series(dtype=float)
-
-    if overall.empty:
-        st.info("No scored attempts to display.")
-        return
-
-    fig, ax = plt.subplots(figsize=(10, 6), dpi=200)
-
-    bins = 20
-    ax.hist(overall, bins=bins, alpha=0.5, color='grey', edgecolor='black', linewidth=0.4, label='Overall')
-
-    o_mean, o_p75 = overall.mean(), overall.quantile(0.75)
-    ax.axvline(o_mean, color='grey', linestyle='--', linewidth=1.5, label=f'Overall mean ({o_mean*100:.1f}%)')
-    ax.axvline(o_p75, color='grey', linestyle=':', linewidth=1.5, label=f'Overall 75th %ile ({o_p75*100:.1f}%)')
-
-    if not cohort.empty:
-        ax.hist(cohort, bins=bins, alpha=0.6, color='#1f77b4', edgecolor='black', linewidth=0.4, label='Selected domain(s)')
-        c_mean, c_p75 = cohort.mean(), cohort.quantile(0.75)
-        ax.axvline(c_mean, color='#1f77b4', linestyle='--', linewidth=1.5, label=f'Cohort mean ({c_mean*100:.1f}%)')
-        ax.axvline(c_p75, color='#1f77b4', linestyle=':', linewidth=1.5, label=f'Cohort 75th %ile ({c_p75*100:.1f}%)')
-    elif cohort_scores is not None:
-        st.info("No attempts match the selected domain(s).")
-
-    ax.set_xlabel('Total Score', color='black')
-    ax.set_ylabel('Number of Attempts', color='black')
-    ax.set_title('Score Distribution — Overall vs Selected Domain(s)', color='black')
-    ax.grid(True, alpha=0.3)
-    ax.tick_params(axis='both', colors='black')
-    legend = ax.legend()
-    plt.setp(legend.get_texts(), color='black')
-    st.pyplot(fig)
 
 def plot_section_scores(results_df):
     """

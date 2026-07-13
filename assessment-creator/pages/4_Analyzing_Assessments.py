@@ -114,61 +114,37 @@ if st.session_state.results_df is not None and not st.session_state.results_df.e
         utils_assessment_analysis.plot_net_skills_heatmap(user_skills_df, results_df)
         utils_assessment_analysis.plot_skill_correlation_heatmap(user_skills_df)
     
-    # Benchmarks Expander
-    with st.expander("Benchmarks", expanded=False):
-        st.info("**Benchmarks**: Average and 75th percentile scores for all attempts, compared side-by-side with a cohort filtered by one or more email domains (e.g. jnj.com, indeed.com).")
-        att = utils_assessment_analysis.attempt_scores(results_df)
-        if att.empty:
-            st.info("No scored attempts available for benchmarks.")
-        else:
-            if 'email_map' not in st.session_state or st.session_state.email_map is None:
-                with st.spinner("Loading learner emails for benchmarks..."):
-                    st.session_state.email_map = utils_assessment_analysis.fetch_emails_for_user_ids(att['userId'].tolist())
-            email_map = st.session_state.email_map
-            att = att.assign(domain=att['userId'].map(lambda u: utils_assessment_analysis.domain_of(email_map.get(u, u))))
-
-            overall = att['totalScore']
-            o_stats = utils_assessment_analysis.benchmark_stats(overall)
-
-            domains = sorted(d for d in att['domain'].dropna().unique().tolist() if d)
-            selected_domains = st.multiselect("Filter by email domain(s)", options=domains)
-
-            has_cohort = bool(selected_domains)
-            if has_cohort:
-                cohort = att[att['domain'].isin(selected_domains)]['totalScore']
-                c_stats = utils_assessment_analysis.benchmark_stats(cohort)
-                col1, col2 = st.columns(2)
-            else:
-                col1, col2 = st.container(), None
-
-            with col1:
-                st.markdown("#### Overall")
-                m1, m2 = st.columns(2)
-                with m1:
-                    st.metric("Average Score", f"{o_stats['mean']*100:.1f}%" if o_stats['mean'] is not None else "—")
-                with m2:
-                    st.metric("75th Percentile", f"{o_stats['p75']*100:.1f}%" if o_stats['p75'] is not None else "—")
-                st.caption(f"{o_stats['count']} attempts")
-
-            if has_cohort:
-                with col2:
-                    st.markdown(f"#### Selected Domain(s): {', '.join(selected_domains)}")
-                    m3, m4 = st.columns(2)
-                    with m3:
-                        st.metric("Average Score", f"{c_stats['mean']*100:.1f}%" if c_stats['mean'] is not None else "—")
-                    with m4:
-                        st.metric("75th Percentile", f"{c_stats['p75']*100:.1f}%" if c_stats['p75'] is not None else "—")
-                    st.caption(f"{c_stats['count']} attempts")
-                utils_assessment_analysis.plot_benchmark_distribution(overall, cohort)
-            else:
-                st.info("Select one or more email domains above to compare a cohort side-by-side.")
-                utils_assessment_analysis.plot_benchmark_distribution(overall, None)
-
     # Assessment Performance Expander
     with st.expander("Assessment Performance Analysis", expanded=False):
         st.info("**Assessment Performance Analysis**: These charts analyze question quality, score distributions, and section performance. The question analysis shows which questions are most effective, while the histogram and section charts show overall performance patterns.")
         utils_assessment_analysis.plot_question_analysis(results_df, question_details=question_details_df)
-        utils_assessment_analysis.plot_total_score_histogram(results_df)
+
+        # Email-domain cohort filter for the total-score distribution
+        if 'email_map' not in st.session_state or st.session_state.email_map is None:
+            with st.spinner("Loading learner emails for domain filter..."):
+                st.session_state.email_map = utils_assessment_analysis.fetch_emails_for_user_ids(
+                    results_df['userId'].dropna().unique().tolist()
+                )
+        email_map = st.session_state.email_map
+        _domains = sorted({
+            d for d in (
+                utils_assessment_analysis.domain_of(email_map.get(u, u))
+                for u in results_df['userId'].dropna().unique()
+            ) if d
+        })
+        selected_domains = st.multiselect("Filter by email domain(s)", options=_domains) if _domains else []
+        if selected_domains:
+            _sel = set(selected_domains)
+            cohort_scores = results_df.loc[
+                results_df['userId'].map(lambda u: utils_assessment_analysis.domain_of(email_map.get(u, u)) in _sel),
+                'totalScore',
+            ].dropna()
+            utils_assessment_analysis.plot_total_score_histogram(
+                results_df, cohort_scores=cohort_scores, cohort_label=", ".join(selected_domains)
+            )
+        else:
+            utils_assessment_analysis.plot_total_score_histogram(results_df)
+
         utils_assessment_analysis.plot_section_scores(results_df)
 
     # Recommendations Expander — manual trigger only
