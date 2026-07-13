@@ -154,15 +154,20 @@ def main():
     # Processing time information
     st.info("**Processing Time**: Expect this to take 3-5~ minutes per program (CD/ND) or a few minutes for uploaded content, depending on PDF size and number of skills.")
 
-    with st.form('Generate Assessments'):
-        MODE = st.radio(
-            'Content source',
-            ['CD/ND Program Keys', 'Uploaded Content'],
-            horizontal=True,
-            help="CD/ND Program Keys: generate from Udacity classroom content via GraphQL. "
-                 "Uploaded Content: generate from an uploaded PDF and/or free-text description.",
-        )
+    # Mode toggle lives OUTSIDE the form: Streamlit forms buffer widget
+    # changes and only rerun on submit, so a mode radio inside the form would
+    # not swap the visible fields until the user clicks Generate. Putting it
+    # here makes selecting a mode rerun the page and re-render the right form.
+    MODE = st.radio(
+        'Content source',
+        ['CD/ND Program Keys', 'Uploaded Content'],
+        horizontal=True,
+        help="CD/ND Program Keys: generate from Udacity classroom content via GraphQL. "
+             "Uploaded Content: generate from an uploaded PDF and/or free-text description.",
+    )
+    st.session_state['mode'] = MODE
 
+    with st.form('Generate Assessments'):
         st.markdown('#### Required Parameters')
 
         if MODE == 'CD/ND Program Keys':
