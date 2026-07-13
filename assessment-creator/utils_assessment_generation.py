@@ -3695,16 +3695,13 @@ def generate_assessments_from_content(
         for future in concurrent.futures.as_completed(futures):
             try:
                 qcs = future.result()
-                for qc in qcs:
-                    # Override provenance: this came from an upload, not Udacity
-                    # classroom content. Keep the concept title the AI attached.
-                    original_source = qc.get('question', {}).get('source', {}) or {}
-                    qc['question']['sourceCategory'] = 'UPLOADED'
-                    qc['question']['source'] = {
-                        'uploaded': True,
-                        'topic': original_source.get('conceptTitle', ''),
-                        'difficultyName': difficulty_level,
-                    }
+                # NOTE: do NOT override qc['question']['source'] here. The upload
+                # page sends `source` verbatim to the createQuestion mutation, and
+                # the Source input type only accepts the CD-style fields
+                # (partTitle, conceptTitle, uri, ...) that process_concept already
+                # populated. process_concept set conceptTitle to the leaf topic,
+                # which is all the provenance we need. sourceCategory is forced to
+                # 'UDACITY' by the upload page regardless.
                 section['questions_choices'].extend(qcs)
                 questions_from_ai += len(qcs)
             except Exception as e:
