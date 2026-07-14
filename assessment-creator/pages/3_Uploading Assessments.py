@@ -34,6 +34,44 @@ def generate_slug(ASSESSMENT_TITLE):
     slug = re.sub(r'\s+', '-', title_no_brackets.strip().lower())
     return slug
 
+# Valid GraphQL enum values for the assessments API. The LLM that builds the
+# upload CSV sometimes emits topical labels (e.g. "Deployment") for category or
+# lowercase/wrong status values (e.g. "active", "published"), which the API
+# rejects with GRAPHQL_VALIDATION_FAILED. These helpers normalize incoming
+# values back to the accepted enums before we submit.
+VALID_QUESTION_CATEGORIES = {"SINGLE_CHOICE", "MULTIPLE_CHOICE"}
+VALID_STATUSES = {"ACTIVE"}
+
+def _normalize_status(value, default="ACTIVE"):
+    """Coerce a status value to a valid QuestionStatus/ChoiceStatus enum."""
+    if value is None:
+        return default
+    v = str(value).strip().upper()
+    if v in VALID_STATUSES:
+        return v
+    # Common LLM variants that should map to ACTIVE.
+    if v in {"PUBLISHED", "DRAFT"}:
+        return "ACTIVE"
+    return default
+
+def _normalize_category(category, group):
+    """Coerce a question category to SINGLE_CHOICE / MULTIPLE_CHOICE.
+
+    If the value is already a valid enum (case-insensitive), return it. Otherwise
+    infer from the number of correct choices in the group: more than one correct
+    choice -> MULTIPLE_CHOICE, otherwise SINGLE_CHOICE. Falls back to
+    SINGLE_CHOICE and logs a warning so unexpected values are visible.
+    """
+    if isinstance(category, str) and category.strip().upper() in VALID_QUESTION_CATEGORIES:
+        return category.strip().upper()
+    try:
+        correct = int(group["choice_isCorrect"].fillna(False).astype(bool).sum())
+    except Exception:
+        correct = 0
+    inferred = "MULTIPLE_CHOICE" if correct > 1 else "SINGLE_CHOICE"
+    print(f"WARNING: Unrecognized category '{category}' -> inferred '{inferred}' from {correct} correct choices")
+    return inferred
+
 def fetch_difficulty_levels():
     query = """
     query {
@@ -873,16 +911,29 @@ def process_question_group(question_tuple, group):
         
         response_json = r.json()
         print(f"Question creation response JSON keys: {list(response_json.keys())}")
-        
-        if 'data' not in response_json:
-            print(f"ERROR: No 'data' key in question response: {response_json}")
-            raise Exception("No 'data' key in question response")
-        
-        if 'createQuestion' not in response_json['data']:
-            print(f"ERROR: No 'createQuestion' key in question response data: {response_json['data']}")
-            raise Exception("No 'createQuestion' key in question response data")
-        
-        question_id = response_json['data']['createQuestion']['id']
+
+        # The API can return HTTP 200 with {"errors":[...], "data":{"createQuestion": null}}
+        # when a field fails GraphQL validation. The previous code subscripted
+        # data['createQuestion']['id'] directly, which crashed with a cryptic
+        # "'NoneType' object is not subscriptable" that hid the real validation
+        # message. Surface the actual GraphQL error instead.
+        errors = response_json.get("errors")
+        data = response_json.get("data")
+        create_question = data.get("createQuestion") if isinstance(data, dict) else None
+
+        if errors or create_question is None:
+            if errors:
+                try:
+                    msg = json.dumps(errors)
+                except Exception:
+                    msg = str(errors)
+            else:
+                msg = "createQuestion was null with no GraphQL errors"
+            print(f"ERROR: Question mutation rejected by API: {msg}")
+            print(f"ERROR: Request payload: {question_payload}")
+            raise Exception(f"Question mutation rejected by API (status {r.status_code}): {msg}")
+
+        question_id = create_question['id']
         print(f"Successfully created question with ID: {question_id}")
         q_exception = None
         
@@ -1012,6 +1063,50 @@ def upload_assessment_to_api(df, assessment_title):
             print(f"Available columns: {list(df.columns)}")
             raise Exception(f"Missing grouping columns: {missing_grouping_cols}")
         
+        # Step 3.5: Normalize enum fields (category / question_status / choice_status)
+        # to valid API values. The LLM-generated CSV sometimes contains topical
+        # labels for category (e.g. "Deployment") and lowercase/wrong status
+        # values (e.g. "active", "published"), which the API rejects. Normalize
+        # here so the rest of the upload works on clean enums.
+        print(f"\n{'='*50}")
+        print("STEP 3.5: NORMALIZING ENUM FIELDS")
+        print(f"{'='*50}")
+
+        pre_category_values = df['category'].value_counts(dropna=False).to_dict()
+        pre_qstatus_values = df['question_status'].value_counts(dropna=False).to_dict()
+        pre_cstatus_values = df['choice_status'].value_counts(dropna=False).to_dict()
+
+        # Normalize status columns (question-level and choice-level).
+        df['question_status'] = df['question_status'].map(_normalize_status)
+        df['choice_status'] = df['choice_status'].map(_normalize_status)
+
+        # Normalize category per question group, inferring from correct-choice
+        # count when the value is not already a valid enum. Group by the question
+        # identity columns (everything that defines a unique question except the
+        # fields we are normalizing) so each question's choice rows are counted
+        # together.
+        category_identity_cols = [
+            c for c in question_columns if c not in ('category', 'question_status')
+        ]
+        # Ensure choice_isCorrect exists for inference; default to False if absent.
+        if 'choice_isCorrect' not in df.columns:
+            df['choice_isCorrect'] = False
+
+        corrected_categories = 0
+        for _, group in df.groupby(category_identity_cols, dropna=False):
+            normalized = _normalize_category(group['category'].iloc[0], group)
+            if normalized != group['category'].iloc[0]:
+                corrected_categories += 1
+            df.loc[group.index, 'category'] = normalized
+
+        print(f"Category values before: {pre_category_values}")
+        print(f"Category values after:  {df['category'].value_counts(dropna=False).to_dict()}")
+        print(f"Corrected {corrected_categories} question group(s) with unrecognized category")
+        print(f"Question status before: {pre_qstatus_values}")
+        print(f"Question status after:  {df['question_status'].value_counts(dropna=False).to_dict()}")
+        print(f"Choice status before: {pre_cstatus_values}")
+        print(f"Choice status after:  {df['choice_status'].value_counts(dropna=False).to_dict()}")
+
         # Group the DataFrame
         grouped = df.groupby(question_columns)
         print(f"Created {grouped.ngroups} question groups")
