@@ -380,6 +380,42 @@ def main():
                                     use_container_width=True,
                                 )
 
+                    # Uploaded-content flow: eval+retry stats + FAIL-reason
+                    # breakdown so the pass-rate lift (and remaining weak spots)
+                    # are visible.
+                    if MODE == 'Uploaded Content' and progress_data.get('retry_stats'):
+                        rs = progress_data['retry_stats']
+                        c1, c2, c3, c4 = st.columns(4)
+                        c1.metric("Questions generated", rs.get('initial_questions', 0))
+                        c2.metric("Passed first eval", rs.get('pass_first_pass', 0))
+                        c3.metric("Recovered on retry", rs.get('recovered_on_retry', 0))
+                        c4.metric("Still failing", rs.get('still_failing', 0))
+                        first_pass = rs.get('initial_questions', 0)
+                        final_pass = rs.get('pass_first_pass', 0) + rs.get('recovered_on_retry', 0)
+                        if first_pass:
+                            st.caption(
+                                f"Eval pass rate: {first_pass} → {final_pass}/{first_pass} "
+                                f"({round(100 * final_pass / first_pass, 1)}%) after up to 2 retry attempts."
+                            )
+                        fail_reasons = progress_data.get('eval_fail_reasons') or {}
+                        if fail_reasons:
+                            with st.expander(
+                                f"🔎 Why the remaining {rs.get('still_failing', 0)} question(s) still FAIL "
+                                "(by criterion)"
+                            ):
+                                st.dataframe(
+                                    [{"Criterion": k, "Count": v}
+                                     for k, v in sorted(
+                                         fail_reasons.items(), key=lambda kv: kv[1], reverse=True)],
+                                    use_container_width=True,
+                                    hide_index=True,
+                                )
+                                st.caption(
+                                    "If `relevanceAndClarity` dominates, skill mapping quality is the "
+                                    "next lever (looser tags). `choiceQuality`/`generalAdherence` point "
+                                    "at prompt tuning."
+                                )
+
                     # Store results in session state
                     st.session_state.generated_questions_df = questions_choices_df
                     st.session_state.progress_data = progress_data

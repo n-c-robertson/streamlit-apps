@@ -1388,3 +1388,290 @@ def get_topic_split_prompt(topic, full_text, count_needed):
         topic_split_prompt[0],
         {'role': 'user', 'content': user_prompt},
     ]
+
+
+# ===========================================================================
+# Uploaded-content flow: prompts to lift eval pass rate.
+# - per-leaf learning objectives (so generalAdherence has a relevant LO)
+# - skill-tied, no-PDF-specific generation prompt
+# - lenient-skill eval prompt (skillId is a best-fit tag, not a strict match)
+# - fix prompt for the regenerate-on-FAIL retry loop
+# All uploaded-only; shared CD/ND prompts untouched.
+# ===========================================================================
+
+learning_objectives_per_leaf_prompt = [
+    {
+        'role': 'system',
+        'content': """You are an AI assistant for Udacity. For each leaf topic provided, derive 3-5 specific, assessable learning objectives drawn from the source content.
+Return only valid JSON with no extra commentary or markdown.
+
+JSON Schema:
+{{
+  "<leaf_topic_1>": ["objective 1", "objective 2", "..."],
+  "<leaf_topic_2>": ["objective 1", "..."]
+}}
+
+Rules:
+- Objectives must be specific to that leaf topic (not generic to the whole document).
+- Objectives must describe what a learner should understand or be able to do.
+- Cover the key concepts of the topic; do not invent material absent from the source.
+"""
+    },
+    {
+        'role': 'user',
+        'content': """Source content:
+{full_text}
+
+Target difficulty: {difficulty}
+
+Leaf topics and the taxonomy skill each maps to:
+{leaf_topics_with_skills}
+
+Return the learning objectives JSON per the schema, keyed by exact leaf topic name.
+"""
+    }
+]
+
+
+def get_learning_objectives_per_leaf_prompt(leaf_topics, mapped_skill_names, full_text, difficulty):
+    pairs = "\n".join(
+        f"- {topic} (skill: {skill})"
+        for topic, skill in zip(leaf_topics, mapped_skill_names)
+    )
+    user_prompt = learning_objectives_per_leaf_prompt[1]['content'].format(
+        full_text=full_text,
+        difficulty=difficulty or 'unspecified',
+        leaf_topics_with_skills=pairs,
+    )
+    return [
+        learning_objectives_per_leaf_prompt[0],
+        {'role': 'user', 'content': user_prompt},
+    ]
+
+
+uploaded_assessment_questions_prompt = [
+    {
+        'role': 'system',
+        'content': """You are an AI assistant for Udacity tasked with generating a technical assessment question from an uploaded document (e.g. a PDF or free-text description).
+Your output must be a single, valid JSON object matching the schema provided below.
+Return only valid JSON with no additional commentary or markdown formatting.
+
+JSON Schema:
+{{
+  "questions_choices": [
+    {{
+      "question": {{
+        "difficultyLevelId": string,
+        "skillId": string,
+        "category": string,
+        "status": string,
+        "content": string,
+        "source": object
+      }},
+      "choices": [
+        {{
+          "status": string,
+          "content": string,
+          "isCorrect": boolean,
+          "orderIndex": number
+        }}
+      ]
+    }}
+  ]
+}}
+
+The document is the source material only. Questions must be answerable by someone who learned the concept from ANY source, not by someone who memorised this document.
+"""
+    },
+    {
+        'role': 'user',
+        'content': """Generate {number_questions_per_concept} question(s) from the uploaded document below.
+
+The skill being tested is: {skill_name}
+The specific sub-area (leaf topic) to draw from is: {leaf_topic}
+The "difficultyLevelId" you output MUST BE this one: {difficulty_level}
+The "skillId" you output MUST BE exactly: {skill_name}
+
+Requirements:
+- Skill alignment: the question must demonstrably test {skill_name}, drawing on the {leaf_topic} sub-area. The skill tag is a best-fit taxonomy label, so the question's subject matter must clearly belong to that skill area.
+- Content independence: DO NOT reference specific examples, names, projects, code listings, anecdotes, or wording from the document. Generalise. A learner who never saw this document must be able to answer.
+- Conceptual focus: test understanding of concepts, principles, and methodologies - not recall of document specifics.
+- Question Types: each question categorised as one of: {question_types}.
+- Learning Objectives: each question must align with at least one of: {learning_objectives}.
+- Answer Choices:
+  - SINGLE_CHOICE: one correct answer + three plausible distractors.
+  - MULTIPLE_CHOICE: multiple correct (as appropriate), 4-5 total choices.
+  - All choices similar in length, detail, complexity. Correct answer never obviously longer.
+  - Correct answer must not reuse distinctive terms/phrases from the question stem.
+  - Distractors must be plausible common misconceptions, distinct, concise, grammatically consistent. No negative phrasing, no "Both A & C" combined answers.
+- Blooms Taxonomy: align to one of Remember/Understand/Apply/Analyze/Evaluate/Create.
+- Programming: if relevant, include markdown code (inline `code` or fenced blocks) - but code must be generic/illustrative, not copied from the document.
+- Custom overrides (override prior instructions): customized difficulty {customized_difficulty} than the content; custom instructions: {customized_prompt_instructions}.
+
+Source document:
+{content}
+
+Return only valid JSON per the schema.
+"""
+    }
+]
+
+
+def get_uploaded_assessment_questions_prompt(
+    number_questions_per_concept,
+    difficulty_level,
+    skill_name,
+    leaf_topic,
+    question_types,
+    learning_objectives,
+    content,
+    customized_difficulty,
+    customized_prompt_instructions,
+):
+    user_prompt = uploaded_assessment_questions_prompt[1]['content'].format(
+        number_questions_per_concept=number_questions_per_concept,
+        skill_name=skill_name,
+        leaf_topic=leaf_topic,
+        difficulty_level=difficulty_level,
+        question_types=question_types,
+        learning_objectives=learning_objectives,
+        content=content,
+        customized_difficulty=customized_difficulty,
+        customized_prompt_instructions=customized_prompt_instructions or '(none)',
+    )
+    return [
+        uploaded_assessment_questions_prompt[0],
+        {'role': 'user', 'content': user_prompt},
+    ]
+
+
+uploaded_question_evaluation_prompt = [
+    {
+        'role': 'system',
+        'content': """You are an AI evaluator reviewing a technical assessment question generated from an uploaded document.
+Output only a valid JSON object matching exactly the schema below. No commentary.
+
+Evaluation Criteria:
+
+- **Relevance and Clarity**:
+- Language neutral, clear, concise, conceptual.
+- IMPORTANT: the "skillId" is a BEST-FIT taxonomy tag, not necessarily an exact label for the question. Do NOT fail the question merely because the skillId string does not literally or semantically match the question wording. Instead, judge whether the question's subject matter plausibly belongs to that skill area. Only fail on relevance if the question is clearly off-topic for the skill area or mistargeted for the difficulty level {difficulty_level}.
+- No context-specific references to a specific source document's examples/names/anecdotes.
+
+- **Question Type Suitability**:
+- Question type ({question_type}) must match one of: {question_types}.
+- Ensure conceptual coverage.
+
+- **Answer Choices**:
+- SINGLE_CHOICE: one correct, three plausible distractors.
+- MULTIPLE_CHOICE: multiple correct (where appropriate), 4-5 total options.
+- Distractors plausible, distinct, concise, grammatically consistent, represent common misconceptions. No negative/ambiguous wording.
+- Correct answers not overly lengthy, must not mimic question-stem language.
+
+- **General Adherence**:
+- Avoid context-specific examples or anecdotes from a specific source document.
+- Question must align with at least one learning objective: {learning_objectives}.
+- Programming questions use clean markdown (inline backticks or fenced blocks).
+
+JSON Schema:
+{{
+"questionEvaluation": string,     // "PASS" if criteria fully met; otherwise "FAIL"
+"relevanceAndClarity": string,
+"questionTypeDiversity": string,
+"choiceQuality": string,
+"generalAdherence": string
+}}
+"""
+    },
+    {
+        'role': 'user',
+        'content': """Evaluate this JSON-formatted question and answer choices:
+
+{question_data}
+
+Return your evaluation as per the specified JSON schema.
+"""
+    }
+]
+
+
+def get_uploaded_question_evaluation_prompt(learning_objectives, qc, question_types):
+    system_prompt = uploaded_question_evaluation_prompt[0]['content'].format(
+        difficulty_level=qc['question'].get('difficultyLevelId', ''),
+        skill=qc['question'].get('skillId', ''),
+        question_type=qc['question'].get('category', ''),
+        question_types=question_types,
+        learning_objectives=learning_objectives,
+    )
+    user_prompt = uploaded_question_evaluation_prompt[1]['content'].format(
+        question_data=qc,
+    )
+    return [
+        {'role': 'system', 'content': system_prompt},
+        {'role': 'user', 'content': user_prompt},
+    ]
+
+
+question_fix_prompt = [
+    {
+        'role': 'system',
+        'content': """You are an AI assistant for Udacity. You are given an assessment question that FAILED an automated evaluation, the evaluator's per-criterion feedback, and the learning objectives. Revise the question (and its choices) to fix every issue named in the feedback while keeping the same skill and difficulty.
+Return only a single valid JSON object matching the schema below. No commentary or markdown.
+
+JSON Schema:
+{{
+  "questions_choices": [
+    {{
+      "question": {{
+        "difficultyLevelId": string,
+        "skillId": string,
+        "category": string,
+        "status": string,
+        "content": string,
+        "source": object
+      }},
+      "choices": [
+        {{ "status": string, "content": string, "isCorrect": boolean, "orderIndex": number }}
+      ]
+    }}
+  ]
+}}
+
+Rules:
+- Keep skillId and difficultyLevelId unchanged.
+- Keep category unchanged unless the feedback says the type is invalid.
+- Fix only what the feedback names; do not invent a new topic.
+- Questions must remain answerable by someone who learned the concept from any source (no document-specific references).
+- Correct answer must not be the longest choice and must not reuse stem keywords.
+"""
+    },
+    {
+        'role': 'user',
+        'content': """Skill being tested: {skill_name}
+
+Learning objectives:
+{learning_objectives}
+
+Original question (JSON):
+{question_data}
+
+Evaluator feedback (per criterion):
+{eval_feedback}
+
+Return the revised question as valid JSON per the schema. Keep it a single question in questions_choices.
+"""
+    }
+]
+
+
+def get_question_fix_prompt(qc, eval_feedback, learning_objectives, skill_name):
+    user_prompt = question_fix_prompt[1]['content'].format(
+        skill_name=skill_name,
+        learning_objectives=learning_objectives,
+        question_data=qc,
+        eval_feedback=eval_feedback,
+    )
+    return [
+        question_fix_prompt[0],
+        {'role': 'user', 'content': user_prompt},
+    ]

@@ -1155,7 +1155,7 @@ def get_qc_id(qc):
     unique_str += qc['question'].get('difficultyLevelId', '')
     return hashlib.md5(unique_str.encode('utf-8')).hexdigest()
 
-def process_concept(sectionId, node, lesson, concept, difficulty_level, difficulty_level_uri, skills, learning_objectives, number_questions_per_concept, question_types, customized_difficulty, customized_prompt_instructions, assessment_type="placement"):
+def process_concept(sectionId, node, lesson, concept, difficulty_level, difficulty_level_uri, skills, learning_objectives, number_questions_per_concept, question_types, customized_difficulty, customized_prompt_instructions, assessment_type="placement", prompt_fn=None):
     # Build atom content from concept atoms.
     atom_content = ""
     quiz_atoms = []
@@ -1223,7 +1223,23 @@ def process_concept(sectionId, node, lesson, concept, difficulty_level, difficul
     print(f"Node: {node['title']} (Key: {node['key']})")
     
     # Choose the appropriate prompt based on assessment type
-    if assessment_type.lower() == "readiness":
+    if prompt_fn is not None:
+        # Uploaded-content flow: caller-supplied prompt (e.g. skill-tied,
+        # no-PDF-specific gen prompt). skills is a single-element list with
+        # the mapped skill name; concept['title'] is the leaf topic.
+        skill_name = skills[0] if skills else ''
+        prompt_messages = prompt_fn(
+            number_questions_per_concept,
+            difficulty_level,
+            skill_name,
+            concept.get('title', ''),
+            question_types,
+            learning_objectives,
+            content,
+            customized_difficulty,
+            customized_prompt_instructions,
+        )
+    elif assessment_type.lower() == "readiness":
         prompt_messages = prompts.get_readiness_assessment_questions_prompt(
             number_questions_per_concept,
             difficulty_level,
@@ -2423,6 +2439,7 @@ def run_post_pipeline(
     missing_prerequisite_skills=None,
     extra_progress_data=None,
     debug_outputs=None,
+    skip_evaluation=False,
 ):
     """Shared tail of the generation pipeline.
 
@@ -2545,11 +2562,19 @@ def run_post_pipeline(
 
     i += 1
     update_progress(i)
-    section_content_definitions = evaluate_questions(section_content_definitions, QUESTION_TYPES)
-    debug_outputs['evaluate_questions'] = {
-        'output': f"Evaluated questions for {len(section_content_definitions)} sections",
-        'type': 'list'
-    }
+    if skip_evaluation:
+        # Caller (uploaded-content flow) pre-evaluated with the lenient eval
+        # prompt + retry loop; keep the eval results already attached.
+        debug_outputs['evaluate_questions'] = {
+            'output': 'Skipped - evaluation already run by caller (uploaded flow)',
+            'type': 'skipped',
+        }
+    else:
+        section_content_definitions = evaluate_questions(section_content_definitions, QUESTION_TYPES)
+        debug_outputs['evaluate_questions'] = {
+            'output': f"Evaluated questions for {len(section_content_definitions)} sections",
+            'type': 'list'
+        }
 
     i += 1
     update_progress(i)
@@ -3574,6 +3599,177 @@ def build_synthetic_section(title, full_text, mapped_skills, difficulty_name, di
     }
 
 
+def generate_learning_objectives_per_leaf(full_text, mapped_skills, difficulty):
+    """Build per-leaf learning objectives in one batched OpenAI call.
+
+    Returns a dict keyed by leaf topic name -> list of objective strings.
+    Falls back to an empty list per topic on failure so gen never blocks.
+    """
+    leaf_topics = [ms['topic'] for ms in mapped_skills]
+    skill_names = [ms['name'] for ms in mapped_skills]
+    if not leaf_topics:
+        return {}
+
+    messages = prompts.get_learning_objectives_per_leaf_prompt(
+        leaf_topics, skill_names, full_text, difficulty
+    )
+    try:
+        response = settings.call_openai_with_fallback(
+            model=settings.CHAT_COMPLETIONS_MODEL,
+            response_format=settings.CHAT_COMPLETIONS_RESPONSE_FORMAT,
+            messages=messages,
+        )
+        result = json.loads(response.choices[0].message.content)
+    except Exception as e:
+        print(f"[generate_learning_objectives_per_leaf] failed: {type(e).__name__}: {e}")
+        return {topic: [] for topic in leaf_topics}
+
+    # Normalise: ensure every leaf topic has a list.
+    return {topic: list(result.get(topic, []) or []) for topic in leaf_topics}
+
+
+def _eval_one_uploaded(learning_objectives, qc, question_types):
+    """Eval a single qc with the uploaded (lenient-skill) eval prompt."""
+    try:
+        messages = prompts.get_uploaded_question_evaluation_prompt(learning_objectives, qc, question_types)
+        response = settings.call_openai_with_fallback(
+            model=settings.CHAT_COMPLETIONS_MODEL,
+            response_format=settings.CHAT_COMPLETIONS_RESPONSE_FORMAT,
+            messages=messages,
+        )
+        return json.loads(response.choices[0].message.content)
+    except Exception as e:
+        print(f"[uploaded eval] failed: {type(e).__name__}: {e}")
+        return None
+
+
+def _fix_one_question(qc, eval_feedback, learning_objectives, skill_name):
+    """Call the fix prompt and return a revised qc dict, or None on failure."""
+    try:
+        messages = prompts.get_question_fix_prompt(qc, eval_feedback, learning_objectives, skill_name)
+        response = settings.call_openai_with_fallback(
+            model=settings.CHAT_COMPLETIONS_MODEL,
+            response_format=settings.CHAT_COMPLETIONS_RESPONSE_FORMAT,
+            messages=messages,
+        )
+        parsed = json.loads(
+            response.choices[0].message.content.replace('```json', '').replace('```', '')
+        )
+        qcs = parsed.get('questions_choices', [])
+        if not qcs:
+            return None
+        revised = qcs[0]
+        # Preserve metadata the gen step attached (sectionId, source, etc.).
+        revised['question']['sectionId'] = qc['question'].get('sectionId')
+        revised['question']['difficultyLevelUri'] = qc['question'].get('difficultyLevelUri')
+        revised['question']['source'] = qc['question'].get('source')
+        revised['question']['sourceCategory'] = qc['question'].get('sourceCategory')
+        revised['question']['hasCodingContent'] = qc['question'].get('hasCodingContent', False)
+        return revised
+    except Exception as e:
+        print(f"[uploaded fix] failed: {type(e).__name__}: {e}")
+        return None
+
+
+def evaluate_and_retry_uploaded(section_content_definitions, question_types, max_retries=2):
+    """Uploaded-only eval + regenerate-on-FAIL retry loop.
+
+    Uses the lenient-skill uploaded eval prompt. For each FAIL, feeds the eval
+    feedback back to the fix prompt, regenerates, and re-evaluates, up to
+    max_retries. Attaches the final eval to each qc. Returns retry stats and a
+    FAIL-reason breakdown for the page.
+    """
+    retry_stats = {
+        'initial_questions': 0,
+        'pass_first_pass': 0,
+        'recovered_on_retry': 0,
+        'still_failing': 0,
+        'retries_run': 0,
+    }
+    eval_fail_reasons = Counter()
+
+    # Map leaf topic -> per-leaf learning objectives (stored on each concept).
+    # Falls back to the section-level LOs if a concept has none.
+    for section in section_content_definitions:
+        section_lo = section.get('learning_objectives') or {}
+        qcs = section.get('questions_choices', [])
+        retry_stats['initial_questions'] += len(qcs)
+
+        # Build a lookup of concept title -> LOs from the synthetic concepts.
+        concept_los = {}
+        for concept in section.get('_uploaded_concepts', []):
+            concept_los[concept.get('title', '')] = concept.get('_learning_objectives', []) or []
+
+        # --- First eval pass (threaded) ---
+        def first_eval(qc):
+            topic = qc.get('question', {}).get('source', {}).get('conceptTitle', '')
+            los = concept_los.get(topic) or section_lo
+            ev = _eval_one_uploaded(los, qc, question_types)
+            return qc, ev
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = [executor.submit(first_eval, qc) for qc in qcs]
+            for fut in concurrent.futures.as_completed(futures):
+                qc, ev = fut.result()
+                if ev is not None:
+                    qc['eval'] = ev
+                    if ev.get('questionEvaluation') == 'PASS':
+                        retry_stats['pass_first_pass'] += 1
+
+        # --- Retry loop on FAILs ---
+        for attempt in range(1, max_retries + 1):
+            fails = [qc for qc in section['questions_choices']
+                     if (qc.get('eval') or {}).get('questionEvaluation') != 'PASS']
+            if not fails:
+                break
+            retry_stats['retries_run'] += len(fails)
+
+            def fix_eval(qc):
+                topic = qc.get('question', {}).get('source', {}).get('conceptTitle', '')
+                los = concept_los.get(topic) or section_lo
+                skill_name = qc.get('question', {}).get('skillId', '')
+                ev = qc.get('eval') or {}
+                feedback = (
+                    f"relevanceAndClarity: {ev.get('relevanceAndClarity', '')}\n"
+                    f"questionTypeDiversity: {ev.get('questionTypeDiversity', '')}\n"
+                    f"choiceQuality: {ev.get('choiceQuality', '')}\n"
+                    f"generalAdherence: {ev.get('generalAdherence', '')}"
+                )
+                revised = _fix_one_question(qc, feedback, los, skill_name)
+                if revised is None:
+                    return qc, None, None
+                new_ev = _eval_one_uploaded(los, revised, question_types)
+                return qc, revised, new_ev
+
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                futures = [executor.submit(fix_eval, qc) for qc in fails]
+                for fut in concurrent.futures.as_completed(futures):
+                    orig, revised, new_ev = fut.result()
+                    if revised is None or new_ev is None:
+                        continue
+                    revised['eval'] = new_ev
+                    if new_ev.get('questionEvaluation') == 'PASS':
+                        retry_stats['recovered_on_retry'] += 1
+                    # Replace the original qc (identity match) with the revised one.
+                    for idx, existing in enumerate(section['questions_choices']):
+                        if existing is orig:
+                            section['questions_choices'][idx] = revised
+                            break
+
+        # --- Tally still-failing + reasons ---
+        for qc in section['questions_choices']:
+            ev = qc.get('eval') or {}
+            if ev.get('questionEvaluation') != 'PASS':
+                retry_stats['still_failing'] += 1
+                # Attribute the fail to the first non-empty criterion text.
+                for crit in ('relevanceAndClarity', 'choiceQuality', 'generalAdherence', 'questionTypeDiversity'):
+                    if ev.get(crit):
+                        eval_fail_reasons[crit] += 1
+                        break
+
+    return section_content_definitions, retry_stats, dict(eval_fail_reasons)
+
+
 def generate_assessments_from_content(
     uploaded_file,
     free_text,
@@ -3644,25 +3840,35 @@ def generate_assessments_from_content(
         'skill_mapping': mapping_debug,
     }
 
-    # 4. Build synthetic section + learning objectives
+    # 4. Build synthetic section + per-leaf learning objectives.
+    #    Per-leaf LOs (uploaded-only) give each question a relevant objective to
+    #    align against, fixing the generalAdherence FAILs the section-level LOs
+    #    caused. The shared learning_objective_generator is NOT used here.
     update_pre(3)
     section_content_definitions = [
         build_synthetic_section(title, full_text, mapped_skills, difficulty_name, difficulty_uri)
     ]
-    section_content_definitions = learning_objective_generator(section_content_definitions)
-    debug_outputs['learning_objective_generator'] = {
-        'output': str([s.get('learning_objectives', {}) for s in section_content_definitions])[:1000],
-        'type': 'list',
+    section = section_content_definitions[0]
+    per_leaf_los = generate_learning_objectives_per_leaf(full_text, mapped_skills, difficulty_name)
+    for concept in section['_uploaded_concepts']:
+        concept['_learning_objectives'] = per_leaf_los.get(concept['title'], [])
+    # Also surface per-leaf LOs on the section so the eval retry loop can fall
+    # back to them if a concept's lookup misses.
+    section['learning_objectives'] = per_leaf_los
+    debug_outputs['learning_objectives_per_leaf'] = {
+        'output': f"Built per-leaf LOs for {len(per_leaf_los)} topics",
+        'type': 'dict',
+        'per_leaf_los': per_leaf_los,
     }
 
     # 5. Generate N questions per leaf topic. Call process_concept directly so
     #    each leaf is constrained to its single mapped skill (process_concepts
-    #    would pass the full skill list to every concept).
+    #    would pass the full skill list to every concept). Use the uploaded,
+    #    skill-tied generation prompt (prompt_fn) and that leaf's per-leaf LOs.
     update_pre(4)
     section = section_content_definitions[0]
     section['questions_choices'] = []
     section.setdefault('_diagnostics', [])
-    learning_objectives = section.get('learning_objectives')
     section_key = section['content_keys'][0]
     difficulty_level = section['difficulty_level'][section_key]['name']
     difficulty_level_uri = section['difficulty_level'][section_key].get('uri', '')
@@ -3672,6 +3878,7 @@ def generate_assessments_from_content(
         for concept in section['_uploaded_concepts']:
             ms = concept['_mapped_skill']
             skills_for_concept = [ms['name']]
+            leaf_los = concept.get('_learning_objectives', [])
             futures.append(
                 executor.submit(
                     process_concept,
@@ -3682,12 +3889,13 @@ def generate_assessments_from_content(
                     difficulty_level,
                     difficulty_level_uri,
                     skills_for_concept,
-                    learning_objectives,
+                    leaf_los,
                     n_questions_per_topic,
                     question_types,
                     customized_difficulty,
                     customized_prompt_instructions,
                     "placement",
+                    prompts.get_uploaded_assessment_questions_prompt,
                 )
             )
 
@@ -3722,10 +3930,27 @@ def generate_assessments_from_content(
         'total_questions': len(section['questions_choices']),
     }
 
+    # 6. Uploaded-only eval + regenerate-on-FAIL retry loop (lenient skill
+    #    match). Runs before run_post_pipeline, which is then told to skip its
+    #    own eval step. Retry stats + FAIL-reason breakdown go to the page.
+    section_content_definitions, retry_stats, eval_fail_reasons = evaluate_and_retry_uploaded(
+        section_content_definitions, question_types, max_retries=2
+    )
+    debug_outputs['evaluate_and_retry_uploaded'] = {
+        'output': f"Eval+retry: {retry_stats['pass_first_pass']} passed first pass, "
+                  f"{retry_stats['recovered_on_retry']} recovered on retry, "
+                  f"{retry_stats['still_failing']} still failing",
+        'type': 'dict',
+        'retry_stats': retry_stats,
+        'eval_fail_reasons': eval_fail_reasons,
+    }
+
     extra_progress_data = {
         'taxonomy': taxonomy,
         'leaf_topics': leaf_topics,
         'skill_mapping': mapping_debug,
+        'retry_stats': retry_stats,
+        'eval_fail_reasons': eval_fail_reasons,
     }
 
     questions_choices_df, progress_data = run_post_pipeline(
@@ -3742,5 +3967,6 @@ def generate_assessments_from_content(
         missing_prerequisite_skills=[],
         extra_progress_data=extra_progress_data,
         debug_outputs=debug_outputs,
+        skip_evaluation=True,
     )
     return questions_choices_df, progress_data
