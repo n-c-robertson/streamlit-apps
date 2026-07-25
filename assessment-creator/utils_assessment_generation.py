@@ -3165,7 +3165,14 @@ def convert_questions_to_code_format_dataframe(
     """
     # Get unique questions for analysis
     unique_questions_df = df.groupby('question_content').first().reset_index()
-    
+
+    # ponytail: code-markdown conversion produces choice-based questions and
+    # its prompt only supports SINGLE_CHOICE/MULTIPLE_CHOICE. Skip
+    # SHORT_ANSWER (rubric-graded, no choices) so they're preserved as-is
+    # instead of being rewritten into multiple-choice stems while still
+    # tagged SHORT_ANSWER.
+    unique_questions_df = unique_questions_df[unique_questions_df['category'] != 'SHORT_ANSWER']
+
     # Detect coding content in questions (simple heuristic)
     coding_questions = []
     for _, row in unique_questions_df.iterrows():
