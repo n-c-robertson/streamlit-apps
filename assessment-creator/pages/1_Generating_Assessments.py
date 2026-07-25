@@ -252,9 +252,9 @@ def main():
 
             QUESTION_TYPES = st.multiselect(
             'Question Types',
-            ['MULTIPLE_CHOICE', 'SINGLE_CHOICE'],
+            ['MULTIPLE_CHOICE', 'SINGLE_CHOICE', 'SHORT_ANSWER'],
             default=['MULTIPLE_CHOICE', 'SINGLE_CHOICE'],
-            help="Select the types of questions you want to generate. Only SINGLE CHOICE and MULTIPLE CHOICE problems are supported."
+            help="Select the types of questions you want to generate. SINGLE/MULTIPLE CHOICE produce answer choices; SHORT_ANSWER produces an LLM-graded rubric (no choices)."
         )
 
             # Add question limit slider
