@@ -39,8 +39,59 @@ def generate_slug(ASSESSMENT_TITLE):
 # lowercase/wrong status values (e.g. "active", "published"), which the API
 # rejects with GRAPHQL_VALIDATION_FAILED. These helpers normalize incoming
 # values back to the accepted enums before we submit.
-VALID_QUESTION_CATEGORIES = {"SINGLE_CHOICE", "MULTIPLE_CHOICE"}
+VALID_QUESTION_CATEGORIES = {"SINGLE_CHOICE", "MULTIPLE_CHOICE", "SHORT_ANSWER"}
 VALID_STATUSES = {"ACTIVE"}
+
+# ponytail: SHORT_ANSWER has no choices; rubric JSON shape per
+# schema/grading.graphqls (RubricInput). Stored as JSON string in the CSV
+# `rubric` column, mirroring the `source` column pattern.
+RUBRIC_REQUIRED_FOR = {"SHORT_ANSWER"}
+
+
+def _validate_rubric(rubric):
+    """Validate a parsed rubric dict against the API's ValidateRubric invariants
+    (internal/services/grading/grading.go:131). Returns (rubric, error)."""
+    if not isinstance(rubric, dict):
+        return None, "rubric must be an object"
+    criteria = rubric.get("criteria")
+    if not isinstance(criteria, list) or len(criteria) == 0:
+        return None, "rubric must have at least one criterion"
+    seen = set()
+    for c in criteria:
+        name = (c.get("name") or "").strip() if isinstance(c, dict) else ""
+        if not name:
+            return None, "criterion name is empty"
+        if name in seen:
+            return None, f"duplicate criterion name {name!r}"
+        seen.add(name)
+        pts = c.get("points")
+        if not isinstance(pts, int) or pts <= 0:
+            return None, f"criterion {name!r} has non-positive points ({pts!r})"
+    thr = rubric.get("passingThreshold")
+    if not isinstance(thr, (int, float)) or thr < 0 or thr > 1:
+        return None, f"passingThreshold must be in [0, 1] (got {thr!r})"
+    return rubric, None
+
+
+def _parse_rubric(value):
+    """Parse a rubric CSV cell (string JSON, dict, or None) to a dict, or None."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return None
+        try:
+            return ast.literal_eval(s)
+        except Exception:
+            try:
+                return json.loads(s)
+            except Exception:
+                return None
+    return None
+
 
 def _normalize_status(value, default="ACTIVE"):
     """Coerce a status value to a valid QuestionStatus/ChoiceStatus enum."""
@@ -55,12 +106,13 @@ def _normalize_status(value, default="ACTIVE"):
     return default
 
 def _normalize_category(category, group):
-    """Coerce a question category to SINGLE_CHOICE / MULTIPLE_CHOICE.
+    """Coerce a question category to a valid QuestionCategory enum.
 
-    If the value is already a valid enum (case-insensitive), return it. Otherwise
-    infer from the number of correct choices in the group: more than one correct
-    choice -> MULTIPLE_CHOICE, otherwise SINGLE_CHOICE. Falls back to
-    SINGLE_CHOICE and logs a warning so unexpected values are visible.
+    If the value is already a valid enum (case-insensitive), return it. For
+    unrecognized values, infer from the number of correct choices in the group:
+    more than one correct choice -> MULTIPLE_CHOICE, otherwise SINGLE_CHOICE.
+    SHORT_ANSWER is never inferred (it has no choices) — it must be set
+    explicitly. Logs a warning on inference.
     """
     if isinstance(category, str) and category.strip().upper() in VALID_QUESTION_CATEGORIES:
         return category.strip().upper()
@@ -817,6 +869,7 @@ def process_question_group(question_tuple, group):
     question_id = None
     q_exception = None
     choice_results = []
+    is_short_answer = False
     
     try:
         
@@ -876,19 +929,35 @@ def process_question_group(question_tuple, group):
         except Exception as e:
             print(f"WARNING: Failed to parse source data: {e}")
             source_data = {}
-        
-        question_variables = {
-            "input": {
-                'sectionId': section_id,
-                'difficultyLevelId': difficulty_level_id,
-                'skillId': skill_id,
-                'category': category,
-                'status': status,
-                'content': content,
-                'source': source_data,
-                'sourceCategory': 'UDACITY'
-            }
+
+        # ponytail: rubric is question-level (constant across the group), so
+        # read it from the first row rather than extending the groupby tuple.
+        rubric_str = group['rubric'].iloc[0] if 'rubric' in group.columns else None
+        is_short_answer = (category == "SHORT_ANSWER")
+
+        question_input = {
+            'sectionId': section_id,
+            'difficultyLevelId': difficulty_level_id,
+            'skillId': skill_id,
+            'category': category,
+            'status': status,
+            'content': content,
+            'source': source_data,
+            'sourceCategory': 'UDACITY'
         }
+
+        if is_short_answer:
+            rubric = _parse_rubric(rubric_str)
+            if rubric is None:
+                raise Exception("SHORT_ANSWER questions require a rubric (CSV 'rubric' column is empty)")
+            rubric, rerr = _validate_rubric(rubric)
+            if rerr:
+                raise Exception(f"Invalid rubric: {rerr}")
+            question_input['rubric'] = rubric
+            print(f"SHORT_ANSWER: rubric with {len(rubric.get('criteria', []))} criteria, threshold={rubric.get('passingThreshold')}")
+        # Non-SHORT_ANSWER: never send rubric (resolver forbids it).
+
+        question_variables = {"input": question_input}
         
         print(f"Question variables prepared successfully")
         
@@ -944,8 +1013,8 @@ def process_question_group(question_tuple, group):
         print(f"Full traceback:")
         traceback.print_exc()
     
-    # Now, process choices for this question.
-    if question_id is not None:
+    # Now, process choices for this question. SHORT_ANSWER has no choices — skip.
+    if question_id is not None and not is_short_answer:
         with concurrent.futures.ThreadPoolExecutor() as choice_executor:
             futures = {
                 choice_executor.submit(process_choice, question_id, row): idx 
@@ -958,6 +1027,8 @@ def process_question_group(question_tuple, group):
                 except Exception as e:
                     print(f"ERROR: Choice processing failed: {e}")
                     choice_results.append((None, None, e))
+    elif question_id is not None and is_short_answer:
+        print(f"SHORT_ANSWER question {question_id}: skipping choice creation (no choices)")
     else:
         print(f"Skipping choice processing due to question creation failure")
     
@@ -1244,6 +1315,14 @@ query DownloadAssessment($id: ID!) {
           lessonTitle
           conceptTitle
         }
+        rubric {
+          passingThreshold
+          criteria {
+            name
+            description
+            points
+          }
+        }
         difficultyLevelId
         skillId
         choices {
@@ -1373,6 +1452,8 @@ def convert_assessment_to_csv_dataframe(assessment):
                 "question_content": question.get("content"),
                 "sourceCategory": question.get("sourceCategory") or "UDACITY",
                 "source": source_dict,
+                # ponytail: rubric JSON-stringified for CSV round-trip; empty for non-SHORT_ANSWER.
+                "rubric": json.dumps(question.get("rubric")) if question.get("rubric") else "",
             }
 
             if not choices:
@@ -1399,6 +1480,7 @@ def convert_assessment_to_csv_dataframe(assessment):
     columns = [
         "sectionId", "difficultyLevelId", "difficultyLevelUri", "skillId", "skillUri",
         "category", "question_status", "question_content", "sourceCategory", "source",
+        "rubric",
         "choice_status", "choice_content", "choice_isCorrect", "choice_orderIndex",
     ]
     df = pd.DataFrame(rows, columns=columns)

@@ -86,7 +86,8 @@ JSON Schema:
         "category": string,
         "status": string,
         "content": string,
-        "source": object
+        "source": object,
+        "rubric": object
       }},
       "choices": [
         {{
@@ -99,6 +100,15 @@ JSON Schema:
     }}
   ]
 }}
+
+The `rubric` field is REQUIRED when category is "SHORT_ANSWER" and MUST be omitted (or null) otherwise. Its shape is:
+{{
+  "passingThreshold": number,
+  "criteria": [
+    {{ "name": string, "description": string, "points": number }}
+  ]
+}}
+`passingThreshold` is a fraction in [0, 1]. Each criterion `points` is a positive integer. Criterion names must be unique and non-empty. `choices` MUST be an empty array for SHORT_ANSWER.
 
 Follow the instructions in the user prompt precisely. We want to generate the best technical assessments on the planet.
 """
@@ -130,6 +140,7 @@ The "skillId" you output MUST BE one of the following: {skills}.
 - **Answer Choices**:
   - **Single Choice Questions**: One correct answer and three plausible distractors.
   - **Multiple Choice Questions**: Multiple correct answers (as appropriate) with distractors; total number of choices between 4 and 5.
+  - **Short Answer Questions** (category "SHORT_ANSWER"): No choices — emit `"choices": []`. Instead emit a `rubric` object with `passingThreshold` (a fraction in [0, 1]) and a `criteria` array. Each criterion has a short `name` (unique, non-empty), a detailed `description` the LLM grader uses verbatim, and a positive integer `points`. Use 2-4 criteria that together cover the key dimensions of a correct answer.
 
 - **Answer Choice Length and Detail**:  
   - All answer choices must be similar in length, detail, and complexity. The correct answer should never be obviously longer or more detailed than distractors.
@@ -258,6 +269,29 @@ Example 4: Case study question.
     }}
   ]
 }}
+
+Example 5: Short answer question (LLM-graded, no choices).
+{{
+  "questions_choices": [
+    {{
+      "question": {{
+        "difficultyLevelId": "Intermediate",
+        "skillId": "Prompt Engineering",
+        "category": "SHORT_ANSWER",
+        "status": "ACTIVE",
+        "content": "Explain what prompt engineering is and why it matters when working with large language models.",
+        "rubric": {{
+          "passingThreshold": 0.7,
+          "criteria": [
+            {{ "name": "Accuracy", "description": "The answer correctly explains what prompt engineering is — crafting inputs to guide LLM outputs.", "points": 3 }},
+            {{ "name": "Relevance", "description": "The answer explains why prompt engineering matters, e.g. output quality, consistency, or reducing hallucinations.", "points": 2 }}
+          ]
+        }}
+      }},
+      "choices": []
+    }}
+  ]
+}}
 """
     }
 ]
@@ -305,7 +339,8 @@ JSON Schema:
         "category": string,
         "status": string,
         "content": string,
-        "source": object
+        "source": object,
+        "rubric": object
       }},
       "choices": [
         {{
@@ -318,6 +353,15 @@ JSON Schema:
     }}
   ]
 }}
+
+The `rubric` field is REQUIRED when category is "SHORT_ANSWER" and MUST be omitted (or null) otherwise. Its shape is:
+{{
+  "passingThreshold": number,
+  "criteria": [
+    {{ "name": string, "description": string, "points": number }}
+  ]
+}}
+`passingThreshold` is a fraction in [0, 1]. Each criterion `points` is a positive integer. Criterion names must be unique and non-empty. `choices` MUST be an empty array for SHORT_ANSWER.
 
 Follow the instructions in the user prompt precisely. We want to generate the best readiness assessments on the planet.
 """
@@ -362,6 +406,7 @@ The "skillId" you output MUST BE one of the following: {skills}.
 - **Answer Choices**:
   - **Single Choice Questions**: One correct answer and three plausible distractors.
   - **Multiple Choice Questions**: Multiple correct answers (as appropriate) with distractors; total number of choices between 4 and 5.
+  - **Short Answer Questions** (category "SHORT_ANSWER"): No choices — emit `"choices": []`. Instead emit a `rubric` object with `passingThreshold` (a fraction in [0, 1]) and a `criteria` array. Each criterion has a short `name` (unique, non-empty), a detailed `description` the LLM grader uses verbatim, and a positive integer `points`. Use 2-4 criteria that together cover the key dimensions of a correct answer.
 
 - **Answer Choice Length and Detail**:  
   - All answer choices must be similar in length, detail, and complexity. The correct answer should never be obviously longer or more detailed than distractors.
@@ -561,6 +606,7 @@ Evaluation Criteria:
 - **Answer Choices**:
 - For SINGLE_CHOICE: one correct, three plausible distractors.
 - For MULTIPLE_CHOICE: multiple correct answers (where applicable) with 4-5 total options.
+- For SHORT_ANSWER: no choices — instead evaluate the rubric: criteria are non-empty, uniquely named, cover the key dimensions of a correct answer, have positive integer points, and a passingThreshold in [0, 1].
 - Distractors must be plausible, distinct, concise, and grammatically consistent.
 - Distractors must represent common misconceptions or errors, avoiding negative or ambiguous wording.
 - Correct answers must not be overly lengthy or mimic language from the question stem.
@@ -1466,7 +1512,8 @@ JSON Schema:
         "category": string,
         "status": string,
         "content": string,
-        "source": object
+        "source": object,
+        "rubric": object
       }},
       "choices": [
         {{
@@ -1479,6 +1526,15 @@ JSON Schema:
     }}
   ]
 }}
+
+The `rubric` field is REQUIRED when category is "SHORT_ANSWER" and MUST be omitted (or null) otherwise. Its shape is:
+{{
+  "passingThreshold": number,
+  "criteria": [
+    {{ "name": string, "description": string, "points": number }}
+  ]
+}}
+`passingThreshold` is a fraction in [0, 1]. Each criterion `points` is a positive integer. Criterion names must be unique and non-empty. `choices` MUST be an empty array for SHORT_ANSWER.
 
 The document is the source material only. Questions must be answerable by someone who learned the concept from ANY source, not by someone who memorised this document.
 """
@@ -1501,6 +1557,7 @@ Requirements:
 - Answer Choices:
   - SINGLE_CHOICE: one correct answer + three plausible distractors.
   - MULTIPLE_CHOICE: multiple correct (as appropriate), 4-5 total choices.
+  - SHORT_ANSWER: no choices — emit `"choices": []` and a `rubric` object with `passingThreshold` (fraction in [0,1]) and a `criteria` array (each: unique non-empty `name`, detailed `description`, positive integer `points`; 2-4 criteria).
   - All choices similar in length, detail, complexity. Correct answer never obviously longer.
   - Correct answer must not reuse distinctive terms/phrases from the question stem.
   - Distractors must be plausible common misconceptions, distinct, concise, grammatically consistent. No negative phrasing, no "Both A & C" combined answers.
@@ -1565,6 +1622,7 @@ Evaluation Criteria:
 - **Answer Choices**:
 - SINGLE_CHOICE: one correct, three plausible distractors.
 - MULTIPLE_CHOICE: multiple correct (where appropriate), 4-5 total options.
+- SHORT_ANSWER: no choices — instead evaluate the rubric: criteria non-empty, uniquely named, cover key dimensions of a correct answer, positive integer points, passingThreshold in [0, 1].
 - Distractors plausible, distinct, concise, grammatically consistent, represent common misconceptions. No negative/ambiguous wording.
 - Correct answers not overly lengthy, must not mimic question-stem language.
 

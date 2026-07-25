@@ -1732,7 +1732,37 @@ def json_to_dataframe(section_content_definitions):
             print(f"  Mapped to skillUri: '{question_skill_uri}'")
             if not question_skill_uri and question_skill_name:
                 print(f"  WARNING: No URI mapping found for skill '{question_skill_name}'")
-            
+
+            # ponytail: SHORT_ANSWER has no choices — emit one row with empty
+            # choice fields and the rubric. Other categories emit one row per
+            # choice as before.
+            rubric = question.get('rubric')
+            if not choices:
+                row = {
+                    'sectionId': question.get('sectionId'),
+                    'difficultyLevelId': question.get('difficultyLevelId'),
+                    'difficultyLevelUri': question.get('difficultyLevelUri'),
+                    'skillId': question_skill_name,
+                    'skillUri': question_skill_uri,
+                    'category': question.get('category'),
+                    'question_status': question.get('status'),
+                    'question_content': question.get('content'),
+                    'sourceCategory': question.get('sourceCategory'),
+                    'source': question.get('source'),
+                    'rubric': rubric,
+                    'choice_status': None,
+                    'choice_content': None,
+                    'choice_isCorrect': None,
+                    'choice_orderIndex': None,
+                    'questionEvaluation': qc.get('eval', {}).get('questionEvaluation'),
+                    'relevanceAndClarity': qc.get('eval', {}).get('relevanceAndClarity'),
+                    'questionTypeDiversity': qc.get('eval', {}).get('questionTypeDiversity'),
+                    'choiceQuality': qc.get('eval', {}).get('choiceQuality'),
+                    'generalAdherence': qc.get('eval', {}).get('generalAdherence')
+                }
+                rows.append(row)
+                continue
+
             for choice in choices:
                 row = {
                     'sectionId': question.get('sectionId'),
@@ -1745,6 +1775,7 @@ def json_to_dataframe(section_content_definitions):
                     'question_content': question.get('content'),
                     'sourceCategory': question.get('sourceCategory'),
                     'source': question.get('source'),
+                    'rubric': rubric,
                     'choice_status': choice.get('status'),
                     'choice_content': choice.get('content'),
                     'choice_isCorrect': choice.get('isCorrect'),
@@ -2026,6 +2057,10 @@ def convert_questions_to_case_studies(
     """
     # Get unique questions for analysis
     unique_questions_df = df.groupby(question_col).first().reset_index()
+
+    # ponytail: case study conversion produces choice-based questions; skip
+    # SHORT_ANSWER (rubric-graded, no choices) so they're preserved as-is.
+    unique_questions_df = unique_questions_df[unique_questions_df['category'] != 'SHORT_ANSWER']
     initial_unique_questions = len(unique_questions_df)
     
     # Calculate how many questions to convert
@@ -2373,6 +2408,9 @@ def tune_distractors(section_content_definitions, tuning_percentage=0.20):
     
     # Tune selected questions
     for qc in questions_to_tune:
+        # ponytail: distractor tuning only applies to choice-based questions.
+        if qc.get('question', {}).get('category') == 'SHORT_ANSWER':
+            continue
         try:
             # Prepare the question data for tuning
             question_data = {
@@ -2535,6 +2573,7 @@ def run_post_pipeline(
         questions_choices_df = pd.DataFrame(columns=[
             'sectionId', 'difficultyLevelId', 'difficultyLevelUri', 'skillId', 'skillUri',
             'category', 'question_status', 'question_content', 'sourceCategory', 'source',
+            'rubric',
             'choice_status', 'choice_content', 'choice_isCorrect', 'choice_orderIndex',
             'questionEvaluation', 'relevanceAndClarity', 'questionTypeDiversity',
             'choiceQuality', 'generalAdherence'
@@ -3206,6 +3245,10 @@ def tune_distractors_dataframe(df: pd.DataFrame, tuning_percentage=0.20) -> tupl
                 
             # Get the first row to extract question data
             first_row = question_rows.iloc[0]
+
+            # ponytail: distractor tuning only applies to choice-based questions.
+            if first_row.get('category', '') == 'SHORT_ANSWER':
+                continue
             
             # Prepare the question data for tuning
             question_data = {
