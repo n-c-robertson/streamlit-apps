@@ -123,6 +123,8 @@ The "skillId" you output MUST BE one of the following: {skills}.
 **Requirements:**  
 - **Question Types**: Each question must be categorized as one of the following types: {question_types}.
 
+- **Question Type Distribution**: When "SHORT_ANSWER" is among the allowed types, aim for roughly **30%** of the generated questions to be SHORT_ANSWER (LLM-graded, with a rubric), and the remaining ~70% split among the other allowed types. Round to the nearest whole question — e.g. for 5 questions produce ~1-2 SHORT_ANSWER; for 10 questions produce ~3 SHORT_ANSWER. If SHORT_ANSWER is not in the allowed types, ignore this and use only the other types. Do not produce more than ~40% or fewer than ~20% SHORT_ANSWER.
+
 - **Content Alignment**: Ensure each question is strictly based on conceptual knowledge, skills, or principles from the provided content.
 
 - **Neutral Phrasing**: Use neutral language to ensure broad applicability and avoid context-specific references.
@@ -388,6 +390,8 @@ The "skillId" you output MUST BE one of the following: {skills}.
 
 **Requirements:**  
 - **Question Types**: Each question must be categorized as one of the following types: {question_types}.
+
+- **Question Type Distribution**: When "SHORT_ANSWER" is among the allowed types, aim for roughly **30%** of the generated questions to be SHORT_ANSWER (LLM-graded, with a rubric), and the remaining ~70% split among the other allowed types. Round to the nearest whole question — e.g. for 5 questions produce ~1-2 SHORT_ANSWER; for 10 questions produce ~3 SHORT_ANSWER. If SHORT_ANSWER is not in the allowed types, ignore this and use only the other types. Do not produce more than ~40% or fewer than ~20% SHORT_ANSWER.
 
 - **Prerequisite Skill Focus**: Ensure each question tests foundational knowledge and skills that are prerequisites for understanding the provided content.
 
@@ -1553,6 +1557,7 @@ Requirements:
 - Content independence: DO NOT reference specific examples, names, projects, code listings, anecdotes, or wording from the document. Generalise. A learner who never saw this document must be able to answer.
 - Conceptual focus: test understanding of concepts, principles, and methodologies - not recall of document specifics.
 - Question Types: each question categorised as one of: {question_types}.
+- Question Type Distribution: when "SHORT_ANSWER" is among the allowed types, aim for roughly **30%** of the generated questions to be SHORT_ANSWER (LLM-graded, with a rubric), and the remaining ~70% split among the other allowed types. Round to the nearest whole question — e.g. for 5 questions produce ~1-2 SHORT_ANSWER; for 10 questions produce ~3 SHORT_ANSWER. If SHORT_ANSWER is not in the allowed types, ignore this and use only the other types. Do not produce more than ~40% or fewer than ~20% SHORT_ANSWER.
 - Learning Objectives: each question must align with at least one of: {learning_objectives}.
 - Answer Choices:
   - SINGLE_CHOICE: one correct answer + three plausible distractors.
