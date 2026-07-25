@@ -1263,13 +1263,20 @@ question_selection_prompt = [
         'role': 'system',
         'content': """You are an AI assistant for Udacity tasked with selecting the highest quality assessment question from a list of candidates for a specific skill.
 
+Each candidate is prefixed with its category in square brackets, e.g. "[SINGLE_CHOICE] ...", "[MULTIPLE_CHOICE] ...", or "[SHORT_ANSWER] ...".
+
 Your goal is to identify the question that best tests the given skill with optimal:
 - Clarity and precision
 - Appropriate difficulty level
 - Educational value
-- Quality of distractors (for multiple choice)
 - Practical applicability
 - Alignment with learning objectives
+
+**Category-aware judging** — score each candidate on the criteria that apply to its own category; do NOT penalize a question for lacking something its category doesn't use:
+- **SINGLE_CHOICE / MULTIPLE_CHOICE**: judge the quality of the answer choices — distractors must be plausible, distinct, grammatically consistent, and free of clues to the correct answer; correct answer must not be the longest or reuse stem keywords.
+- **SHORT_ANSWER**: there are NO choices by design — do NOT penalize the absence of choices or distractors. Instead judge the **rubric**: criteria are non-empty and uniquely named, together cover the key dimensions of a correct answer, have positive integer points, and a passingThreshold in [0, 1]; the question stem invites a substantive, gradable written answer.
+
+Pick the single best question regardless of category — a strong SHORT_ANSWER question with a well-constructed rubric is strictly better than a mediocre multiple-choice question, and vice versa.
 
 Return only valid JSON with no extra commentary.
 
@@ -1288,10 +1295,10 @@ Evaluate each candidate question based on:
 2. **Skill Alignment**: Does the question directly test the specified skill?
 3. **Difficulty Appropriateness**: Is the difficulty level appropriate for the skill?
 4. **Educational Value**: Does answering this question help demonstrate mastery of the skill?
-5. **Question Quality**: Is this a well-constructed assessment item?
+5. **Question Quality**: Is this a well-constructed assessment item for its category? (For choice-based questions, judge distractor quality. For SHORT_ANSWER, judge rubric quality — do not penalize the absence of choices.)
 6. **Practical Relevance**: Is the question relevant to real-world application of the skill?
 
-Candidate Questions:
+Candidate Questions (each prefixed with its [CATEGORY]):
 {candidate_questions}
 
 Select the question index (0-based) that represents the highest quality assessment for the skill "{skill}".
@@ -1300,27 +1307,37 @@ Return your selection as JSON with the question index and brief reasoning."""
     }
 ]
 
-def get_question_selection_prompt(skill, candidate_questions):
+def get_question_selection_prompt(skill, candidate_questions, candidate_categories=None):
     """
     Generate a prompt for selecting the best question from candidates for a skill.
-    
+
     Args:
         skill: The skill name
         candidate_questions: List of question content strings
-    
+        candidate_categories: Optional list of category strings, parallel to
+            candidate_questions. When provided, each candidate is prefixed with
+            its [CATEGORY] so the model can judge it on the criteria that
+            apply to its own category (e.g. rubric quality for SHORT_ANSWER
+            instead of distractor quality).
+
     Returns:
         List of message dictionaries for the prompt
     """
-    # Format candidate questions with indices
+    # Format candidate questions with indices and an optional [CATEGORY] prefix
     formatted_candidates = ""
-    for i, question in enumerate(candidate_questions):
-        formatted_candidates += f"\n{i}. {question}\n"
-    
+    if candidate_categories and len(candidate_categories) == len(candidate_questions):
+        for i, (question, category) in enumerate(zip(candidate_questions, candidate_categories)):
+            cat = (category or '').strip().upper() or 'UNKNOWN'
+            formatted_candidates += f"\n{i}. [{cat}] {question}\n"
+    else:
+        for i, question in enumerate(candidate_questions):
+            formatted_candidates += f"\n{i}. {question}\n"
+
     user_prompt = question_selection_prompt[1]['content'].format(
         skill=skill,
         candidate_questions=formatted_candidates
     )
-    
+
     return [
         question_selection_prompt[0],
         {'role': 'user', 'content': user_prompt}

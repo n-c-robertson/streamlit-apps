@@ -2569,6 +2569,33 @@ def tune_distractors(section_content_definitions, tuning_percentage=0.20):
         "reason": f"Tuned {tuned_count} out of {len(questions_to_tune)} selected questions"
     }
 
+def _category_counts_from_df(df: pd.DataFrame, question_col: str = "question_content") -> dict:
+    """Per-category unique-question counts for a pipeline DataFrame.
+
+    Returns a dict like {"SINGLE_CHOICE": 5, "SHORT_ANSWER": 2, ...} keyed by
+    the question's category. Used by run_post_pipeline to track how many of
+    each category survive each step (e.g. so the SHORT_ANSWER share can be
+    observed end-to-end instead of only inferred from the ~30% generation
+    target).
+    """
+    if df is None or len(df) == 0 or question_col not in df.columns or 'category' not in df.columns:
+        return {}
+    unique_df = df.groupby(question_col).first().reset_index()
+    return unique_df['category'].fillna('(none)').value_counts().to_dict()
+
+
+def _category_counts_from_sections(section_content_definitions) -> dict:
+    """Per-category question counts from section_content_definitions (the
+    in-memory structure used before json_to_dataframe produces a DataFrame)."""
+    counts: dict = {}
+    if not section_content_definitions:
+        return counts
+    for section in section_content_definitions:
+        for qc in section.get('questions_choices', []):
+            cat = (qc.get('question', {}) or {}).get('category') or '(none)'
+            counts[cat] = counts.get(cat, 0) + 1
+    return counts
+
 def run_post_pipeline(
     section_content_definitions,
     QUESTION_TYPES,
@@ -2622,11 +2649,16 @@ def run_post_pipeline(
             progress_text.text(post_steps[i])
 
     question_counts = []
+    # Parallel to question_counts: per-category unique-question breakdown at
+    # each pipeline step so the survival of each category (notably
+    # SHORT_ANSWER) is observable end-to-end.
+    category_counts = []
 
     # Count questions after processing concepts
     total_questions = sum(len(section.get('questions_choices', [])) for section in section_content_definitions)
     estimated_choices = total_questions * 4
     question_counts.append(("After Processing Concepts", total_questions, estimated_choices))
+    category_counts.append(("After Processing Concepts", _category_counts_from_sections(section_content_definitions)))
 
     # Collect per-section diagnostics so every return path can include them.
     section_diagnostics = []
@@ -2686,6 +2718,7 @@ def run_post_pipeline(
         ])
         progress_data = {
             'question_counts': question_counts,
+            'category_counts': category_counts,
             'evaluation_stats': {'initial_unique_questions': 0, 'after_evaluation_unique_questions': 0, 'failed_questions': 0},
             'intermediate_counts': {'initial_unique_questions': 0, 'after_tfidf_unique_questions': 0, 'after_semantic_unique_questions': 0},
             'filtering_stats': {'initial_unique_questions': 0, 'after_filtering_unique_questions': 0, 'filtered_out_questions': 0},
@@ -2732,6 +2765,7 @@ def run_post_pipeline(
     total_choices = len(questions_choices_df)
     unique_questions = questions_choices_df['question_content'].nunique()
     question_counts.append(("After Converting to DataFrame", unique_questions, total_choices))
+    category_counts.append(("After Converting to DataFrame", _category_counts_from_df(questions_choices_df)))
     print(f"\n=== DATAFRAME CONVERSION DEBUG ===")
     print(f"Questions after dataframe conversion: {unique_questions} unique questions, {total_choices} total choices")
     if unique_questions == 0:
@@ -2747,6 +2781,7 @@ def run_post_pipeline(
         'evaluation_stats': evaluation_stats
     }
     question_counts.append(("After Evaluation Filtering", questions_choices_df['question_content'].nunique(), len(questions_choices_df)))
+    category_counts.append(("After Evaluation Filtering", _category_counts_from_df(questions_choices_df)))
 
     i += 1
     update_progress(i)
@@ -2757,6 +2792,7 @@ def run_post_pipeline(
         'intermediate_counts': intermediate_counts
     }
     question_counts.append(("After Deduplication", questions_choices_df['question_content'].nunique(), len(questions_choices_df)))
+    category_counts.append(("After Deduplication", _category_counts_from_df(questions_choices_df)))
 
     i += 1
     update_progress(i)
@@ -2767,6 +2803,7 @@ def run_post_pipeline(
         'filtering_stats': filtering_stats
     }
     question_counts.append(("After Filtering", questions_choices_df['question_content'].nunique(), len(questions_choices_df)))
+    category_counts.append(("After Filtering", _category_counts_from_df(questions_choices_df)))
 
     i += 1
     update_progress(i)
@@ -2790,6 +2827,7 @@ def run_post_pipeline(
             'conversion_stats': conversion_stats
         }
     question_counts.append(("After Case Study Conversion", questions_choices_df['question_content'].nunique(), len(questions_choices_df)))
+    category_counts.append(("After Case Study Conversion", _category_counts_from_df(questions_choices_df)))
 
     i += 1
     update_progress(i)
@@ -2817,6 +2855,7 @@ def run_post_pipeline(
             'code_conversion_stats': code_conversion_stats
         }
     question_counts.append(("After Code Format Conversion", questions_choices_df['question_content'].nunique(), len(questions_choices_df)))
+    category_counts.append(("After Code Format Conversion", _category_counts_from_df(questions_choices_df)))
 
     i += 1
     update_progress(i)
@@ -2827,6 +2866,7 @@ def run_post_pipeline(
         'tuning_stats': tuning_stats
     }
     question_counts.append(("After Distractor Tuning", questions_choices_df['question_content'].nunique(), len(questions_choices_df)))
+    category_counts.append(("After Distractor Tuning", _category_counts_from_df(questions_choices_df)))
 
     i += 1
     update_progress(i)
@@ -2838,6 +2878,7 @@ def run_post_pipeline(
             'selection_stats': selection_stats
         }
         question_counts.append(("After Question Selection", questions_choices_df['question_content'].nunique(), len(questions_choices_df)))
+        category_counts.append(("After Question Selection", _category_counts_from_df(questions_choices_df)))
     else:
         selection_stats = {'selection_needed': False, 'reason': 'No question limit specified'}
         debug_outputs['intelligent_question_selection'] = {
@@ -2855,6 +2896,14 @@ def run_post_pipeline(
     print("Per-step question counts:")
     for label, q_count, c_count in question_counts:
         print(f"  - {label}: {q_count} unique questions, {c_count} choices")
+    print("Per-step category survival:")
+    for label, breakdown in category_counts:
+        if not breakdown:
+            print(f"  - {label}: (no questions)")
+            continue
+        ordered = sorted(breakdown.items(), key=lambda kv: (-kv[1], kv[0]))
+        parts = ", ".join(f"{cat}={n}" for cat, n in ordered)
+        print(f"  - {label}: {parts}")
     if final_unique == 0:
         print("WARNING: Pipeline finished with 0 questions. If questions existed at 'After Processing Concepts' "
               "but not here, look for the step where the count dropped to 0 above (typical culprits: "
@@ -2863,6 +2912,7 @@ def run_post_pipeline(
 
     progress_data = {
         'question_counts': question_counts,
+        'category_counts': category_counts,
         'evaluation_stats': evaluation_stats,
         'intermediate_counts': intermediate_counts,
         'filtering_stats': filtering_stats,
@@ -3054,10 +3104,18 @@ def intelligent_question_selection(questions_choices_df, question_limit, questio
     selected_questions = set()
     skills_list = list(skill_groups.groups.keys())
     
-    # Create a candidate pool for each skill (questions not yet selected)
+    # Create a candidate pool for each skill (questions not yet selected).
+    # Keep a parallel category lookup (question_content -> category) so the
+    # selection prompt can judge each candidate on the criteria that apply
+    # to its own category (rubric quality for SHORT_ANSWER, distractor quality
+    # for choice-based questions) instead of implicitly penalizing short
+    # answers for having no choices.
     skill_candidates = {}
+    question_category_lookup = {}
     for skill, group in skill_groups:
         skill_candidates[skill] = group[question_col].tolist()
+        for _, row in group.iterrows():
+            question_category_lookup[row[question_col]] = row.get('category', '')
     
     # Cycle through skills and select the best question from each skill's candidates
     cycle_count = 0
@@ -3082,7 +3140,8 @@ def intelligent_question_selection(questions_choices_df, question_limit, questio
             else:
                 # Use AI agent to select the best question from candidates
                 try:
-                    selected_question = select_best_question_with_ai(skill, candidates)
+                    candidate_categories = [question_category_lookup.get(q, '') for q in candidates]
+                    selected_question = select_best_question_with_ai(skill, candidates, candidate_categories)
                 except Exception:
                     # Fallback to first candidate
                     selected_question = candidates[0]
@@ -3091,7 +3150,16 @@ def intelligent_question_selection(questions_choices_df, question_limit, questio
     
     # Filter the original dataframe to only include selected questions
     filtered_df = questions_choices_df[questions_choices_df[question_col].isin(selected_questions)].reset_index(drop=True)
-    
+
+    # Per-category breakdown of the selected set so callers can see whether
+    # the mix (e.g. SHORT_ANSWER share) was preserved through selection.
+    selected_category_counts = {}
+    if len(filtered_df) > 0:
+        sel_unique = filtered_df.groupby(question_col).first().reset_index()
+        selected_category_counts = sel_unique['category'].fillna('(none)').value_counts().to_dict()
+
+    pool_category_counts = unique_questions_df['category'].fillna('(none)').value_counts().to_dict()
+
     selection_stats = {
         'total_questions': total_unique_questions,
         'selected_questions': len(selected_questions),
@@ -3099,24 +3167,30 @@ def intelligent_question_selection(questions_choices_df, question_limit, questio
         'selection_needed': True,
         'cycles_completed': cycle_count,
         'skills_processed': len(skills_list),
+        'pool_category_counts': pool_category_counts,
+        'selected_category_counts': selected_category_counts,
         'reason': f"Selected {len(selected_questions)} best questions from {total_unique_questions} using AI agent"
     }
     
     return filtered_df, selection_stats
 
-def select_best_question_with_ai(skill, candidate_questions):
+def select_best_question_with_ai(skill, candidate_questions, candidate_categories=None):
     """
     Use OpenAI to select the best question from a list of candidates for a given skill.
     
     Args:
         skill: The skill name
         candidate_questions: List of question content strings
+        candidate_categories: Optional list of category strings, parallel to
+            candidate_questions, so the model can judge each candidate on the
+            criteria that apply to its own category (rubric quality for
+            SHORT_ANSWER, distractor quality for choice-based questions).
     
     Returns:
         str: The selected best question content
     """
     # Get the selection prompt
-    prompt_messages = prompts.get_question_selection_prompt(skill, candidate_questions)
+    prompt_messages = prompts.get_question_selection_prompt(skill, candidate_questions, candidate_categories)
     
     # Make API call
     response = settings.call_openai_with_fallback(

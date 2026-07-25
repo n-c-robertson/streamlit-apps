@@ -599,7 +599,42 @@ def main():
                         questions_selected = tuning_stats['questions_selected_for_tuning']
                         
                         st.write(f"- **Distractor tuning**: {questions_tuned:,} questions improved (from {questions_selected:,} selected)")
-        
+
+                    # Add per-category survival breakdown so the share of each
+                    # question type (notably SHORT_ANSWER) can be tracked
+                    # end-to-end through the pipeline.
+                    if 'category_counts' in progress_data:
+                        category_counts = progress_data['category_counts']
+                        if category_counts:
+                            st.markdown("#### 📊 **Category Survival (per step)**")
+                            st.caption("Unique questions by category at each pipeline step. Use this to confirm SHORT_ANSWER (and other types) survive rather than being silently squashed.")
+                            rows = []
+                            for label, breakdown in category_counts:
+                                row = {"Pipeline step": label}
+                                if breakdown:
+                                    for cat, n in sorted(breakdown.items(), key=lambda kv: (-kv[1], kv[0])):
+                                        row[cat] = n
+                                rows.append(row)
+                            st.dataframe(rows, use_container_width=True, hide_index=True)
+
+                    # Add intelligent-selection category mix comparison so the
+                    # selected set's composition can be checked against the pool.
+                    if 'selection_stats' in progress_data:
+                        selection_stats = progress_data['selection_stats']
+                        pool_counts = selection_stats.get('pool_category_counts')
+                        selected_counts = selection_stats.get('selected_category_counts')
+                        if selection_stats.get('selection_needed') and pool_counts and selected_counts:
+                            st.markdown("#### 🎯 **Category Mix: Pool vs Selected**")
+                            st.caption("Confirms the question-limit selection step preserved the category mix (e.g. SHORT_ANSWER share) rather than biasing toward choice-based questions.")
+                            all_cats = sorted(set(pool_counts) | set(selected_counts), key=lambda c: (-(pool_counts.get(c, 0) + selected_counts.get(c, 0)), c))
+                            mix_rows = [
+                                {"Category": cat,
+                                 "Pool": pool_counts.get(cat, 0),
+                                 "Selected": selected_counts.get(cat, 0)}
+                                for cat in all_cats
+                            ]
+                            st.dataframe(mix_rows, use_container_width=True, hide_index=True)
+
         # Add debug output section
         if 'debug_outputs' in progress_data:
             with st.expander("🔍 Debug: Step-by-Step Outputs", expanded=False):
