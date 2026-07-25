@@ -735,8 +735,8 @@ def create_choice(question_id, choice_data):
         "input": {
             'questionId': question_id,
             'content': choice_data['choice_content'],
-            'isCorrect': choice_data['choice_isCorrect'],
-            'orderIndex': choice_data['choice_orderIndex'],
+            'isCorrect': bool(choice_data['choice_isCorrect']),
+            'orderIndex': int(choice_data['choice_orderIndex']),
             'status': choice_data['choice_status']
         }
     }
@@ -808,12 +808,25 @@ def process_choice(question_id, row):
         }
         """
         
+        # Coerce scalar fields to native Python types before sending to the
+        # GraphQL API. This is critical for `orderIndex`: SHORT_ANSWER rows
+        # carry NaN in choice_orderIndex, which makes pd.read_csv infer the
+        # whole column as float64, so choice rows arrive as 0.0/1.0/... .
+        # The API's Int scalar (gqlgen) rejects JSON floats like 0.0, which
+        # silently broke every createChoice call after SHORT_ANSWER support
+        # was added (questions were created with zero choices). Force int.
+        try:
+            order_index = int(row['choice_orderIndex'])
+        except (TypeError, ValueError):
+            raise Exception(f"choice_orderIndex is not coercible to int: {row['choice_orderIndex']!r}")
+        is_correct = bool(row['choice_isCorrect'])
+
         choice_variables = {
             "input": {
                 'questionId': question_id,
                 'content': row['choice_content'],
-                'isCorrect': row['choice_isCorrect'],
-                'orderIndex': row['choice_orderIndex'],
+                'isCorrect': is_correct,
+                'orderIndex': order_index,
                 'status': row['choice_status']
             }
         }
