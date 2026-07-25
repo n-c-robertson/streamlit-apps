@@ -117,7 +117,8 @@ Follow the instructions in the user prompt precisely. We want to generate the be
         'role': 'user',
         'content': """You are to generate {number_questions_per_concept} question(s) for the following Udacity content.
 The questions must be based on the following skills: {skills}.
-The "difficultyLevelId" you output MUST BE this one: {difficulty_level}.
+The "difficultyLevelId" you output MUST BE exactly: "{difficulty_level}".
+Do not paraphrase it, do not add slashes, do not invent levels, and do not output any value other than one of: {difficulty_enum}.
 The "skillId" you output MUST BE one of the following: {skills}.
 
 **Requirements:**  
@@ -306,7 +307,8 @@ def get_assessment_questions_prompt(
     learning_objectives,
     content,
     customized_difficulty,
-    customized_prompt_instructions
+    customized_prompt_instructions,
+    difficulty_enum=""
 ):
     user_prompt = question_generation_prompt[1]['content'].format(
         number_questions_per_concept=number_questions_per_concept,
@@ -316,7 +318,8 @@ def get_assessment_questions_prompt(
         learning_objectives=learning_objectives,
         content=content,
         customized_difficulty=customized_difficulty,
-        customized_prompt_instructions=customized_prompt_instructions
+        customized_prompt_instructions=customized_prompt_instructions,
+        difficulty_enum=difficulty_enum
     )
     return [
         question_generation_prompt[0],
@@ -372,7 +375,8 @@ Follow the instructions in the user prompt precisely. We want to generate the be
         'role': 'user',
         'content': """You are to generate {number_questions_per_concept} question(s) that test learners' readiness and prerequisite knowledge for the following Udacity content.
 The questions must be based on the following prerequisite skills: {skills}.
-The "difficultyLevelId" you output MUST BE this one: {difficulty_level}.
+The "difficultyLevelId" you output MUST BE exactly: "{difficulty_level}".
+Do not paraphrase it, do not add slashes, do not invent levels, and do not output any value other than one of: {difficulty_enum}.
 The "skillId" you output MUST BE one of the following: {skills}.
 
 **CRITICAL REQUIREMENT - SKILL RESTRICTION:**
@@ -385,7 +389,7 @@ The "skillId" you output MUST BE one of the following: {skills}.
 - **Purpose**: These questions test whether learners have the foundational knowledge and skills needed to successfully engage with the provided content
 - **Target**: Questions should assess prerequisite skills that are essential for understanding and applying the concepts in the content
 - **Approach**: Focus on testing foundational knowledge, basic concepts, and fundamental skills that learners should have mastered before attempting this content
-- **Difficulty Level**: Questions should be ONE STEP EASIER than the content being prepared for. If the content is Intermediate, questions should be Beginner-level. If the content is Advanced, questions should be Intermediate-level.
+- **Difficulty Level**: Questions should be ONE STEP EASIER than the content being prepared for. The target difficulty for these questions is "{difficulty_level}" — output exactly that value. If the content is Intermediate, questions should be Beginner-level. If the content is Advanced, questions should be Intermediate-level. If the content is Beginner, questions should be Fluency-level. If the content is Fluency, questions should be Discovery-level.
 - **Content Independence**: Questions should NOT test knowledge of the specific content provided. Instead, test basic foundational knowledge that would be required to understand ANY content in this skill area.
 
 **Requirements:**  
@@ -419,10 +423,11 @@ The "skillId" you output MUST BE one of the following: {skills}.
   - The correct answer must not reuse distinctive terms or phrases directly from the question stem.
 
 - **Difficulty Alignment**:
-  - Generate questions that are ONE STEP EASIER than the specified difficulty level:
+  - Generate questions at the target difficulty level "{difficulty_level}" (one step easier than the content):
     - **If content is Advanced**: Generate Intermediate-level questions (application, moderate analysis)
     - **If content is Intermediate**: Generate Beginner-level questions (basic recall, definitions, straightforward comprehension)
-    - **If content is Beginner**: Generate Discovery/Fluency-level questions (basic recognition, simple recall)
+    - **If content is Beginner**: Generate Fluency-level questions (basic recognition, simple recall)
+    - **If content is Fluency**: Generate Discovery-level questions (basic recognition, simple recall)
   - Focus on foundational concepts and basic understanding rather than complex application
 
 - **Readiness Assessment Focus**:
@@ -572,7 +577,8 @@ def get_readiness_assessment_questions_prompt(
     learning_objectives,
     content,
     customized_difficulty,
-    customized_prompt_instructions
+    customized_prompt_instructions,
+    difficulty_enum=""
 ):
     user_prompt = readiness_question_generation_prompt[1]['content'].format(
         number_questions_per_concept=number_questions_per_concept,
@@ -582,7 +588,8 @@ def get_readiness_assessment_questions_prompt(
         learning_objectives=learning_objectives,
         content=content,
         customized_difficulty=customized_difficulty,
-        customized_prompt_instructions=customized_prompt_instructions
+        customized_prompt_instructions=customized_prompt_instructions,
+        difficulty_enum=difficulty_enum
     )
     return [
         readiness_question_generation_prompt[0],

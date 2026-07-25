@@ -4,6 +4,7 @@
 
 import streamlit as st
 import utils_assessment_analysis
+import difficulty
 
 #========================================
 # PAGE CONFIGURATION
@@ -37,7 +38,11 @@ with st.form("Analyze Assessments"):
         col1, col2 = st.columns(2)
         
         with col1:
-            difficulty_options = ['Beginner', 'Intermediate', 'Advanced']
+            # Layer 1 (normalization): pull the canonical level set from the
+            # API instead of hardcoding only 3 of the 5 real levels
+            # (['Beginner', 'Intermediate', 'Advanced'] missed Discovery and
+            # Fluency, so recommendations filtered those out entirely).
+            difficulty_options = difficulty.canonical_labels()
             selected_difficulties = st.multiselect(
                 "Difficulty Levels",
                 options=difficulty_options,

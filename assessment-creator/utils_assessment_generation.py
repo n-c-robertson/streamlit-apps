@@ -24,6 +24,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 import graphql_queries
 import settings
 import prompts
+import difficulty
 
 #========================================
 # FUNCTIONS
@@ -1223,6 +1224,17 @@ def process_concept(sectionId, node, lesson, concept, difficulty_level, difficul
     print(f"Node: {node['title']} (Key: {node['key']})")
     
     # Choose the appropriate prompt based on assessment type
+    # Layer 2 (closed vocabulary): build the canonical enum string once so
+    # the prompt can tell the LLM exactly which difficultyLevelId values are
+    # valid. This is cached via difficulty.fetch_difficulty_levels'
+    # @st.cache_data wrapper, so it's a single API round-trip per session.
+    try:
+        difficulty_enum = ", ".join(difficulty.canonical_labels())
+    except Exception as e:
+        print(f"[difficulty enum] could not load canonical labels: {e}; "
+              f"falling back to hardcoded set")
+        difficulty_enum = ", ".join(difficulty.CANONICAL_ORDER)
+
     if prompt_fn is not None:
         # Uploaded-content flow: caller-supplied prompt (e.g. skill-tied,
         # no-PDF-specific gen prompt). skills is a single-element list with
@@ -1248,7 +1260,8 @@ def process_concept(sectionId, node, lesson, concept, difficulty_level, difficul
             learning_objectives,
             content,
             customized_difficulty,
-            customized_prompt_instructions
+            customized_prompt_instructions,
+            difficulty_enum=difficulty_enum
         )
     else:
         # Default to placement assessment
@@ -1260,7 +1273,8 @@ def process_concept(sectionId, node, lesson, concept, difficulty_level, difficul
             learning_objectives,
             content,
             customized_difficulty,
-            customized_prompt_instructions
+            customized_prompt_instructions,
+            difficulty_enum=difficulty_enum
         )
     
     # Use context management for OpenAI API call
@@ -1323,6 +1337,42 @@ def process_concept(sectionId, node, lesson, concept, difficulty_level, difficul
         # Attach metadata.
         qc['question']['sectionId'] = sectionId
         qc['question']['difficultyLevelUri'] = difficulty_level_uri  # Set the difficulty URI
+
+        # Layer 1 (normalization): the URI is authoritative. Overwrite the
+        # LLM-emitted `difficultyLevelId` (which is a free-form label and may
+        # be junk — e.g. "Hard", "Medium", "Discovery/Fluency") with the real
+        # API id derived from the URI. If the URI is missing/empty, fall back
+        # to normalizing whatever label the LLM emitted via the API's label
+        # table; if that also fails, leave the LLM value in place so the
+        # upload page's empty-id check can reject the row loudly.
+        emitted_difficulty = qc['question'].get('difficultyLevelId', '')
+        canonical_id = difficulty.difficulty_id_for_uri(difficulty_level_uri)
+        if canonical_id:
+            if emitted_difficulty and emitted_difficulty != canonical_id:
+                # Layer 4 (validation paper trail): keep the LLM's value
+                # visible in stdout so drift is observable, but persist the
+                # canonical id.
+                print(
+                    f"  difficulty normalization: LLM emitted "
+                    f"{emitted_difficulty!r}, overwriting with canonical id "
+                    f"{canonical_id!r} from URI {difficulty_level_uri!r}"
+                )
+            qc['question']['difficultyLevelId'] = canonical_id
+        elif emitted_difficulty:
+            label_id = difficulty.difficulty_id_for_label(emitted_difficulty)
+            if label_id:
+                print(
+                    f"  difficulty normalization: no URI, resolved LLM label "
+                    f"{emitted_difficulty!r} -> id {label_id!r}"
+                )
+                qc['question']['difficultyLevelId'] = label_id
+            else:
+                print(
+                    f"  WARNING: could not normalize difficultyLevelId "
+                    f"{emitted_difficulty!r} (URI={difficulty_level_uri!r}); "
+                    f"leaving LLM value in place — upload will reject if unmapped"
+                )
+
         qc['question']['source'] = {
             'partTitle': node['title'],
             'partKey': node['key'],
@@ -1398,7 +1448,7 @@ def process_concepts(section_content_definitions, number_questions_per_concept, 
                         difficulty_level = dl_obj['name']
                         difficulty_level_uri = dl_obj.get('uri', '')
                         break
-                
+
                 if not difficulty_level:
                     _add_diagnostic(
                         section, "ERROR", lesson_key,
@@ -1406,6 +1456,30 @@ def process_concepts(section_content_definitions, number_questions_per_concept, 
                         "node skipped; difficulty is required by the question prompt."
                     )
                     continue
+
+                # Layer 3 (readiness step-down): readiness questions test
+                # prerequisite knowledge and must be ONE STEP EASIER than the
+                # content. Previously the prompt was handed the content's own
+                # level *and* told to "step down" itself, which produced the
+                # non-existent label "Discovery/Fluency". We now compute the
+                # stepped-down canonical label here and resolve its URI from
+                # the API, so the prompt gets a single concrete target level
+                # and the persisted difficultyLevelId is correct.
+                content_difficulty = difficulty_level
+                content_difficulty_uri = difficulty_level_uri
+                difficulty_level = difficulty.readiness_step_down(content_difficulty)
+                stepped_uri = difficulty.difficulty_uri_for_label(difficulty_level)
+                # Prefer the stepped-down level's own URI; fall back to the
+                # content URI so upload can still map (and the Layer 1
+                # overwrite in process_concept will resolve the id).
+                difficulty_level_uri = stepped_uri or content_difficulty_uri
+                if difficulty_level != content_difficulty:
+                    print(
+                        f"  readiness step-down: content is "
+                        f"{content_difficulty!r} ({content_difficulty_uri!r}) -> "
+                        f"generating {difficulty_level!r} questions "
+                        f"(URI {difficulty_level_uri!r})"
+                    )
                 
                 # Use original prerequisite skills for question generation
                 skills = list(original_prerequisite_skills)
@@ -2126,7 +2200,22 @@ def convert_questions_to_case_studies(
                                 try:
                                     new_row = original_row.copy()
                                     new_row[question_col] = case_study_question.get('content', original_question)
-                                    new_row['difficultyLevelId'] = case_study_question.get('difficultyLevelId', original_row['difficultyLevelId'])
+                                    # Layer 1 (normalization): prefer the
+                                    # original row's already-normalized
+                                    # difficultyLevelId (derived from the URI
+                                    # in process_concept) over the LLM's
+                                    # case-study value, which is a free-form
+                                    # label and may be junk. Only fall back to
+                                    # normalizing the LLM value if the original
+                                    # is empty.
+                                    cs_diff = case_study_question.get('difficultyLevelId')
+                                    if original_row.get('difficultyLevelId'):
+                                        new_row['difficultyLevelId'] = original_row['difficultyLevelId']
+                                    elif cs_diff:
+                                        normalized = difficulty.difficulty_id_for_label(cs_diff)
+                                        new_row['difficultyLevelId'] = normalized or cs_diff
+                                    else:
+                                        new_row['difficultyLevelId'] = original_row.get('difficultyLevelId', '')
                                     new_row['category'] = case_study_question.get('category', original_row['category'])
                                     new_row['question_status'] = case_study_question.get('status', original_row['question_status'])
                                     
@@ -2440,7 +2529,24 @@ def tune_distractors(section_content_definitions, tuning_percentage=0.20):
                 
                 # Update the question with tuned distractors
                 if "question" in tuned_data and "choices" in tuned_data:
-                    qc['question'] = tuned_data["question"]
+                    # Layer 1 (normalization): the tuned question object comes
+                    # straight from the LLM and may carry a junk
+                    # difficultyLevelId (free-form label). Preserve the
+                    # metadata fields that process_concept attached
+                    # authoritatively (difficultyLevelId/Uri from the API,
+                    # sectionId, source, sourceCategory, hasCodingContent,
+                    # rubric) and only adopt the tuned content + choices.
+                    original_question = qc['question']
+                    tuned_question = tuned_data["question"]
+                    preserved_fields = (
+                        'difficultyLevelId', 'difficultyLevelUri',
+                        'sectionId', 'source', 'sourceCategory',
+                        'hasCodingContent', 'rubric',
+                    )
+                    for field in preserved_fields:
+                        if field in original_question:
+                            tuned_question[field] = original_question[field]
+                    qc['question'] = tuned_question
                     qc['choices'] = tuned_data["choices"]
                     tuned_count += 1
                 else:

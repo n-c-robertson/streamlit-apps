@@ -22,6 +22,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import graphql_queries
 import settings
+import difficulty
 
 #========================================
 # FUNCTIONS
@@ -98,9 +99,15 @@ def display_question(question_data, question_index, total_questions):
         
         with col2:
             # Difficulty display
-            difficulty = first_record.get('difficultyLevelId', 'Unknown Difficulty')
+            # Layer 1 (normalization): the persisted difficultyLevelId may be
+            # an API id (UUID) when produced by the new flow, or a free-form
+            # label ("Intermediate", "Discovery/Fluency", ...) when produced by
+            # the old flow. Normalize for display so reviewers never see junk.
+            raw_difficulty = first_record.get('difficultyLevelId', 'Unknown Difficulty')
+            normalized = difficulty.normalize_difficulty_label(raw_difficulty)
+            display_difficulty = normalized or raw_difficulty or 'Unknown Difficulty'
             st.markdown(f"**Difficulty:**")
-            st.write(difficulty)
+            st.write(display_difficulty)
         
         with col3:
             # Content URI with expandable details
