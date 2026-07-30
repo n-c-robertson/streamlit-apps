@@ -22,6 +22,7 @@ from settings import (
     WORKERA_SIGNALS_URL,
     WORKERA_SCORES_URL,
     WORKERA_SCORES_DETAIL_URL,
+    WORKERA_V2_SCORES_URL,
     UDACITY_WORKERA_API_KEYS_URL,
     SKILLS_SEARCH_URL,
     OPENAI_API_KEY,
@@ -284,6 +285,132 @@ def _skill_ratings_to_lists(skill_ratings: list) -> tuple[list, list]:
     return strong, needs
 
 
+# V2 skill ratings use an integer rating 1-4 (4 = expert). Enterprise's v2StrongRatingThreshold
+# is 3, so rating >= 3 maps to "strong" and 1-2 maps to "needs improvement".
+V2_STRONG_RATING_THRESHOLD = 3
+
+
+def _v2_skill_ratings_to_lists(skill_ratings: list) -> tuple[list, list]:
+    """Convert V2 skill_ratings (integer rating 1-4) into strong/needs skill name lists."""
+    strong, needs = [], []
+    for s in skill_ratings or []:
+        name = s.get("name")
+        if not name:
+            continue
+        rating = s.get("rating")
+        # Prefer the integer rating; fall back to proficiency_level if rating is absent.
+        if isinstance(rating, (int, float)) and not isinstance(rating, bool):
+            (strong if rating >= V2_STRONG_RATING_THRESHOLD else needs).append(name)
+        else:
+            level = (s.get("proficiency_level") or "").lower()
+            if level == "strong":
+                strong.append(name)
+            elif level == "needs_improvement":
+                needs.append(name)
+    return strong, needs
+
+
+def fetch_v2_scores(api_key: str, progress_callback=None) -> list:
+    """
+    Fetch company-wide V2 scores from GET /api/v2/scores. Each score carries embedded
+    skill_ratings (rating 1-4 + behaviors), so no per-score detail fetch is needed.
+    progress_callback(fetched_pages) is called after each page if provided.
+    """
+    url = WORKERA_V2_SCORES_URL
+    headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
+    params = {"limit": 100}
+    all_scores = []
+    pages = 0
+    while url:
+        resp = requests.get(url, headers=headers, params=params, timeout=60)
+        if resp.status_code != 200:
+            raise Exception(f"V2 scores API error: {resp.status_code} - {resp.text[:500]}")
+        data = resp.json()
+        page_items = data.get("data") or []
+        all_scores.extend(page_items)
+        pages += 1
+        if progress_callback:
+            progress_callback(pages, len(all_scores))
+        if data.get("has_more") and data.get("next_page"):
+            url = data.get("next_page")
+            params = {}  # next_page is a full URL
+        else:
+            url = None
+        # Rate-limit backoff
+        remaining = resp.headers.get("x-ratelimit-remaining")
+        if remaining is not None and int(remaining) == 0:
+            import time
+            time.sleep(60)
+    return all_scores
+
+
+def _v2_first(score: dict, *keys, default=None):
+    """Return the first present, non-None value among keys (handles snake_case + camelCase)."""
+    for k in keys:
+        v = score.get(k)
+        if v is not None:
+            return v
+    return default
+
+
+def v2_scores_to_signals_df(v2_scores: list, domains_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Build a signals-shaped DataFrame from V2 scores. Strong/needs skills are derived from
+    each score's embedded skill_ratings (rating >= 3 -> strong), so no detail fetch is needed.
+    Preserves the rich V2 fields (skill_ratings, proficiency_level, source) as extra columns.
+    """
+    cols = [
+        "identifier", "domain_identifier", "user_identifier", "email", "score",
+        "strong_skills", "needs_improvement_skills", "created_at", "updated_at",
+        "domain_id", "title", "benchmark_enterprise_avg", "benchmark_enterprise_75_perc",
+        "proficiency_level", "source", "skill_ratings",
+    ]
+    if not v2_scores:
+        return pd.DataFrame(columns=cols)
+    records = []
+    for s in v2_scores:
+        user = s.get("user") or {}
+        domain = s.get("domain") or {}
+        ratings = s.get("skill_ratings") or []
+        strong, needs = _v2_skill_ratings_to_lists(ratings)
+        # Fall back to explicit strong/needs arrays if the list response omits ratings.
+        if not strong and not needs:
+            strong = s.get("strong_skills") or []
+            needs = s.get("needs_improvement_skills") or []
+        records.append({
+            "identifier": _v2_first(s, "identifier"),
+            "domain_identifier": _v2_first(s, "domain_identifier", default=domain.get("identifier")),
+            "domain_name": _v2_first(s, "domain_name", default=domain.get("name")),
+            "user_identifier": _v2_first(s, "user_identifier", default=user.get("identifier")),
+            "email": _v2_first(s, "email", "workera_user_email", default=user.get("email")),
+            "score": _v2_first(s, "score"),
+            "strong_skills": strong,
+            "needs_improvement_skills": needs,
+            "created_at": _v2_first(s, "created_at", "createdAt"),
+            "updated_at": _v2_first(s, "updated_at", "updatedAt"),
+            "proficiency_level": _v2_first(s, "proficiency_level", "proficiencyLevel"),
+            "source": _v2_first(s, "source"),
+            "skill_ratings": ratings,
+        })
+    df = pd.DataFrame(records)
+    if not domains_df.empty:
+        df = df.merge(
+            domains_df[["domain_id", "title", "benchmark_enterprise_avg", "benchmark_enterprise_75_perc"]],
+            left_on="domain_identifier",
+            right_on="domain_id",
+            how="left",
+        )
+    if "title" not in df.columns:
+        df["title"] = df.get("domain_name", "")
+    else:
+        df["title"] = df["title"].fillna(df.get("domain_name", ""))
+    # Ensure the canonical columns exist even if the merge didn't add benchmarks.
+    for c in ["benchmark_enterprise_avg", "benchmark_enterprise_75_perc"]:
+        if c not in df.columns:
+            df[c] = None
+    return df
+
+
 def scores_to_signals_df(scores: list, domains_df: pd.DataFrame) -> pd.DataFrame:
     """
     Build a signals-shaped DataFrame from scores list (no skill details yet).
@@ -342,17 +469,29 @@ def add_benchmark_scores(domains_df: pd.DataFrame, benchmarks: list) -> pd.DataF
 
 @st.cache_data(ttl=300)
 def fetch_all_api_data(api_key: str):
-    """Fetch all data from Workera API (cached for 5 minutes). Uses scores + scores/{id} flow."""
+    """
+    Fetch all data from Workera API (cached for 5 minutes).
+    Primary flow: V2 /api/v2/scores (company-wide list with embedded skill_ratings).
+    Fallback: V1 /scores list + /scores/{id} detail (legacy; 404s for most keys).
+    """
     domains_df = fetch_domains(api_key)
     benchmarks_raw = fetch_benchmarks(api_key)
     domains_df = add_benchmark_scores(domains_df, benchmarks_raw)
-    scores = fetch_scores(api_key)
-    signals_df = scores_to_signals_df(scores, domains_df)
-    
-    # Store raw benchmarks and scores list for later detail fetches
     benchmarks_df = pd.DataFrame(benchmarks_raw) if benchmarks_raw else pd.DataFrame()
-    
-    return domains_df, signals_df, benchmarks_df, scores
+
+    try:
+        v2_scores = fetch_v2_scores(api_key)
+        signals_df = v2_scores_to_signals_df(v2_scores, domains_df)
+        st.session_state['scores_source'] = 'v2'
+        st.session_state['v2_scores_raw'] = v2_scores
+        return domains_df, signals_df, benchmarks_df, v2_scores
+    except Exception as e:
+        # Fall back to the legacy v1 /scores + /scores/{id} flow.
+        st.session_state['scores_source'] = 'v1_fallback'
+        st.session_state['v2_fetch_error'] = str(e)
+        scores = fetch_scores(api_key)
+        signals_df = scores_to_signals_df(scores, domains_df)
+        return domains_df, signals_df, benchmarks_df, scores
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -645,6 +784,23 @@ def main():
                 import traceback
                 st.code(traceback.format_exc())
                 return
+
+    # Show which scores source is active (V2 vs v1 fallback) for debugging.
+    scores_source = st.session_state.get('scores_source')
+    with st.sidebar.expander("Scores source", expanded=False):
+        if scores_source == 'v2':
+            st.success("Using V2 /api/v2/scores (company-wide list with embedded skill_ratings).")
+            raw = st.session_state.get('v2_scores_raw') or []
+            st.caption(f"{len(raw)} V2 scores fetched.")
+            if raw:
+                st.json({k: (v if not isinstance(v, list) else f"<list of {len(v)}>") for k, v in raw[0].items()})
+        elif scores_source == 'v1_fallback':
+            st.warning("V2 /api/v2/scores failed; fell back to V1 /scores + /scores/{id}.")
+            err = st.session_state.get('v2_fetch_error')
+            if err:
+                st.code(err)
+        else:
+            st.caption("No scores fetched yet.")
     
     if 'api_fetched' not in st.session_state or not st.session_state.get('api_fetched'):
         st.info("👆 Click 'Fetch Data from API' to load assessment data.")
@@ -677,35 +833,44 @@ def main():
                 st.warning(f"No data found for assessment: {selected_assessment}")
                 return
             
-            # Fetch score details (scores/{id}) to get skill_ratings, then reshape to strong_skills / needs_improvement_skills
-            score_ids = filtered_signals['identifier'].dropna().astype(str).tolist()
-            if not score_ids:
-                st.warning("No score identifiers to fetch details for.")
-                return
-            api_key = st.session_state.get('workera_api_key')
-            if not api_key:
-                st.error("Workera API key not found. Re-fetch data from the API.")
-                return
-            progress_placeholder = st.empty()
-            def _progress(current, total):
-                if total:
-                    progress_placeholder.progress(min(1.0, current / total), text=f"Fetching score details {current}/{total}...")
-            details = fetch_score_details(api_key, score_ids, progress_callback=_progress)
-            progress_placeholder.empty()
-            detail_lookup = {}
-            for d in details:
-                sid = d.get('identifier')
-                if sid is None:
-                    continue
-                ratings = (d.get('results') or {}).get('skill_ratings') or []
-                strong, needs = _skill_ratings_to_lists(ratings)
-                detail_lookup[str(sid)] = (strong, needs)
-            filtered_signals['strong_skills'] = filtered_signals['identifier'].astype(str).map(
-                lambda id: detail_lookup.get(id, ([], []))[0]
+            # Fetch score details (scores/{id}) to get skill_ratings, then reshape to strong_skills / needs_improvement_skills.
+            # V2 flow already populates strong_skills/needs_improvement_skills from embedded skill_ratings,
+            # so only run the per-score detail fetch when those columns are empty (v1 fallback).
+            has_embedded_skills = (
+                'strong_skills' in filtered_signals.columns
+                and filtered_signals['strong_skills'].apply(lambda x: len(x) if isinstance(x, list) else 0).sum() > 0
             )
-            filtered_signals['needs_improvement_skills'] = filtered_signals['identifier'].astype(str).map(
-                lambda id: detail_lookup.get(id, ([], []))[1]
-            )
+            if has_embedded_skills:
+                details = []
+            else:
+                score_ids = filtered_signals['identifier'].dropna().astype(str).tolist()
+                if not score_ids:
+                    st.warning("No score identifiers to fetch details for.")
+                    return
+                api_key = st.session_state.get('workera_api_key')
+                if not api_key:
+                    st.error("Workera API key not found. Re-fetch data from the API.")
+                    return
+                progress_placeholder = st.empty()
+                def _progress(current, total):
+                    if total:
+                        progress_placeholder.progress(min(1.0, current / total), text=f"Fetching score details {current}/{total}...")
+                details = fetch_score_details(api_key, score_ids, progress_callback=_progress)
+                progress_placeholder.empty()
+                detail_lookup = {}
+                for d in details:
+                    sid = d.get('identifier')
+                    if sid is None:
+                        continue
+                    ratings = (d.get('results') or {}).get('skill_ratings') or []
+                    strong, needs = _skill_ratings_to_lists(ratings)
+                    detail_lookup[str(sid)] = (strong, needs)
+                filtered_signals['strong_skills'] = filtered_signals['identifier'].astype(str).map(
+                    lambda id: detail_lookup.get(id, ([], []))[0]
+                )
+                filtered_signals['needs_improvement_skills'] = filtered_signals['identifier'].astype(str).map(
+                    lambda id: detail_lookup.get(id, ([], []))[1]
+                )
             
             # Prepare the attempts dataframe
             attempts_df = filtered_signals.copy()

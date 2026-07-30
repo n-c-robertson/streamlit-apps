@@ -15,6 +15,11 @@ WORKERA_SCORES_URL = f"{WORKERA_API_BASE}/scores"
 WORKERA_SCORES_DETAIL_URL = f"{WORKERA_API_BASE}/scores/{{id}}"
 WORKERA_DOMAINS_SAGE_URL = f"{WORKERA_API_BASE}/domains/sage"
 
+# Workera V2 API — company-wide scores list with embedded skill_ratings (rating 1-4 + behaviors).
+# Replaces the v1 /scores list + /scores/{id} detail flow, which 404s (resource_missing) for most keys.
+WORKERA_V2_API_BASE = "https://skills.workera.ai/api/v2"
+WORKERA_V2_SCORES_URL = f"{WORKERA_V2_API_BASE}/scores"
+
 # Udacity API
 UDACITY_API_BASE = "https://api.udacity.com/api"
 UDACITY_WORKERA_API_KEYS_URL = f"{UDACITY_API_BASE}/workera/api_keys"
