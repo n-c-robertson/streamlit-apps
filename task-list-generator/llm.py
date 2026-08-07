@@ -27,6 +27,14 @@ Rules:
 - If a rubric criterion is optional/exceedable, mark it but do not make it a
   required step; put exceedance in `tips`.
 
+CONCEPT ASSIGNMENT (start-here pointer):
+- For EVERY task, choose the single concept from the CONCEPT CATALOG that is the
+  best fit for TEACHING that task (the concept a student should go to first to
+  learn what they need to do the task). Set `concept_key` to that concept's
+  exact key from the catalog and `concept_title` to its title.
+- You MUST pick a key that appears verbatim in the CONCEPT CATALOG. Do not
+  invent keys. If no concept is a good fit, still pick the closest one.
+
 Output STRICT JSON only (no markdown fences), matching this schema:
 {
   "tasks": [
@@ -35,17 +43,21 @@ Output STRICT JSON only (no markdown fences), matching this schema:
       "title": "...",
       "description": "...",
       "rubric_criteria": ["criterion text", "..."],
+      "concept_key": "<exact key from the concept catalog>",
+      "concept_title": "...",
       "tips": "..."
     }
   ]
 }
 """
 
-REFINE_SYSTEM_PROMPT = """You are refining an existing ordered task list for a
-Udacity project. Apply the user's feedback. Keep the rubric as the source of
-truth: do not drop required criteria unless the user explicitly asks. Re-emit
-the FULL updated task list as STRICT JSON with the same schema as before
-({"tasks": [...]}). Preserve step numbering starting at 1. No markdown fences."""
+REFINE_SYSTEM_PROMPT = """You are refining an ordered task list for a Udacity
+project. Apply the user's feedback. Keep the rubric as the source of truth: do
+not drop required criteria unless the user explicitly asks. For every task keep
+or improve the `concept_key`/`concept_title` start-here pointer, choosing from
+the CONCEPT CATALOG only. Re-emit the FULL updated task list as STRICT JSON
+with the same schema as before ({"tasks": [...]}). Preserve step numbering
+starting at 1. No markdown fences."""
 
 
 def _client(api_key: str) -> OpenAI:
@@ -76,19 +88,29 @@ def _format_context(retrieved: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _format_catalog(catalog: list[dict[str, str]]) -> str:
+    if not catalog:
+        return "(no concepts available)"
+    return "\n".join(f"- {c['key']}  |  {c.get('title','')}" for c in catalog)
+
+
 def synthesize_tasklist(
     api_key: str,
     *,
     project: dict[str, Any],
     retrieved: list[dict[str, Any]],
+    concept_catalog: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    """Return {"tasks": [...]} parsed from the LLM."""
+    """Return {"tasks": [...]} parsed from the LLM. Each task carries a
+    best-fit `concept_key`/`concept_title` drawn from the concept catalog."""
     rubric_text = rubric_to_text(project.get("rubric"), project_title=project.get("title", ""))
     criteria_count = len(flatten_rubric(project.get("rubric")))
     user_prompt = (
         f"PROJECT TITLE: {project.get('title','')}\n"
         f"RUBRIC ({criteria_count} criteria):\n{rubric_text or '(no rubric available)'}\n\n"
         f"SUPPORTING CLASSROOM CONTENT (secondary):\n{_format_context(retrieved)}\n\n"
+        f"CONCEPT CATALOG (pick each task's concept_key from here):\n"
+        f"{_format_catalog(concept_catalog or [])}\n\n"
         "Produce the ordered task list JSON now."
     )
     resp = _client(api_key).chat.completions.create(
@@ -109,11 +131,13 @@ def refine_tasklist(
     current_tasks: list[dict[str, Any]],
     feedback: str,
     history: list[dict[str, str]],
+    concept_catalog: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     rubric_text = rubric_to_text(project.get("rubric"), project_title=project.get("title", ""))
     messages = [
         {"role": "system", "content": REFINE_SYSTEM_PROMPT},
         {"role": "system", "content": f"RUBRIC:\n{rubric_text or '(no rubric)'}"},
+        {"role": "system", "content": f"CONCEPT CATALOG:\n{_format_catalog(concept_catalog or [])}"},
         {"role": "user", "content": f"Current task list JSON:\n{json.dumps({'tasks': current_tasks})}"},
     ]
     messages.extend(history)

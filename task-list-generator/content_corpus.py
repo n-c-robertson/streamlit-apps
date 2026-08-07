@@ -128,6 +128,27 @@ def _lesson_chunks(lesson: dict[str, Any], *, parent_project_key: str | None) ->
     return chunks
 
 
+def build_concept_catalog(chunks: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Unique list of {key, title} for every concept in the program.
+
+    Built from concept_rollup chunks (one per concept), which carry
+    concept_key + concept_title. Used as the search space the LLM picks a
+    best-fit teaching concept from for each task.
+    """
+    seen: set[str] = set()
+    catalog: list[dict[str, str]] = []
+    for c in chunks or []:
+        if c.get("type") != "concept_rollup":
+            continue
+        key = c.get("concept_key")
+        title = c.get("concept_title") or ""
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        catalog.append({"key": key, "title": title})
+    return catalog
+
+
 def build_corpus(program: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Return (chunks, projects).
 

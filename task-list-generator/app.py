@@ -60,6 +60,8 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = {}  # project_key -> [{"role","content"}, ...]
 if "synthesized" not in st.session_state:
     st.session_state.synthesized = {}  # project_key -> bool
+if "concept_catalog" not in st.session_state:
+    st.session_state.concept_catalog = []  # [{key, title}, ...]
 
 
 # --------------------------------------------------------------------------- #
@@ -71,12 +73,14 @@ def _load_program(key: str) -> None:
     with st.status("Loading program from classroom-content (production)..."):
         program = udacity_client.fetch_program(key, UDACITY_JWT)
         chunks, projects = content_corpus.build_corpus(program)
+        catalog = content_corpus.build_concept_catalog(chunks)
         with st.spinner("Embedding content for semantic search..."):
             index = semantic_search.build_index(_oa, chunks)
     st.session_state.program = program
     st.session_state.chunks = chunks
     st.session_state.projects = projects
     st.session_state.index = index
+    st.session_state.concept_catalog = catalog
     st.session_state.tasklists = {}
     st.session_state.chat_history = {}
     st.session_state.synthesized = {}
@@ -94,11 +98,61 @@ def _retrieve(project: dict[str, Any], k: int = 8) -> list[dict[str, Any]]:
     return index.search(qvec, project_key=project.get("key"), k=k)
 
 
+def _concept_url(program_key: str, concept_key: str) -> str:
+    return f"https://classroom.udacity.com/{program_key}?conceptKey={concept_key}"
+
+
+def _normalize_concepts(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Validate each task's LLM-chosen concept_key against the catalog. For any
+    missing or invalid key, fall back to the nearest concept by semantic search
+    over concept_rollup chunks. Always populate concept_title + concept_url."""
+    catalog = st.session_state.concept_catalog or []
+    catalog_by_key = {c["key"]: c for c in catalog}
+    index: semantic_search.CorpusIndex | None = st.session_state.index
+    program_key = (st.session_state.program or {}).get("key") or ""
+
+    rollups = [c for c in (st.session_state.chunks or []) if c.get("type") == "concept_rollup"]
+
+    for i, t in enumerate(tasks, 1):
+        ck = t.get("concept_key")
+        if ck and ck in catalog_by_key:
+            t["concept_title"] = catalog_by_key[ck].get("title", "")
+        else:
+            # LLM picked a bad/missing key -> find nearest concept by embedding.
+            best = None
+            if index is not None and rollups:
+                qtext = f"{t.get('title','')} {t.get('description','')}"
+                try:
+                    qvec = semantic_search.embed_query(_oa, qtext)
+                    hits = index.search(qvec, k=1)
+                    # search returns all chunk types; prefer concept_rollup hits.
+                    rollup_hits = [h for h in hits if h.get("type") == "concept_rollup"]
+                    best = (rollup_hits or hits)[0] if (rollup_hits or hits) else None
+                except Exception:
+                    best = None
+            if best:
+                t["concept_key"] = best.get("concept_key")
+                t["concept_title"] = best.get("concept_title", "")
+            else:
+                t["concept_key"] = t.get("concept_key") or ""
+                t["concept_title"] = t.get("concept_title") or ""
+        if t.get("concept_key"):
+            t["concept_url"] = _concept_url(program_key, t["concept_key"])
+        else:
+            t["concept_url"] = ""
+    return tasks
+
+
 def _synthesize(project: dict[str, Any]) -> None:
     retrieved = _retrieve(project)
-    result = llm.synthesize_tasklist(OPENAI_API_KEY, project=project, retrieved=retrieved)
+    result = llm.synthesize_tasklist(
+        OPENAI_API_KEY,
+        project=project,
+        retrieved=retrieved,
+        concept_catalog=st.session_state.concept_catalog,
+    )
     pk = project.get("key") or project.get("title")
-    st.session_state.tasklists[pk] = result.get("tasks", [])
+    st.session_state.tasklists[pk] = _normalize_concepts(result.get("tasks", []))
     st.session_state.chat_history[pk] = []
     st.session_state.synthesized[pk] = True
 
@@ -113,8 +167,9 @@ def _refine(project: dict[str, Any], feedback: str) -> None:
         current_tasks=current,
         feedback=feedback,
         history=history,
+        concept_catalog=st.session_state.concept_catalog,
     )
-    st.session_state.tasklists[pk] = result.get("tasks", [])
+    st.session_state.tasklists[pk] = _normalize_concepts(result.get("tasks", []))
     st.session_state.chat_history[pk].append({"role": "user", "content": feedback})
     st.session_state.chat_history[pk].append({"role": "assistant", "content": json.dumps(result)})
 
@@ -122,10 +177,20 @@ def _refine(project: dict[str, Any], feedback: str) -> None:
 def _tasks_to_csv(tasks: list[dict[str, Any]]) -> str:
     out = io.StringIO()
     w = csv.writer(out)
-    w.writerow(["step", "title", "description", "rubric_criteria", "tips"])
+    w.writerow(["step", "title", "description", "rubric_criteria", "concept_title", "concept_url", "concept_key"])
     for i, t in enumerate(tasks, 1):
         crits = "; ".join(t.get("rubric_criteria") or [])
-        w.writerow([t.get("step") or i, t.get("title", ""), t.get("description", ""), crits, t.get("tips", "")])
+        w.writerow(
+            [
+                t.get("step") or i,
+                t.get("title", ""),
+                t.get("description", ""),
+                crits,
+                t.get("concept_title", ""),
+                t.get("concept_url", ""),
+                t.get("concept_key", ""),
+            ]
+        )
     return out.getvalue()
 
 
@@ -233,7 +298,9 @@ def _render_tasklist(project: dict[str, Any]) -> None:
                 "title": t.get("title", ""),
                 "description": t.get("description", ""),
                 "rubric_criteria": " | ".join(t.get("rubric_criteria") or []),
-                "tips": t.get("tips", ""),
+                "concept": t.get("concept_title", ""),
+                "start_here": t.get("concept_url", ""),
+                "concept_key": t.get("concept_key", ""),
             }
             for i, t in enumerate(tasks)
         ]
@@ -247,8 +314,13 @@ def _render_tasklist(project: dict[str, Any]) -> None:
                 crits = t.get("rubric_criteria") or []
                 if crits:
                     st.caption("Rubric criteria: " + " | ".join(crits))
-                if t.get("tips"):
-                    st.caption(f":bulb: {t['tips']}")
+                if t.get("concept_title") and t.get("concept_url"):
+                    st.caption(
+                        f":books: Start here: [{t['concept_title']}]({t['concept_url']}) "
+                        f"(concept `{t.get('concept_key','')}`)"
+                    )
+                elif t.get("concept_title"):
+                    st.caption(f":books: Start here: {t['concept_title']} (concept `{t.get('concept_key','')}`)")
 
     st.download_button(
         "Download CSV",
