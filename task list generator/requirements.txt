@@ -1,0 +1,4 @@
+streamlit>=1.30
+openai>=1.30
+requests>=2.31
+numpy>=1.26

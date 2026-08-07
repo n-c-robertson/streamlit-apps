@@ -1,0 +1,178 @@
+# ---- Locale-agnostic enumeration of every Component row for a key. ----
+# NOT locale-gated; used to discover which locale actually has a release.
+query ComponentsByKey($key: String!) {
+  components(key: $key, count: 50) {
+    id
+    key
+    locale
+    type
+    deprecated
+    latest_release {
+      root_node_id
+    }
+  }
+}
+
+# ---- Resolve a key to its latest_release in a specific locale. ----
+query ComponentByKey($key: String!, $locale: String!) {
+  component(key: $key, locale: $locale) {
+    latest_release {
+      major
+      minor
+      patch
+      root_node_id
+      root_node {
+        id
+        key
+        locale
+        version
+        title
+      }
+    }
+  }
+}
+
+# ---- CONSTRUCTION-branch fallback for keys with no published RELEASE. ----
+query ConstructionByKey($key: String!, $locale: String!) {
+  node(key: $key, locale: $locale, version: "construction") {
+    id
+    key
+    title
+    semantic_type
+  }
+  component(key: $key, locale: $locale) {
+    metadata {
+      difficulty_level { name uri }
+      teaches_skills { name uri }
+      prerequisite_skills { name uri }
+    }
+  }
+}
+
+# ---- Full content tree by root node id. ----
+# Top-level fields are Node-interface fields only (id/key/title/locale/version/
+# semantic_type). Type-specific fields (summary, syllabus_overview) live inside
+# the inline fragments. Works for Nanodegree, Part (cd root), and Lesson roots.
+fragment conceptFields on Concept {
+  id
+  key
+  title
+  is_public
+  progress_key
+  atoms {
+    __typename
+    ... on AtomInterface {
+      id
+      key
+      semantic_type
+      title
+    }
+    ... on TextAtom {
+      text
+    }
+    ... on VideoAtom {
+      video { vtt_url }
+    }
+    ... on RadioQuizAtom {
+      question {
+        prompt
+        answers { is_correct text }
+      }
+    }
+    ... on CheckboxQuizAtom {
+      question {
+        prompt
+        correct_feedback
+        answers { is_correct text }
+      }
+    }
+    ... on MatchingQuizAtom {
+      question {
+        answers_label
+        concepts_label
+        concepts { text correct_answer { text } }
+        complex_prompt { text }
+        answers { text }
+      }
+    }
+  }
+}
+
+fragment lessonFields on Lesson {
+  id
+  key
+  title
+  summary
+  is_project_lesson
+  project {
+    id
+    key
+    title
+    description
+    summary
+    duration
+    rubric_id
+    reviews_project_id
+    hide_rubric
+    rubric {
+      id
+      project_id
+      language
+      sections {
+        id
+        name
+        position
+        rubric_items {
+          id
+          criteria
+          passed_description
+          exceeded_description
+          optional
+          position
+          exceedable
+          reviewer_tips
+        }
+      }
+    }
+  }
+  concepts { ...conceptFields }
+}
+
+fragment moduleFields on Module {
+  id
+  key
+  title
+  lessons { ...lessonFields }
+}
+
+fragment partFields on Part {
+  id
+  key
+  title
+  summary
+  is_optional
+  is_public
+  modules { ...moduleFields }
+}
+
+query NodeById($id: Int!) {
+  node(id: $id) {
+    id
+    key
+    title
+    locale
+    version
+    semantic_type
+    ... on Nanodegree {
+      summary
+      syllabus_overview
+      parts { ...partFields }
+    }
+    ... on Part {
+      ...partFields
+    }
+    ... on Lesson {
+      ...lessonFields
+    }
+  }
+}
