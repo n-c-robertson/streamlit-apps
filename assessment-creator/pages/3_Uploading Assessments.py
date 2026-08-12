@@ -22,6 +22,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import graphql_queries
 import settings
+from settings import VALID_QUESTION_CATEGORIES
 
 #========================================
 # FUNCTIONS
@@ -39,7 +40,9 @@ def generate_slug(ASSESSMENT_TITLE):
 # lowercase/wrong status values (e.g. "active", "published"), which the API
 # rejects with GRAPHQL_VALIDATION_FAILED. These helpers normalize incoming
 # values back to the accepted enums before we submit.
-VALID_QUESTION_CATEGORIES = {"SINGLE_CHOICE", "MULTIPLE_CHOICE", "SHORT_ANSWER", "CODING"}
+# VALID_QUESTION_CATEGORIES is imported from settings.py (single source of
+# truth) — the only categories this app supports end-to-end. Unrecognized
+# values are REJECTED, not silently inferred, to remove sloppiness.
 VALID_STATUSES = {"ACTIVE"}
 
 # ponytail: SHORT_ANSWER has no choices; rubric JSON shape per
@@ -173,21 +176,20 @@ CREATE_CODING_QUESTION_MUTATION = """
 def _normalize_category(category, group):
     """Coerce a question category to a valid QuestionCategory enum.
 
-    If the value is already a valid enum (case-insensitive), return it. For
-    unrecognized values, infer from the number of correct choices in the group:
-    more than one correct choice -> MULTIPLE_CHOICE, otherwise SINGLE_CHOICE.
-    SHORT_ANSWER is never inferred (it has no choices) — it must be set
-    explicitly. Logs a warning on inference.
+    If the value is already a valid enum (case-insensitive), return it. Any
+    other value is REJECTED with a clear error — we no longer infer
+    SINGLE_CHOICE/MULTIPLE_CHOICE from choice count, since that papered over
+    bad data and was a source of sloppiness. The generator already enforces
+    the enum, so an invalid value here means a hand-edited or imported CSV
+    that the user must fix before upload.
     """
     if isinstance(category, str) and category.strip().upper() in VALID_QUESTION_CATEGORIES:
         return category.strip().upper()
-    try:
-        correct = int(group["choice_isCorrect"].fillna(False).astype(bool).sum())
-    except Exception:
-        correct = 0
-    inferred = "MULTIPLE_CHOICE" if correct > 1 else "SINGLE_CHOICE"
-    print(f"WARNING: Unrecognized category '{category}' -> inferred '{inferred}' from {correct} correct choices")
-    return inferred
+    raise ValueError(
+        f"Unrecognized question category {category!r}. "
+        f"Must be one of {sorted(VALID_QUESTION_CATEGORIES)}. "
+        "Fix the CSV 'category' column and re-upload."
+    )
 
 def fetch_difficulty_levels():
     query = """
@@ -1297,15 +1299,16 @@ def upload_assessment_to_api(df, assessment_title):
         df['question_status'] = df['question_status'].map(_normalize_status)
         df['choice_status'] = df['choice_status'].map(_normalize_status)
 
-        # Normalize category per question group, inferring from correct-choice
-        # count when the value is not already a valid enum. Group by the question
-        # identity columns (everything that defines a unique question except the
-        # fields we are normalizing) so each question's choice rows are counted
-        # together.
+        # Normalize category per question group. Unrecognized categories are
+        # REJECTED (raised) here — we no longer infer from correct-choice count.
+        # Group by the question identity columns (everything that defines a
+        # unique question except the fields we are normalizing) so each
+        # question's rows are normalized together.
         category_identity_cols = [
             c for c in question_columns if c not in ('category', 'question_status')
         ]
-        # Ensure choice_isCorrect exists for inference; default to False if absent.
+        # choice_isCorrect is no longer used for inference, but keep the column
+        # for downstream choice processing.
         if 'choice_isCorrect' not in df.columns:
             df['choice_isCorrect'] = False
 

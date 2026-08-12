@@ -63,6 +63,13 @@ CHAT_COMPLETIONS_RESPONSE_FORMAT = {
 # `testCases` instead of choices.
 CODING_CATEGORY = "CODING"
 
+# The only question categories this app supports end-to-end (generate -> review
+# -> upload). The assessments API's QuestionCategory enum also has TRUE_FALSE,
+# but this app does not author it, so it is excluded to remove sloppiness:
+# any other value is rejected at generation and upload rather than silently
+# coerced. This is the single source of truth — import from here, do not redefine.
+VALID_QUESTION_CATEGORIES = {"SINGLE_CHOICE", "MULTIPLE_CHOICE", "SHORT_ANSWER", "CODING"}
+
 # UI label -> Assessments API `CodingLanguage` enum. Only these 5 are wired up
 # for execution in assessments-api (internal/services/code_execution); the
 # other enum values (TYPESCRIPT, HTML, CSS, SHELL) are authoring-only.

@@ -149,7 +149,7 @@ Do not paraphrase it, do not add slashes, do not invent levels, and do not outpu
 The "skillId" you output MUST BE one of the following: {skills}.
 
 **Requirements:**  
-- **Question Types**: Each question must be categorized as one of the following types: {question_types}.
+- **Question Types**: Each question must be categorized as one of the following types: {question_types}. The `category` value MUST be exactly one of these enum strings (uppercase, no variations, no synonyms, no topical labels). Any other value is rejected before upload.
 
 - **Question Type Distribution**: When "SHORT_ANSWER" is among the allowed types, aim for roughly **30%** of the generated questions to be SHORT_ANSWER (LLM-graded, with a rubric), and the remaining ~70% split among the other allowed types. Round to the nearest whole question — e.g. for 5 questions produce ~1-2 SHORT_ANSWER; for 10 questions produce ~3 SHORT_ANSWER. If SHORT_ANSWER is not in the allowed types, ignore this and use only the other types. Do not produce more than ~40% or fewer than ~20% SHORT_ANSWER. When "CODING" is among the allowed types, aim for roughly **40-50%** of the generated questions to be CODING, biased toward concepts that involve programming or code; only generate CODING questions for concepts where a code task is meaningful, and use the other allowed types for non-programmatic concepts. Do not produce fewer than ~30% CODING when CODING is an allowed type.
 
@@ -507,7 +507,7 @@ The "skillId" you output MUST BE one of the following: {skills}.
 - **Content Independence**: Questions should NOT test knowledge of the specific content provided. Instead, test basic foundational knowledge that would be required to understand ANY content in this skill area.
 
 **Requirements:**  
-- **Question Types**: Each question must be categorized as one of the following types: {question_types}.
+- **Question Types**: Each question must be categorized as one of the following types: {question_types}. The `category` value MUST be exactly one of these enum strings (uppercase, no variations, no synonyms, no topical labels). Any other value is rejected before upload.
 
 - **Question Type Distribution**: When "SHORT_ANSWER" is among the allowed types, aim for roughly **30%** of the generated questions to be SHORT_ANSWER (LLM-graded, with a rubric), and the remaining ~70% split among the other allowed types. Round to the nearest whole question — e.g. for 5 questions produce ~1-2 SHORT_ANSWER; for 10 questions produce ~3 SHORT_ANSWER. If SHORT_ANSWER is not in the allowed types, ignore this and use only the other types. Do not produce more than ~40% or fewer than ~20% SHORT_ANSWER. When "CODING" is among the allowed types, aim for roughly **40-50%** of the generated questions to be CODING, biased toward concepts that involve programming or code; only generate CODING questions for concepts where a code task is meaningful, and use the other allowed types for non-programmatic concepts. Do not produce fewer than ~30% CODING when CODING is an allowed type.
 
@@ -1552,7 +1552,7 @@ Requirements:
 - Skill alignment: the question must demonstrably test {skill_name}, drawing on the {leaf_topic} sub-area. The skill tag is a best-fit taxonomy label, so the question's subject matter must clearly belong to that skill area.
 - Content independence: DO NOT reference specific examples, names, projects, code listings, anecdotes, or wording from the document. Generalise. A learner who never saw this document must be able to answer.
 - Conceptual focus: test understanding of concepts, principles, and methodologies - not recall of document specifics.
-- Question Types: each question categorised as one of: {question_types}.
+- Question Types: each question categorised as one of: {question_types}. The `category` value MUST be exactly one of these enum strings (uppercase, no variations, no synonyms, no topical labels). Any other value is rejected before upload.
 - Question Type Distribution: when "SHORT_ANSWER" is among the allowed types, aim for roughly **30%** of the generated questions to be SHORT_ANSWER (LLM-graded, with a rubric), and the remaining ~70% split among the other allowed types. Round to the nearest whole question — e.g. for 5 questions produce ~1-2 SHORT_ANSWER; for 10 questions produce ~3 SHORT_ANSWER. If SHORT_ANSWER is not in the allowed types, ignore this and use only the other types. Do not produce more than ~40% or fewer than ~20% SHORT_ANSWER. When "CODING" is among the allowed types, aim for roughly **40-50%** of the generated questions to be CODING, biased toward concepts that involve programming or code; only generate CODING questions for concepts where a code task is meaningful, and use the other allowed types for non-programmatic concepts. Do not produce fewer than ~30% CODING when CODING is an allowed type.
 - Learning Objectives: each question must align with at least one of: {learning_objectives}.
 - Answer Choices:

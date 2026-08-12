@@ -33,6 +33,7 @@ from settings import (
     CODING_DEFAULT_TIME_LIMIT_MS,
     CODING_DEFAULT_MEMORY_LIMIT_MB,
     CODING_MIN_TEST_CASES,
+    VALID_QUESTION_CATEGORIES,
 )
 
 #========================================
@@ -1355,6 +1356,14 @@ def process_concept(sectionId, node, lesson, concept, difficulty_level, difficul
             continue
         else:
             print(f"  Question {i+1}: ACCEPTED - skillId '{question_skill}' matches expected skills")
+
+        # Enforce the supported QuestionCategory enum strictly. The LLM
+        # occasionally emits sloppy values (e.g. "HARD", "Code", "single",
+        # "MULTIPLE"); reject anything that isn't an exact enum match instead
+        # of letting it flow through and get silently coerced at upload.
+        if question_category not in VALID_QUESTION_CATEGORIES:
+            print(f"  Question {i+1}: REJECTED - category '{question_category}' is not one of the supported enums {sorted(VALID_QUESTION_CATEGORIES)}")
+            continue
 
         # CODING-specific shape validation. CODING questions carry
         # codingDetails + testCases instead of choices; reject malformed ones
