@@ -82,8 +82,10 @@ CODING_LANGUAGE_ENUM_TO_LABEL = {v: k for k, v in CODING_LANGUAGE_OPTIONS.items(
 CODING_DEFAULT_TIME_LIMIT_MS = 5000
 CODING_DEFAULT_MEMORY_LIMIT_MB = 256
 
-# Minimum number of test cases the API requires per CODING question.
-CODING_MIN_TEST_CASES = 1
+# Minimum number of test cases per CODING question. The API accepts >=1, but we
+# require >=3 at generation time (matching the prompt's "at least 3 test cases"
+# rule) so the dry-run has meaningful coverage and thin suites can't slip through.
+CODING_MIN_TEST_CASES = 3
 
 #========================================
 #CONTEXT MANAGEMENT UTILITIES

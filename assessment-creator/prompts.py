@@ -115,9 +115,9 @@ The `rubric` field is REQUIRED when category is "SHORT_ANSWER" and MUST be omitt
 The `codingDetails` and `testCases` fields are REQUIRED when category is "CODING" and MUST be omitted (or null) otherwise. `choices` MUST be an empty array for CODING. `codingDetails` shape:
 {{
   "language": string,            // one of: PYTHON, SQL, JAVA, JAVASCRIPT, CPP
-  "starterCode": string,         // runnable skeleton with a solution function/signature and a pass/placeholder
-  "solutionCode": string,         // correct reference implementation that passes every test case (staff-only)
-  "testHarnessTemplate": string,  // optional; REQUIRED for SQL as DDL beginning with CREATE or WITH
+  "starterCode": string,         // runnable skeleton defining a function named `solution` with a pass/placeholder
+  "solutionCode": string,         // correct reference implementation that defines `solution` and passes every test case (staff-only)
+  "testHarnessTemplate": string,  // REQUIRED for SQL as DDL beginning with CREATE or WITH. MUST be omitted/empty for PYTHON, JAVASCRIPT, JAVA, CPP — the API auto-generates the harness.
   "constraints": string,
   "timeLimitMs": number,          // 100-30000, default 5000
   "memoryLimitMb": number         // 16-512, default 256
@@ -130,6 +130,12 @@ The `codingDetails` and `testCases` fields are REQUIRED when category is "CODING
   "isExample": boolean,           // at least one test case MUST be isExample: true
   "orderIndex": number
 }}
+
+CODING contract (HARD RULE — violations are rejected before upload):
+- The candidate's function MUST be named exactly `solution`. Both `starterCode` and `solutionCode` MUST define `solution` with identical signature. For Java, define `class Solution` with a method named `solution`.
+- Do NOT reference `solution` as a variable or assign to it. The harness calls `solution(...)`; your only job is to define it.
+- Do NOT emit a `testHarnessTemplate` for PYTHON, JAVASCRIPT, JAVA, or CPP. Only SQL requires one (DDL beginning with CREATE or WITH).
+- `solutionCode` MUST pass every test case you emit.
 
 Follow the instructions in the user prompt precisely. We want to generate the best technical assessments on the planet.
 """
@@ -165,7 +171,7 @@ The "skillId" you output MUST BE one of the following: {skills}.
   - **Single Choice Questions**: One correct answer and three plausible distractors.
   - **Multiple Choice Questions**: Multiple correct answers (as appropriate) with distractors; total number of choices between 4 and 5.
   - **Short Answer Questions** (category "SHORT_ANSWER"): No choices — emit `"choices": []`. Instead emit a `rubric` object with `passingThreshold` (a fraction in [0, 1]) and a `criteria` array. Each criterion has a short `name` (unique, non-empty), a detailed `description` the LLM grader uses verbatim, and a positive integer `points`. Use 2-4 criteria that together cover the key dimensions of a correct answer.
-  - **Coding Questions** (category "CODING"): No choices — emit `"choices": []`. Instead emit a `codingDetails` object and a `testCases` array. Choose the most appropriate `language` for each question from this allowed set based on the concept being assessed (e.g. SQL for data/querying concepts, PYTHON/JAVASCRIPT for general programming, JAVA/CPP for systems or strongly-typed concepts); do not default to one language for all questions. Allowed languages: {coding_languages}. `starterCode` is a runnable skeleton (e.g. `def solution(x):\n    pass` for Python, or a `solution` function/signature with a `pass`/placeholder); `solutionCode` is a correct implementation that passes every test case; produce at least 3 test cases with at least one `isExample: true`. For SQL, `testHarnessTemplate` MUST be a DDL harness beginning with `CREATE` or `WITH`, and use `comparisonStrategy: "SORTED_LINES"`. Only generate a CODING question when the concept is genuinely programmatic; otherwise use the other allowed types.
+  - **Coding Questions** (category "CODING"): No choices — emit `"choices": []`. Instead emit a `codingDetails` object and a `testCases` array. Choose the most appropriate `language` for each question from this allowed set based on the concept being assessed (e.g. SQL for data/querying concepts, PYTHON/JAVASCRIPT for general programming, JAVA/CPP for systems or strongly-typed concepts); do not default to one language for all questions. Allowed languages: {coding_languages}. The candidate's function MUST be named exactly `solution` — both `starterCode` (a runnable skeleton, e.g. `def solution(x):\n    pass` for Python, or `class Solution {{ public ... solution(...) {{...}} }}` for Java) and `solutionCode` (a correct implementation that passes every test case) MUST define `solution` with identical signature. Do NOT reference or assign to `solution` as a variable — the harness calls it. Do NOT emit a `testHarnessTemplate` for PYTHON, JAVASCRIPT, JAVA, or CPP (the API auto-generates the harness); only SQL requires one, as a DDL harness beginning with `CREATE` or `WITH` with `comparisonStrategy: "SORTED_LINES"`. Produce at least 3 test cases with at least one `isExample: true`. Only generate a CODING question when the concept is genuinely programmatic; otherwise use the other allowed types.
 
 - **Answer Choice Length and Detail**:  
   - All answer choices must be similar in length, detail, and complexity. The correct answer should never be obviously longer or more detailed than distractors.
@@ -346,6 +352,34 @@ Example 6: Coding question (Python, no choices).
     }}
   ]
 }}
+
+Example 7: Coding question (SQL, with a DDL harness — the only language that uses testHarnessTemplate).
+{{
+  "questions_choices": [
+    {{
+      "question": {{
+        "difficultyLevelId": "Intermediate",
+        "skillId": "SQL Aggregation",
+        "category": "CODING",
+        "status": "ACTIVE",
+        "content": "Write a SELECT query that returns each department and the number of employees in it, ordered by department name.",
+        "codingDetails": {{
+          "language": "SQL",
+          "starterCode": "-- Write your SELECT query below\nSELECT",
+          "solutionCode": "SELECT department, COUNT(*) AS employee_count FROM employees GROUP BY department ORDER BY department;",
+          "testHarnessTemplate": "CREATE TABLE employees (id INTEGER, department TEXT);\nINSERT INTO employees VALUES (1, 'Engineering'), (2, 'Engineering'), (3, 'Sales');",
+          "constraints": "Use a single SELECT statement.",
+          "timeLimitMs": 5000,
+          "memoryLimitMb": 256
+        }},
+        "testCases": [
+          {{ "input": "", "expectedOutput": "Engineering|2\nSales|1", "comparisonStrategy": "SORTED_LINES", "isExample": true, "orderIndex": 0 }}
+        ]
+      }},
+      "choices": []
+    }}
+  ]
+}}
 """
     }
 ]
@@ -426,9 +460,9 @@ The `rubric` field is REQUIRED when category is "SHORT_ANSWER" and MUST be omitt
 The `codingDetails` and `testCases` fields are REQUIRED when category is "CODING" and MUST be omitted (or null) otherwise. `choices` MUST be an empty array for CODING. `codingDetails` shape:
 {{
   "language": string,            // one of: PYTHON, SQL, JAVA, JAVASCRIPT, CPP
-  "starterCode": string,         // runnable skeleton with a solution function/signature and a pass/placeholder
-  "solutionCode": string,         // correct reference implementation that passes every test case (staff-only)
-  "testHarnessTemplate": string,  // optional; REQUIRED for SQL as DDL beginning with CREATE or WITH
+  "starterCode": string,         // runnable skeleton defining a function named `solution` with a pass/placeholder
+  "solutionCode": string,         // correct reference implementation that defines `solution` and passes every test case (staff-only)
+  "testHarnessTemplate": string,  // REQUIRED for SQL as DDL beginning with CREATE or WITH. MUST be omitted/empty for PYTHON, JAVASCRIPT, JAVA, CPP — the API auto-generates the harness.
   "constraints": string,
   "timeLimitMs": number,          // 100-30000, default 5000
   "memoryLimitMb": number         // 16-512, default 256
@@ -441,6 +475,12 @@ The `codingDetails` and `testCases` fields are REQUIRED when category is "CODING
   "isExample": boolean,           // at least one test case MUST be isExample: true
   "orderIndex": number
 }}
+
+CODING contract (HARD RULE — violations are rejected before upload):
+- The candidate's function MUST be named exactly `solution`. Both `starterCode` and `solutionCode` MUST define `solution` with identical signature. For Java, define `class Solution` with a method named `solution`.
+- Do NOT reference `solution` as a variable or assign to it. The harness calls `solution(...)`; your only job is to define it.
+- Do NOT emit a `testHarnessTemplate` for PYTHON, JAVASCRIPT, JAVA, or CPP. Only SQL requires one (DDL beginning with CREATE or WITH).
+- `solutionCode` MUST pass every test case you emit.
 
 Follow the instructions in the user prompt precisely. We want to generate the best readiness assessments on the planet.
 """
@@ -489,7 +529,7 @@ The "skillId" you output MUST BE one of the following: {skills}.
   - **Single Choice Questions**: One correct answer and three plausible distractors.
   - **Multiple Choice Questions**: Multiple correct answers (as appropriate) with distractors; total number of choices between 4 and 5.
   - **Short Answer Questions** (category "SHORT_ANSWER"): No choices — emit `"choices": []`. Instead emit a `rubric` object with `passingThreshold` (a fraction in [0, 1]) and a `criteria` array. Each criterion has a short `name` (unique, non-empty), a detailed `description` the LLM grader uses verbatim, and a positive integer `points`. Use 2-4 criteria that together cover the key dimensions of a correct answer.
-  - **Coding Questions** (category "CODING"): No choices — emit `"choices": []`. Instead emit a `codingDetails` object and a `testCases` array. Choose the most appropriate `language` for each question from this allowed set based on the concept being assessed (e.g. SQL for data/querying concepts, PYTHON/JAVASCRIPT for general programming, JAVA/CPP for systems or strongly-typed concepts); do not default to one language for all questions. Allowed languages: {coding_languages}. `starterCode` is a runnable skeleton (e.g. `def solution(x):\n    pass` for Python, or a `solution` function/signature with a `pass`/placeholder); `solutionCode` is a correct implementation that passes every test case; produce at least 3 test cases with at least one `isExample: true`. For SQL, `testHarnessTemplate` MUST be a DDL harness beginning with `CREATE` or `WITH`, and use `comparisonStrategy: "SORTED_LINES"`. Only generate a CODING question when the concept is genuinely programmatic; otherwise use the other allowed types.
+  - **Coding Questions** (category "CODING"): No choices — emit `"choices": []`. Instead emit a `codingDetails` object and a `testCases` array. Choose the most appropriate `language` for each question from this allowed set based on the concept being assessed (e.g. SQL for data/querying concepts, PYTHON/JAVASCRIPT for general programming, JAVA/CPP for systems or strongly-typed concepts); do not default to one language for all questions. Allowed languages: {coding_languages}. The candidate's function MUST be named exactly `solution` — both `starterCode` (a runnable skeleton, e.g. `def solution(x):\n    pass` for Python, or `class Solution {{ public ... solution(...) {{...}} }}` for Java) and `solutionCode` (a correct implementation that passes every test case) MUST define `solution` with identical signature. Do NOT reference or assign to `solution` as a variable — the harness calls it. Do NOT emit a `testHarnessTemplate` for PYTHON, JAVASCRIPT, JAVA, or CPP (the API auto-generates the harness); only SQL requires one, as a DDL harness beginning with `CREATE` or `WITH` with `comparisonStrategy: "SORTED_LINES"`. Produce at least 3 test cases with at least one `isExample: true`. Only generate a CODING question when the concept is genuinely programmatic; otherwise use the other allowed types.
 
 - **Answer Choice Length and Detail**:  
   - All answer choices must be similar in length, detail, and complexity. The correct answer should never be obviously longer or more detailed than distractors.
@@ -695,7 +735,7 @@ Evaluation Criteria:
 - For SINGLE_CHOICE: one correct, three plausible distractors.
 - For MULTIPLE_CHOICE: multiple correct answers (where applicable) with 4-5 total options.
 - For SHORT_ANSWER: no choices — instead evaluate the rubric: criteria are non-empty, uniquely named, cover the key dimensions of a correct answer, have positive integer points, and a passingThreshold in [0, 1].
-- For CODING: no choices — instead evaluate `codingDetails` and `testCases`: `language` is one of PYTHON/SQL/JAVA/JAVASCRIPT/CPP; `starterCode` is a runnable skeleton with a solution signature and a pass/placeholder; `solutionCode` is a correct implementation that passes every test case; there are at least 3 test cases with at least one `isExample: true`; `input` is valid JSON for PYTHON/JAVASCRIPT or a JSON scalar for JAVA/CPP; for SQL, `testHarnessTemplate` is a DDL harness beginning with CREATE or WITH and `comparisonStrategy` is SORTED_LINES.
+- For CODING: no choices — instead evaluate `codingDetails` and `testCases`: `language` is one of PYTHON/SQL/JAVA/JAVASCRIPT/CPP; the candidate's function is named exactly `solution` in both `starterCode` and `solutionCode` with identical signature (for Java, `class Solution` with a `solution` method); `solutionCode` is a correct implementation that passes every test case; there are at least 3 test cases with at least one `isExample: true`; `input` is valid JSON for PYTHON/JAVASCRIPT or a JSON scalar for JAVA/CPP; for non-SQL languages there is NO `testHarnessTemplate` (the API auto-generates it); for SQL, `testHarnessTemplate` is a DDL harness beginning with CREATE or WITH and `comparisonStrategy` is SORTED_LINES.
 - Distractors must be plausible, distinct, concise, and grammatically consistent.
 - Distractors must represent common misconceptions or errors, avoiding negative or ambiguous wording.
 - Correct answers must not be overly lengthy or mimic language from the question stem.
@@ -1179,7 +1219,7 @@ Your goal is to identify the question that best tests the given skill with optim
 **Category-aware judging** — score each candidate on the criteria that apply to its own category; do NOT penalize a question for lacking something its category doesn't use:
 - **SINGLE_CHOICE / MULTIPLE_CHOICE**: judge the quality of the answer choices — distractors must be plausible, distinct, grammatically consistent, and free of clues to the correct answer; correct answer must not be the longest or reuse stem keywords.
 - **SHORT_ANSWER**: there are NO choices by design — do NOT penalize the absence of choices or distractors. Instead judge the **rubric**: criteria are non-empty and uniquely named, together cover the key dimensions of a correct answer, have positive integer points, and a passingThreshold in [0, 1]; the question stem invites a substantive, gradable written answer.
-- **CODING**: there are NO choices by design — do NOT penalize the absence of choices or distractors. Instead judge the **code and test cases**: `starterCode` is a runnable skeleton with a clear solution signature; `solutionCode` is a correct implementation that passes every test case; there are at least 3 test cases with at least one `isExample: true`; inputs are well-formed for the language (JSON for PYTHON/JAVASCRIPT, JSON scalar for JAVA/CPP); for SQL the `testHarnessTemplate` is valid DDL and `comparisonStrategy` is SORTED_LINES.
+- **CODING**: there are NO choices by design — do NOT penalize the absence of choices or distractors. Instead judge the **code and test cases**: the candidate's function is named exactly `solution` in both `starterCode` and `solutionCode` with identical signature (for Java, `class Solution` with a `solution` method); `solutionCode` is a correct implementation that passes every test case; there are at least 3 test cases with at least one `isExample: true`; inputs are well-formed for the language (JSON for PYTHON/JAVASCRIPT, JSON scalar for JAVA/CPP); non-SQL languages have NO `testHarnessTemplate` (the API auto-generates it); for SQL the `testHarnessTemplate` is valid DDL and `comparisonStrategy` is SORTED_LINES.
 
 Pick the single best question regardless of category — a strong SHORT_ANSWER question with a well-constructed rubric, or a strong CODING question with a correct solution and solid test cases, is strictly better than a mediocre multiple-choice question, and vice versa.
 
@@ -1474,9 +1514,9 @@ The `rubric` field is REQUIRED when category is "SHORT_ANSWER" and MUST be omitt
 The `codingDetails` and `testCases` fields are REQUIRED when category is "CODING" and MUST be omitted (or null) otherwise. `choices` MUST be an empty array for CODING. `codingDetails` shape:
 {{
   "language": string,            // one of: PYTHON, SQL, JAVA, JAVASCRIPT, CPP
-  "starterCode": string,         // runnable skeleton with a solution function/signature and a pass/placeholder
-  "solutionCode": string,         // correct reference implementation that passes every test case (staff-only)
-  "testHarnessTemplate": string,  // optional; REQUIRED for SQL as DDL beginning with CREATE or WITH
+  "starterCode": string,         // runnable skeleton defining a function named `solution` with a pass/placeholder
+  "solutionCode": string,         // correct reference implementation that defines `solution` and passes every test case (staff-only)
+  "testHarnessTemplate": string,  // REQUIRED for SQL as DDL beginning with CREATE or WITH. MUST be omitted/empty for PYTHON, JAVASCRIPT, JAVA, CPP — the API auto-generates the harness.
   "constraints": string,
   "timeLimitMs": number,          // 100-30000, default 5000
   "memoryLimitMb": number         // 16-512, default 256
@@ -1489,6 +1529,12 @@ The `codingDetails` and `testCases` fields are REQUIRED when category is "CODING
   "isExample": boolean,           // at least one test case MUST be isExample: true
   "orderIndex": number
 }}
+
+CODING contract (HARD RULE — violations are rejected before upload):
+- The candidate's function MUST be named exactly `solution`. Both `starterCode` and `solutionCode` MUST define `solution` with identical signature. For Java, define `class Solution` with a method named `solution`.
+- Do NOT reference `solution` as a variable or assign to it. The harness calls `solution(...)`; your only job is to define it.
+- Do NOT emit a `testHarnessTemplate` for PYTHON, JAVASCRIPT, JAVA, or CPP. Only SQL requires one (DDL beginning with CREATE or WITH).
+- `solutionCode` MUST pass every test case you emit.
 
 The document is the source material only. Questions must be answerable by someone who learned the concept from ANY source, not by someone who memorised this document.
 """
@@ -1513,7 +1559,7 @@ Requirements:
   - SINGLE_CHOICE: one correct answer + three plausible distractors.
   - MULTIPLE_CHOICE: multiple correct (as appropriate), 4-5 total choices.
   - SHORT_ANSWER: no choices — emit `"choices": []` and a `rubric` object with `passingThreshold` (fraction in [0,1]) and a `criteria` array (each: unique non-empty `name`, detailed `description`, positive integer `points`; 2-4 criteria).
-  - CODING: no choices — emit `"choices": []`, a `codingDetails` object, and a `testCases` array. Choose the most appropriate `language` for each question from this allowed set based on the concept being assessed (e.g. SQL for data/querying concepts, PYTHON/JAVASCRIPT for general programming, JAVA/CPP for systems or strongly-typed concepts); do not default to one language for all questions. Allowed languages: {coding_languages}. `starterCode` is a runnable skeleton (e.g. `def solution(x):\n    pass` for Python); `solutionCode` is a correct implementation that passes every test case; produce at least 3 test cases with at least one `isExample: true`. For SQL, `testHarnessTemplate` MUST be a DDL harness beginning with `CREATE` or `WITH`, and use `comparisonStrategy: "SORTED_LINES"`. Code must be generic/illustrative, not copied from the document.
+  - CODING: no choices — emit `"choices": []`, a `codingDetails` object, and a `testCases` array. Choose the most appropriate `language` for each question from this allowed set based on the concept being assessed (e.g. SQL for data/querying concepts, PYTHON/JAVASCRIPT for general programming, JAVA/CPP for systems or strongly-typed concepts); do not default to one language for all questions. Allowed languages: {coding_languages}. The candidate's function MUST be named exactly `solution` — both `starterCode` (a runnable skeleton, e.g. `def solution(x):\n    pass` for Python) and `solutionCode` (a correct implementation that passes every test case) MUST define `solution` with identical signature. Do NOT reference or assign to `solution` as a variable. Do NOT emit a `testHarnessTemplate` for PYTHON, JAVASCRIPT, JAVA, or CPP (the API auto-generates the harness); only SQL requires one, as a DDL harness beginning with `CREATE` or `WITH` with `comparisonStrategy: "SORTED_LINES"`. Produce at least 3 test cases with at least one `isExample: true`. Code must be generic/illustrative, not copied from the document.
   - All choices similar in length, detail, complexity. Correct answer never obviously longer.
   - Correct answer must not reuse distinctive terms/phrases from the question stem.
   - Distractors must be plausible common misconceptions, distinct, concise, grammatically consistent. No negative phrasing, no "Both A & C" combined answers.
@@ -1581,7 +1627,7 @@ Evaluation Criteria:
 - SINGLE_CHOICE: one correct, three plausible distractors.
 - MULTIPLE_CHOICE: multiple correct (where appropriate), 4-5 total options.
 - SHORT_ANSWER: no choices — instead evaluate the rubric: criteria non-empty, uniquely named, cover key dimensions of a correct answer, positive integer points, passingThreshold in [0, 1].
-- CODING: no choices — instead evaluate `codingDetails` and `testCases`: `language` is one of PYTHON/SQL/JAVA/JAVASCRIPT/CPP; `starterCode` is a runnable skeleton with a solution signature and a pass/placeholder; `solutionCode` is a correct implementation that passes every test case; at least 3 test cases with at least one `isExample: true`; `input` is valid JSON for PYTHON/JAVASCRIPT or a JSON scalar for JAVA/CPP; for SQL, `testHarnessTemplate` is a DDL harness beginning with CREATE or WITH and `comparisonStrategy` is SORTED_LINES.
+- CODING: no choices — instead evaluate `codingDetails` and `testCases`: `language` is one of PYTHON/SQL/JAVA/JAVASCRIPT/CPP; the candidate's function is named exactly `solution` in both `starterCode` and `solutionCode` with identical signature (for Java, `class Solution` with a `solution` method); `solutionCode` is a correct implementation that passes every test case; at least 3 test cases with at least one `isExample: true`; `input` is valid JSON for PYTHON/JAVASCRIPT or a JSON scalar for JAVA/CPP; non-SQL languages have NO `testHarnessTemplate`; for SQL, `testHarnessTemplate` is a DDL harness beginning with CREATE or WITH and `comparisonStrategy` is SORTED_LINES.
 - Distractors plausible, distinct, concise, grammatically consistent, represent common misconceptions. No negative/ambiguous wording.
 - Correct answers not overly lengthy, must not mimic question-stem language.
 

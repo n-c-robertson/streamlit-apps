@@ -25,6 +25,7 @@ import graphql_queries
 import settings
 import prompts
 import difficulty
+import coding_dryrun
 from settings import (
     CODING_CATEGORY,
     CODING_LANGUAGE_OPTIONS,
@@ -1374,13 +1375,41 @@ def process_concept(sectionId, node, lesson, concept, difficulty_level, difficul
             if not details.get('starterCode'):
                 print(f"  Question {i+1}: REJECTED - CODING question missing 'starterCode'")
                 continue
-            # SQL requires an explicit DDL harness; other languages may omit
-            # testHarnessTemplate and let the API auto-generate a default.
+            # The candidate's reference implementation is required so we can
+            # dry-run it against the test cases locally and catch misconfigured
+            # harnesses / test cases before upload.
+            if not details.get('solutionCode') or not str(details.get('solutionCode')).strip():
+                print(f"  Question {i+1}: REJECTED - CODING question missing 'solutionCode'")
+                continue
+            # SQL requires an explicit DDL harness; other languages MUST NOT
+            # emit a testHarnessTemplate — the API auto-generates the harness
+            # (which calls solution(...)) and an LLM-emitted one is the source
+            # of the 'solution' variable-not-defined misconfig.
             if lang == "SQL":
                 harness = (details.get('testHarnessTemplate') or '').lstrip()
                 if not harness or not (harness.upper().startswith("CREATE") or harness.upper().startswith("WITH")):
                     print(f"  Question {i+1}: REJECTED - SQL CODING question needs a DDL testHarnessTemplate beginning with CREATE or WITH")
                     continue
+            else:
+                if details.get('testHarnessTemplate') and str(details.get('testHarnessTemplate')).strip():
+                    print(f"  Question {i+1}: WARN - stripping LLM-emitted testHarnessTemplate for {lang} (API auto-generates the harness)")
+                details['testHarnessTemplate'] = None
+            # Contract check + dry-run: verify solutionCode defines `solution`
+            # and that it passes every test case. A skipped dry-run (missing
+            # toolchain / unsupported signature) does NOT reject the question,
+            # but a failed contract or failing test case does.
+            dryrun = coding_dryrun.validate_and_run(details, test_cases)
+            if dryrun.get('contract_error'):
+                print(f"  Question {i+1}: REJECTED - {dryrun['contract_error']}")
+                continue
+            if not dryrun.get('passed'):
+                fail_summary = "; ".join(
+                    f"case {f['case_index']}: {f['reason']}" for f in dryrun.get('failures', [])
+                )
+                print(f"  Question {i+1}: REJECTED - solutionCode failed dry-run: {fail_summary}")
+                continue
+            if dryrun.get('skipped'):
+                print(f"  Question {i+1}: WARN - dry-run skipped ({dryrun.get('skip_reason')}); contract OK")
             # Coerce execution limits to int within API bounds; default if absent.
             details['timeLimitMs'] = _coerce_int_in_bounds(
                 details.get('timeLimitMs'), CODING_DEFAULT_TIME_LIMIT_MS, 100, 30000)

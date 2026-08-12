@@ -1032,7 +1032,11 @@ def process_question_group(question_tuple, group):
             if solution_code is not None and not (isinstance(solution_code, float) and pd.isna(solution_code)):
                 coding_details['solutionCode'] = str(solution_code)
             harness = row0.get('test_harness_template')
-            if harness is not None and not (isinstance(harness, float) and pd.isna(harness)) and str(harness).strip():
+            # Defense in depth: never send a testHarnessTemplate for non-SQL
+            # languages. The API auto-generates the harness (which calls
+            # solution(...)); an author/LLM-emitted one is the source of the
+            # 'solution' variable-not-defined misconfig. SQL keeps its DDL.
+            if str(language).upper() == "SQL" and harness is not None and not (isinstance(harness, float) and pd.isna(harness)) and str(harness).strip():
                 coding_details['testHarnessTemplate'] = str(harness)
             constraints = row0.get('coding_constraints')
             if constraints is not None and not (isinstance(constraints, float) and pd.isna(constraints)) and str(constraints).strip():
