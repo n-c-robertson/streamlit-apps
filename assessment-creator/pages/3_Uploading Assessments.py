@@ -948,6 +948,7 @@ def process_question_group(question_tuple, group):
     q_exception = None
     choice_results = []
     is_short_answer = False
+    is_coding = False
     
     try:
         
