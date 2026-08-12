@@ -176,16 +176,13 @@ CREATE_CODING_QUESTION_MUTATION = """
 def _normalize_category(category, group):
     """Coerce a question category to a valid UPPERCASE QuestionCategory enum.
 
-    Uses the canonical settings.normalize_category: if the value is already a
-    valid enum (case-insensitive) it is returned UPPERCASED; otherwise the
-    correct enum is inferred from the group's row structure (coding_language ->
-    CODING, rubric -> SHORT_ANSWER, >1 correct choice -> MULTIPLE_CHOICE, else
-    SINGLE_CHOICE) so a sloppy category label doesn't abort the upload. Only
-    raise if inference is impossible (no distinguishing columns at all).
+    Always goes through the canonical settings.normalize_category, where the
+    question's structure is AUTHORITATIVE: coding fields -> CODING and rubric
+    -> SHORT_ANSWER even if the CSV label is a valid-but-wrong enum (e.g.
+    SINGLE_CHOICE on a question that actually has codingDetails). This removes
+    the non-determinism where a valid label could override the real structure.
+    Only raise if the normalizer returns None (no structure to infer from).
     """
-    if isinstance(category, str) and category.strip().upper() in VALID_QUESTION_CATEGORIES:
-        return category.strip().upper()
-
     has_coding = False
     if 'coding_language' in group.columns:
         val = group['coding_language'].dropna()
@@ -202,21 +199,22 @@ def _normalize_category(category, group):
             correct_count = 0
     has_choices = correct_count is not None
 
-    inferred = settings.normalize_category(
+    normalized = settings.normalize_category(
         category,
         has_coding=has_coding,
         has_rubric=has_rubric,
         choices_correct_count=correct_count,
         has_choices=has_choices,
     )
-    if inferred is None:
+    if normalized is None:
         raise ValueError(
             f"Unrecognized question category {category!r} and could not infer it from the row structure "
             f"(no coding_language/rubric/choices columns). Must be one of {sorted(VALID_QUESTION_CATEGORIES)}. "
             "Fix the CSV 'category' column and re-upload."
         )
-    print(f"WARNING: Unrecognized category '{category}' -> inferred '{inferred}' from structure")
-    return inferred
+    if normalized != str(category).strip().upper():
+        print(f"WARNING: category '{category}' -> normalized '{normalized}' from structure")
+    return normalized
 
 def fetch_difficulty_levels():
     query = """

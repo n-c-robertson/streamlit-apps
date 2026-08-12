@@ -103,17 +103,29 @@ def infer_category(has_coding=False, has_rubric=False, choices_correct_count=Non
 def normalize_category(category, has_coding=False, has_rubric=False, choices_correct_count=None, has_choices=False):
     """Canonical normalizer: return a valid UPPERCASE QuestionCategory enum, or None.
 
-    This is the single source of truth for forcing categories back to enums:
-      1. If `category` is already a valid enum (case-insensitive), return it
-         UPPERCASED — so "single_choice", "Single_Choice" -> "SINGLE_CHOICE".
-      2. Otherwise infer the correct enum from the question's data structure.
-      3. Otherwise return None (caller must treat as a hard error).
+    LITERAL RULE (structure is authoritative, to remove non-determinism):
+      1. If the question carries coding fields (codingDetails + testCases) the
+         category is CODING — period, even if the label is a valid-but-wrong
+         enum like SINGLE_CHOICE.
+      2. Else if it carries a rubric, the category is SHORT_ANSWER.
+      3. Else if the label is a valid enum (case-insensitive), return it UPPERCASED.
+      4. Else infer from the choices structure (>1 correct -> MULTIPLE_CHOICE,
+         else SINGLE_CHOICE).
+      5. Else None (hard error — nothing to recover from).
 
     Always returns an uppercase enum string when it returns a string.
     """
+    if has_coding:
+        return CODING_CATEGORY
+    if has_rubric:
+        return "SHORT_ANSWER"
     if isinstance(category, str) and category.strip().upper() in VALID_QUESTION_CATEGORIES:
         return category.strip().upper()
-    return infer_category(has_coding, has_rubric, choices_correct_count, has_choices)
+    if has_choices or choices_correct_count is not None:
+        if choices_correct_count is not None and choices_correct_count > 1:
+            return "MULTIPLE_CHOICE"
+        return "SINGLE_CHOICE"
+    return None
 
 
 def normalize_question_category(question, choices=None):
