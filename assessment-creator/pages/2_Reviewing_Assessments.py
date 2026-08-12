@@ -67,6 +67,32 @@ def has_changes(original_question, edited_question, original_records, edited_cho
     
     return False
 
+def has_coding_changes(original_record, edited_question, edited_coding):
+    """Check if any changes were made to a CODING question's content or code fields."""
+    if (original_record.get('question_content') or '') != edited_question:
+        return True
+    field_map = {
+        'coding_language': 'coding_language',
+        'starter_code': 'starter_code',
+        'solution_code': 'solution_code',
+        'test_harness_template': 'test_harness_template',
+        'coding_constraints': 'coding_constraints',
+        'time_limit_ms': 'time_limit_ms',
+        'memory_limit_mb': 'memory_limit_mb',
+        'test_cases': 'test_cases',
+    }
+    for orig_key, edited_key in field_map.items():
+        orig_val = original_record.get(orig_key)
+        # Normalize test_cases for comparison (string vs parsed).
+        if edited_key == 'test_cases' and orig_val is not None and not isinstance(orig_val, str):
+            try:
+                orig_val = json.dumps(orig_val)
+            except Exception:
+                pass
+        if str(orig_val if orig_val is not None else '') != str(edited_coding.get(edited_key) if edited_coding.get(edited_key) is not None else ''):
+            return True
+    return False
+
 def display_question(question_data, question_index, total_questions):
     """Display a single question with its answer choices in a form"""
     st.markdown("---")
@@ -153,53 +179,141 @@ def display_question(question_data, question_index, total_questions):
             help="Edit the question text as needed"
         )
         
-        # Editable answer choices
+        # Editable answer choices (or CODING editor for code questions).
         records = question_data['records']
-        edited_choices = []
-        
-        for i, record in enumerate(records):
-            # Create label with correct answer indicator
-            choice_label = f"Choice {chr(65 + i)}:"
-            if record['choice_isCorrect']:
-                choice_label += " ✅ (Correct Answer)"
-            
-            # Editable choice content
-            edited_choice = st.text_area(
-                choice_label,
-                value=record['choice_content'],
-                key=f"choice_edit_{question_index}_{i}",
-                height=68,
-                help=f"Edit choice {chr(65 + i)} content" + (" (This is the correct answer)" if record['choice_isCorrect'] else "")
+        first_record = records[0] if records else {}
+        is_coding = (first_record.get('category') == 'CODING')
+
+        if is_coding:
+            # CODING questions have no choices — edit the code + test cases instead.
+            rec = first_record
+            current_lang = rec.get('coding_language') or ''
+            # Map stored enum (e.g. PYTHON) back to the UI label for the select.
+            lang_enum_to_label = settings.CODING_LANGUAGE_ENUM_TO_LABEL
+            lang_label = lang_enum_to_label.get(str(current_lang).upper(), current_lang)
+            edited_language = st.selectbox(
+                "Coding Language",
+                options=list(settings.CODING_LANGUAGE_OPTIONS.keys()),
+                index=list(settings.CODING_LANGUAGE_OPTIONS.keys()).index(lang_label)
+                    if lang_label in settings.CODING_LANGUAGE_OPTIONS else 0,
+                key=f"coding_lang_{question_index}",
+                help="Language the candidate's solution must run in."
             )
-            edited_choices.append({
-                'choice_content': edited_choice,
-                'choice_isCorrect': record['choice_isCorrect'],
-                'original_record': record
-            })
-        
-        # Show changes indicator
-        if has_changes(question_data['question_content'], edited_question, records, edited_choices):
-            st.info("📝 **Changes detected** - Your edits will be saved when you accept this question.")
-        
-        
+            edited_starter = st.text_area(
+                "Starter Code",
+                value=rec.get('starter_code') or '',
+                key=f"starter_code_{question_index}",
+                height=120,
+                help="Runnable skeleton with a solution signature and a pass/placeholder."
+            )
+            edited_solution = st.text_area(
+                "Solution Code (staff-only reference)",
+                value=rec.get('solution_code') or '',
+                key=f"solution_code_{question_index}",
+                height=120,
+                help="Correct reference implementation that passes every test case."
+            )
+            edited_harness = st.text_area(
+                "Test Harness Template (optional; required for SQL DDL)",
+                value=rec.get('test_harness_template') or '',
+                key=f"test_harness_{question_index}",
+                height=80,
+                help="DDL harness beginning with CREATE or WITH for SQL; blank for other languages."
+            )
+            edited_constraints = st.text_area(
+                "Constraints",
+                value=rec.get('coding_constraints') or '',
+                key=f"coding_constraints_{question_index}",
+                height=60,
+            )
+            col_t, col_m = st.columns(2)
+            with col_t:
+                edited_time = st.number_input(
+                    "Time Limit (ms)",
+                    value=int(rec.get('time_limit_ms')) if rec.get('time_limit_ms') not in (None, '', float('nan')) and not (isinstance(rec.get('time_limit_ms'), float) and pd.isna(rec.get('time_limit_ms'))) else settings.CODING_DEFAULT_TIME_LIMIT_MS,
+                    min_value=100, max_value=30000, step=100,
+                    key=f"time_limit_{question_index}",
+                )
+            with col_m:
+                edited_mem = st.number_input(
+                    "Memory Limit (MB)",
+                    value=int(rec.get('memory_limit_mb')) if rec.get('memory_limit_mb') not in (None, '', float('nan')) and not (isinstance(rec.get('memory_limit_mb'), float) and pd.isna(rec.get('memory_limit_mb'))) else settings.CODING_DEFAULT_MEMORY_LIMIT_MB,
+                    min_value=16, max_value=512, step=16,
+                    key=f"memory_limit_{question_index}",
+                )
+            edited_test_cases = st.text_area(
+                "Test Cases (JSON array)",
+                value=rec.get('test_cases') if isinstance(rec.get('test_cases'), str) else (json.dumps(rec.get('test_cases')) if rec.get('test_cases') is not None else '[]'),
+                key=f"test_cases_{question_index}",
+                height=140,
+                help="JSON array of {input, expectedOutput, comparisonStrategy, isExample, orderIndex}."
+            )
+
+            edited_coding = {
+                'coding_language': settings.CODING_LANGUAGE_OPTIONS.get(edited_language, edited_language),
+                'starter_code': edited_starter,
+                'solution_code': edited_solution,
+                'test_harness_template': edited_harness,
+                'coding_constraints': edited_constraints,
+                'time_limit_ms': int(edited_time),
+                'memory_limit_mb': int(edited_mem),
+                'test_cases': edited_test_cases,
+            }
+            edited_choices = []
+
+            if has_coding_changes(first_record, edited_question, edited_coding):
+                st.info("📝 **Changes detected** - Your edits will be saved when you accept this question.")
+        else:
+            edited_choices = []
+            for i, record in enumerate(records):
+                # Create label with correct answer indicator
+                choice_label = f"Choice {chr(65 + i)}:"
+                if record['choice_isCorrect']:
+                    choice_label += " ✅ (Correct Answer)"
+
+                # Editable choice content
+                edited_choice = st.text_area(
+                    choice_label,
+                    value=record['choice_content'],
+                    key=f"choice_edit_{question_index}_{i}",
+                    height=68,
+                    help=f"Edit choice {chr(65 + i)} content" + (" (This is the correct answer)" if record['choice_isCorrect'] else "")
+                )
+                edited_choices.append({
+                    'choice_content': edited_choice,
+                    'choice_isCorrect': record['choice_isCorrect'],
+                    'original_record': record
+                })
+
+            # Show changes indicator
+            if has_changes(question_data['question_content'], edited_question, records, edited_choices):
+                st.info("📝 **Changes detected** - Your edits will be saved when you accept this question.")
+
+
         # Return the form submission result with edited data
         if accept_submitted:
             return {
                 'action': 'accept',
                 'edited_question': edited_question,
-                'edited_choices': edited_choices
+                'edited_choices': edited_choices,
+                'edited_coding': edited_coding if is_coding else None,
+                'is_coding': is_coding,
             }
         elif reject_submitted:
             return {
                 'action': 'reject',
                 'edited_question': edited_question,
-                'edited_choices': edited_choices
+                'edited_choices': edited_choices,
+                'edited_coding': edited_coding if is_coding else None,
+                'is_coding': is_coding,
             }
         elif skip_submitted:
             return {
                 'action': 'skip',
                 'edited_question': edited_question,
-                'edited_choices': edited_choices
+                'edited_choices': edited_choices,
+                'edited_coding': edited_coding if is_coding else None,
+                'is_coding': is_coding,
             }
         else:
             return None
@@ -277,13 +391,28 @@ def main():
                 if result['action'] == 'accept':
                     # Update the question with edited content
                     current_question['question_content'] = result['edited_question']
-                    
-                    # Update the records with edited choices and question content
-                    for i, edited_choice in enumerate(result['edited_choices']):
-                        if i < len(current_question['records']):
-                            current_question['records'][i]['choice_content'] = edited_choice['choice_content']
-                            # Also update the question_content in each record
-                            current_question['records'][i]['question_content'] = result['edited_question']
+
+                    if result.get('is_coding'):
+                        # CODING: write edited code fields back into the single record.
+                        edited_coding = result.get('edited_coding') or {}
+                        if current_question['records']:
+                            rec = current_question['records'][0]
+                            rec['question_content'] = result['edited_question']
+                            rec['coding_language'] = edited_coding.get('coding_language')
+                            rec['starter_code'] = edited_coding.get('starter_code')
+                            rec['solution_code'] = edited_coding.get('solution_code')
+                            rec['test_harness_template'] = edited_coding.get('test_harness_template')
+                            rec['coding_constraints'] = edited_coding.get('coding_constraints')
+                            rec['time_limit_ms'] = edited_coding.get('time_limit_ms')
+                            rec['memory_limit_mb'] = edited_coding.get('memory_limit_mb')
+                            rec['test_cases'] = edited_coding.get('test_cases')
+                    else:
+                        # Update the records with edited choices and question content
+                        for i, edited_choice in enumerate(result['edited_choices']):
+                            if i < len(current_question['records']):
+                                current_question['records'][i]['choice_content'] = edited_choice['choice_content']
+                                # Also update the question_content in each record
+                                current_question['records'][i]['question_content'] = result['edited_question']
                     
                     current_question['status'] = 'accepted'
                     if current_question not in st.session_state.accepted_questions:

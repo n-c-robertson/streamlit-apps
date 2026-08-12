@@ -39,13 +39,19 @@ def generate_slug(ASSESSMENT_TITLE):
 # lowercase/wrong status values (e.g. "active", "published"), which the API
 # rejects with GRAPHQL_VALIDATION_FAILED. These helpers normalize incoming
 # values back to the accepted enums before we submit.
-VALID_QUESTION_CATEGORIES = {"SINGLE_CHOICE", "MULTIPLE_CHOICE", "SHORT_ANSWER"}
+VALID_QUESTION_CATEGORIES = {"SINGLE_CHOICE", "MULTIPLE_CHOICE", "SHORT_ANSWER", "CODING"}
 VALID_STATUSES = {"ACTIVE"}
 
 # ponytail: SHORT_ANSWER has no choices; rubric JSON shape per
 # schema/grading.graphqls (RubricInput). Stored as JSON string in the CSV
 # `rubric` column, mirroring the `source` column pattern.
 RUBRIC_REQUIRED_FOR = {"SHORT_ANSWER"}
+
+# CODING questions are created via a dedicated `createCodingQuestion`
+# mutation (no `category` field — it is implicitly CODING) and carry
+# `codingDetails` + `testCases` instead of choices. Stored as JSON strings
+# in the CSV `test_cases` column plus the coding_* columns.
+CODING_REQUIRED_FOR = {"CODING"}
 
 
 def _validate_rubric(rubric):
@@ -104,6 +110,65 @@ def _normalize_status(value, default="ACTIVE"):
     if v in {"PUBLISHED", "DRAFT"}:
         return "ACTIVE"
     return default
+
+
+def _coerce_int(value, default, lo, hi):
+    """Coerce a CODING execution limit to an int within [lo, hi], defaulting if absent/invalid."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return default
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(lo, min(hi, v))
+
+
+def _parse_json_list(value):
+    """Parse a CSV cell holding a JSON array (string or list) into a list, or []."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return []
+        try:
+            parsed = json.loads(s)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            try:
+                parsed = ast.literal_eval(s)
+                return parsed if isinstance(parsed, list) else []
+            except Exception:
+                return []
+    return []
+
+
+# GraphQL mutations. CODING uses a dedicated `createCodingQuestion` mutation
+# with NO `category` field (category is implicitly CODING) and required
+# `codingDetails` + `testCases` inputs (see schema/coding.graphqls).
+CREATE_QUESTION_MUTATION = """
+    mutation createQuestion($input: CreateQuestionInput!) {
+      createQuestion(input: $input) {
+        id
+        content
+        category
+        status
+      }
+    }
+"""
+
+CREATE_CODING_QUESTION_MUTATION = """
+    mutation createCodingQuestion($input: CreateCodingQuestionInput!) {
+      createCodingQuestion(input: $input) {
+        id
+        category
+        content
+        status
+      }
+    }
+"""
 
 def _normalize_category(category, group):
     """Coerce a question category to a valid QuestionCategory enum.
@@ -923,18 +988,7 @@ def process_question_group(question_tuple, group):
         if not section_id or section_id == '':
             print(f"ERROR: Empty sectionId in question tuple - this will cause failure")
             raise Exception("Empty sectionId in question tuple")
-        
-        create_question_mutation = """
-        mutation createQuestion($input: CreateQuestionInput!) {
-          createQuestion(input: $input) {
-            id
-            content
-            category
-            status
-          }
-        }
-        """
-        
+
         # Parse source data
         try:
             source_data = ast.literal_eval(source_str) if source_str else {}
@@ -947,28 +1001,99 @@ def process_question_group(question_tuple, group):
         # read it from the first row rather than extending the groupby tuple.
         rubric_str = group['rubric'].iloc[0] if 'rubric' in group.columns else None
         is_short_answer = (category == "SHORT_ANSWER")
+        is_coding = (category == "CODING")
 
-        question_input = {
-            'sectionId': section_id,
-            'difficultyLevelId': difficulty_level_id,
-            'skillId': skill_id,
-            'category': category,
-            'status': status,
-            'content': content,
-            'source': source_data,
-            'sourceCategory': 'UDACITY'
-        }
+        if is_coding:
+            # CODING uses a dedicated createCodingQuestion mutation (no
+            # `category` field — it is implicitly CODING) with codingDetails
+            # + testCases instead of choices. All coding fields are
+            # question-level (constant across the group's single row).
+            row0 = group.iloc[0]
+            language = str(row0.get('coding_language') or '').strip().upper()
+            if language not in settings.CODING_LANGUAGE_OPTIONS.values():
+                # Accept a UI label too (e.g. "Python") by normalizing.
+                language = settings.CODING_LANGUAGE_OPTIONS.get(
+                    str(row0.get('coding_language') or '').strip().title(), language
+                )
+            if language not in settings.CODING_LANGUAGE_OPTIONS.values():
+                raise Exception(f"CODING question has unsupported language '{row0.get('coding_language')}'")
 
-        if is_short_answer:
-            rubric = _parse_rubric(rubric_str)
-            if rubric is None:
-                raise Exception("SHORT_ANSWER questions require a rubric (CSV 'rubric' column is empty)")
-            rubric, rerr = _validate_rubric(rubric)
-            if rerr:
-                raise Exception(f"Invalid rubric: {rerr}")
-            question_input['rubric'] = rubric
-            print(f"SHORT_ANSWER: rubric with {len(rubric.get('criteria', []))} criteria, threshold={rubric.get('passingThreshold')}")
-        # Non-SHORT_ANSWER: never send rubric (resolver forbids it).
+            starter_code = row0.get('starter_code') or ''
+            if starter_code in (None, '') or (isinstance(starter_code, float) and pd.isna(starter_code)):
+                raise Exception("CODING questions require starter_code")
+            coding_details = {
+                'language': language,
+                'starterCode': str(starter_code),
+                'timeLimitMs': _coerce_int(row0.get('time_limit_ms'), settings.CODING_DEFAULT_TIME_LIMIT_MS, 100, 30000),
+                'memoryLimitMb': _coerce_int(row0.get('memory_limit_mb'), settings.CODING_DEFAULT_MEMORY_LIMIT_MB, 16, 512),
+            }
+            solution_code = row0.get('solution_code')
+            if solution_code is not None and not (isinstance(solution_code, float) and pd.isna(solution_code)):
+                coding_details['solutionCode'] = str(solution_code)
+            harness = row0.get('test_harness_template')
+            if harness is not None and not (isinstance(harness, float) and pd.isna(harness)) and str(harness).strip():
+                coding_details['testHarnessTemplate'] = str(harness)
+            constraints = row0.get('coding_constraints')
+            if constraints is not None and not (isinstance(constraints, float) and pd.isna(constraints)) and str(constraints).strip():
+                coding_details['constraints'] = str(constraints)
+
+            test_cases = _parse_json_list(row0.get('test_cases'))
+            if not test_cases:
+                raise Exception("CODING questions require at least one test case (CSV 'test_cases' column is empty)")
+            # Coerce / default per-test-case fields to satisfy the API.
+            normalized_cases = []
+            for idx, tc in enumerate(test_cases):
+                if not isinstance(tc, dict):
+                    continue
+                comp = (tc.get('comparisonStrategy') or '').upper()
+                if not comp:
+                    comp = "SORTED_LINES" if language == "SQL" else "EXACT"
+                normalized_cases.append({
+                    'input': tc.get('input'),
+                    'expectedOutput': tc.get('expectedOutput'),
+                    'comparisonStrategy': comp,
+                    'isExample': bool(tc.get('isExample', False)),
+                    'orderIndex': int(tc.get('orderIndex', idx)),
+                })
+            if not normalized_cases:
+                raise Exception("CODING questions require at least one valid test case")
+
+            question_input = {
+                'sectionId': section_id,
+                'difficultyLevelId': difficulty_level_id,
+                'skillId': skill_id,
+                'status': status,
+                'content': content,
+                'source': source_data,
+                'sourceCategory': 'UDACITY',
+                'codingDetails': coding_details,
+                'testCases': normalized_cases,
+            }
+            create_question_mutation = CREATE_CODING_QUESTION_MUTATION
+            print(f"CODING: language={language}, {len(normalized_cases)} test cases")
+        else:
+            question_input = {
+                'sectionId': section_id,
+                'difficultyLevelId': difficulty_level_id,
+                'skillId': skill_id,
+                'category': category,
+                'status': status,
+                'content': content,
+                'source': source_data,
+                'sourceCategory': 'UDACITY'
+            }
+
+            if is_short_answer:
+                rubric = _parse_rubric(rubric_str)
+                if rubric is None:
+                    raise Exception("SHORT_ANSWER questions require a rubric (CSV 'rubric' column is empty)")
+                rubric, rerr = _validate_rubric(rubric)
+                if rerr:
+                    raise Exception(f"Invalid rubric: {rerr}")
+                question_input['rubric'] = rubric
+                print(f"SHORT_ANSWER: rubric with {len(rubric.get('criteria', []))} criteria, threshold={rubric.get('passingThreshold')}")
+            # Non-SHORT_ANSWER: never send rubric (resolver forbids it).
+            create_question_mutation = CREATE_QUESTION_MUTATION
 
         question_variables = {"input": question_input}
         
@@ -999,9 +1124,11 @@ def process_question_group(question_tuple, group):
         # data['createQuestion']['id'] directly, which crashed with a cryptic
         # "'NoneType' object is not subscriptable" that hid the real validation
         # message. Surface the actual GraphQL error instead.
+        # CODING questions come back under the `createCodingQuestion` key.
+        response_key = "createCodingQuestion" if is_coding else "createQuestion"
         errors = response_json.get("errors")
         data = response_json.get("data")
-        create_question = data.get("createQuestion") if isinstance(data, dict) else None
+        create_question = data.get(response_key) if isinstance(data, dict) else None
 
         if errors or create_question is None:
             if errors:
@@ -1010,7 +1137,7 @@ def process_question_group(question_tuple, group):
                 except Exception:
                     msg = str(errors)
             else:
-                msg = "createQuestion was null with no GraphQL errors"
+                msg = f"{response_key} was null with no GraphQL errors"
             print(f"ERROR: Question mutation rejected by API: {msg}")
             print(f"ERROR: Request payload: {question_payload}")
             raise Exception(f"Question mutation rejected by API (status {r.status_code}): {msg}")
@@ -1026,8 +1153,9 @@ def process_question_group(question_tuple, group):
         print(f"Full traceback:")
         traceback.print_exc()
     
-    # Now, process choices for this question. SHORT_ANSWER has no choices — skip.
-    if question_id is not None and not is_short_answer:
+    # Now, process choices for this question. SHORT_ANSWER and CODING have no
+    # choices — skip.
+    if question_id is not None and not is_short_answer and not is_coding:
         with concurrent.futures.ThreadPoolExecutor() as choice_executor:
             futures = {
                 choice_executor.submit(process_choice, question_id, row): idx 
@@ -1040,8 +1168,8 @@ def process_question_group(question_tuple, group):
                 except Exception as e:
                     print(f"ERROR: Choice processing failed: {e}")
                     choice_results.append((None, None, e))
-    elif question_id is not None and is_short_answer:
-        print(f"SHORT_ANSWER question {question_id}: skipping choice creation (no choices)")
+    elif question_id is not None and (is_short_answer or is_coding):
+        print(f"{category} question {question_id}: skipping choice creation (no choices)")
     else:
         print(f"Skipping choice processing due to question creation failure")
     

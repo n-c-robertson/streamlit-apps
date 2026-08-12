@@ -25,10 +25,33 @@ import graphql_queries
 import settings
 import prompts
 import difficulty
+from settings import (
+    CODING_CATEGORY,
+    CODING_LANGUAGE_OPTIONS,
+    CODING_LANGUAGE_ENUM_TO_LABEL,
+    CODING_DEFAULT_TIME_LIMIT_MS,
+    CODING_DEFAULT_MEMORY_LIMIT_MB,
+    CODING_MIN_TEST_CASES,
+)
 
 #========================================
 # FUNCTIONS
 #========================================
+
+def _coerce_int_in_bounds(value, default, lo, hi):
+    """Coerce a CODING execution limit to an int within [lo, hi], defaulting if absent/invalid."""
+    if value is None:
+        return default
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        return default
+    if v < lo:
+        return lo
+    if v > hi:
+        return hi
+    return v
+
 
 def format_exception_details(e):
     """
@@ -1156,7 +1179,7 @@ def get_qc_id(qc):
     unique_str += qc['question'].get('difficultyLevelId', '')
     return hashlib.md5(unique_str.encode('utf-8')).hexdigest()
 
-def process_concept(sectionId, node, lesson, concept, difficulty_level, difficulty_level_uri, skills, learning_objectives, number_questions_per_concept, question_types, customized_difficulty, customized_prompt_instructions, assessment_type="placement", prompt_fn=None):
+def process_concept(sectionId, node, lesson, concept, difficulty_level, difficulty_level_uri, skills, learning_objectives, number_questions_per_concept, question_types, customized_difficulty, customized_prompt_instructions, assessment_type="placement", prompt_fn=None, coding_languages=None):
     # Build atom content from concept atoms.
     atom_content = ""
     quiz_atoms = []
@@ -1250,6 +1273,7 @@ def process_concept(sectionId, node, lesson, concept, difficulty_level, difficul
             content,
             customized_difficulty,
             customized_prompt_instructions,
+            coding_languages=coding_languages,
         )
     elif assessment_type.lower() == "readiness":
         prompt_messages = prompts.get_readiness_assessment_questions_prompt(
@@ -1261,7 +1285,8 @@ def process_concept(sectionId, node, lesson, concept, difficulty_level, difficul
             content,
             customized_difficulty,
             customized_prompt_instructions,
-            difficulty_enum=difficulty_enum
+            difficulty_enum=difficulty_enum,
+            coding_languages=coding_languages,
         )
     else:
         # Default to placement assessment
@@ -1274,7 +1299,8 @@ def process_concept(sectionId, node, lesson, concept, difficulty_level, difficul
             content,
             customized_difficulty,
             customized_prompt_instructions,
-            difficulty_enum=difficulty_enum
+            difficulty_enum=difficulty_enum,
+            coding_languages=coding_languages,
         )
     
     # Use context management for OpenAI API call
@@ -1317,17 +1343,52 @@ def process_concept(sectionId, node, lesson, concept, difficulty_level, difficul
         if 'question' not in qc or 'choices' not in qc:
             print(f"  Question {i+1}: INVALID - missing 'question' or 'choices' key")
             continue
-            
+
         question_skill = qc['question'].get('skillId', '')
-        
+        question_category = (qc['question'].get('category') or '').upper()
+
         print(f"  Question {i+1}: skillId='{question_skill}' (Expected one of: {skills})")
-        
+
         if question_skill not in skills:
             print(f"  Question {i+1}: REJECTED - skillId '{question_skill}' not in expected skills {skills}")
             continue
         else:
             print(f"  Question {i+1}: ACCEPTED - skillId '{question_skill}' matches expected skills")
-            
+
+        # CODING-specific shape validation. CODING questions carry
+        # codingDetails + testCases instead of choices; reject malformed ones
+        # so they never reach the upload (which would 400 the whole mutation).
+        if question_category == CODING_CATEGORY:
+            details = qc['question'].get('codingDetails')
+            test_cases = qc['question'].get('testCases')
+            if not isinstance(details, dict):
+                print(f"  Question {i+1}: REJECTED - CODING question missing 'codingDetails' object")
+                continue
+            if not isinstance(test_cases, list) or len(test_cases) < CODING_MIN_TEST_CASES:
+                print(f"  Question {i+1}: REJECTED - CODING question needs >= {CODING_MIN_TEST_CASES} test cases")
+                continue
+            lang = (details.get('language') or '').upper()
+            if lang not in CODING_LANGUAGE_OPTIONS.values():
+                print(f"  Question {i+1}: REJECTED - CODING language '{lang}' not in {list(CODING_LANGUAGE_OPTIONS.values())}")
+                continue
+            if not details.get('starterCode'):
+                print(f"  Question {i+1}: REJECTED - CODING question missing 'starterCode'")
+                continue
+            # SQL requires an explicit DDL harness; other languages may omit
+            # testHarnessTemplate and let the API auto-generate a default.
+            if lang == "SQL":
+                harness = (details.get('testHarnessTemplate') or '').lstrip()
+                if not harness or not (harness.upper().startswith("CREATE") or harness.upper().startswith("WITH")):
+                    print(f"  Question {i+1}: REJECTED - SQL CODING question needs a DDL testHarnessTemplate beginning with CREATE or WITH")
+                    continue
+            # Coerce execution limits to int within API bounds; default if absent.
+            details['timeLimitMs'] = _coerce_int_in_bounds(
+                details.get('timeLimitMs'), CODING_DEFAULT_TIME_LIMIT_MS, 100, 30000)
+            details['memoryLimitMb'] = _coerce_int_in_bounds(
+                details.get('memoryLimitMb'), CODING_DEFAULT_MEMORY_LIMIT_MB, 16, 512)
+            # Ensure choices is an empty array for CODING (upload expects []).
+            qc['choices'] = []
+
         valid_questions.append(qc)
     
     print(f"Valid questions after filtering: {len(valid_questions)} out of {len(chat_completion.get('questions_choices', []))}")
@@ -1396,7 +1457,7 @@ def process_concept(sectionId, node, lesson, concept, difficulty_level, difficul
     return valid_questions
 
 
-def process_concepts(section_content_definitions, number_questions_per_concept, question_types, customized_difficulty, customized_prompt_instructions, assessment_type="placement"):
+def process_concepts(section_content_definitions, number_questions_per_concept, question_types, customized_difficulty, customized_prompt_instructions, assessment_type="placement", coding_languages=None):
     
     for section in section_content_definitions:
         section['questions_choices'] = []
@@ -1503,7 +1564,7 @@ def process_concepts(section_content_definitions, number_questions_per_concept, 
                                     node, node, concept,  # For lesson nodes, pass node as both node and lesson
                                     difficulty_level, difficulty_level_uri, skills, learning_objectives,
                                     number_questions_per_concept, question_types, customized_difficulty, customized_prompt_instructions,
-                                    assessment_type
+                                    assessment_type, None, coding_languages
                                 )
                             )
                     else:
@@ -1519,7 +1580,7 @@ def process_concepts(section_content_definitions, number_questions_per_concept, 
                                             node, lesson, concept,
                                             difficulty_level, difficulty_level_uri, skills, learning_objectives,
                                             number_questions_per_concept, question_types, customized_difficulty, customized_prompt_instructions,
-                                            assessment_type
+                                            assessment_type, None, coding_languages
                                         )
                                     )
 
@@ -1639,7 +1700,7 @@ def process_concepts(section_content_definitions, number_questions_per_concept, 
                                         key, node, lesson, concept,
                                         difficulty_level, difficulty_level_uri, skills, learning_objectives,
                                         number_questions_per_concept, question_types, customized_difficulty, customized_prompt_instructions,
-                                        assessment_type
+                                        assessment_type, None, coding_languages
                                     )
                                 )
 
@@ -1808,10 +1869,13 @@ def json_to_dataframe(section_content_definitions):
                 print(f"  WARNING: No URI mapping found for skill '{question_skill_name}'")
 
             # ponytail: SHORT_ANSWER has no choices — emit one row with empty
-            # choice fields and the rubric. Other categories emit one row per
-            # choice as before.
+            # choice fields and the rubric. CODING also has no choices — emit one
+            # row with empty choice fields plus the coding_* columns and test_cases
+            # JSON. Other categories emit one row per choice as before.
             rubric = question.get('rubric')
             if not choices:
+                coding_details = question.get('codingDetails') if (question.get('category') or '').upper() == CODING_CATEGORY else None
+                test_cases = question.get('testCases') if (question.get('category') or '').upper() == CODING_CATEGORY else None
                 row = {
                     'sectionId': question.get('sectionId'),
                     'difficultyLevelId': question.get('difficultyLevelId'),
@@ -1824,6 +1888,14 @@ def json_to_dataframe(section_content_definitions):
                     'sourceCategory': question.get('sourceCategory'),
                     'source': question.get('source'),
                     'rubric': rubric,
+                    'coding_language': (coding_details or {}).get('language'),
+                    'starter_code': (coding_details or {}).get('starterCode'),
+                    'solution_code': (coding_details or {}).get('solutionCode'),
+                    'test_harness_template': (coding_details or {}).get('testHarnessTemplate'),
+                    'coding_constraints': (coding_details or {}).get('constraints'),
+                    'time_limit_ms': (coding_details or {}).get('timeLimitMs'),
+                    'memory_limit_mb': (coding_details or {}).get('memoryLimitMb'),
+                    'test_cases': json.dumps(test_cases) if test_cases is not None else None,
                     'choice_status': None,
                     'choice_content': None,
                     'choice_isCorrect': None,
@@ -1850,6 +1922,14 @@ def json_to_dataframe(section_content_definitions):
                     'sourceCategory': question.get('sourceCategory'),
                     'source': question.get('source'),
                     'rubric': rubric,
+                    'coding_language': None,
+                    'starter_code': None,
+                    'solution_code': None,
+                    'test_harness_template': None,
+                    'coding_constraints': None,
+                    'time_limit_ms': None,
+                    'memory_limit_mb': None,
+                    'test_cases': None,
                     'choice_status': choice.get('status'),
                     'choice_content': choice.get('content'),
                     'choice_isCorrect': choice.get('isCorrect'),
@@ -2133,8 +2213,9 @@ def convert_questions_to_case_studies(
     unique_questions_df = df.groupby(question_col).first().reset_index()
 
     # ponytail: case study conversion produces choice-based questions; skip
-    # SHORT_ANSWER (rubric-graded, no choices) so they're preserved as-is.
-    unique_questions_df = unique_questions_df[unique_questions_df['category'] != 'SHORT_ANSWER']
+    # SHORT_ANSWER (rubric-graded, no choices) and CODING (code-graded, no
+    # choices) so they're preserved as-is.
+    unique_questions_df = unique_questions_df[~unique_questions_df['category'].isin(['SHORT_ANSWER', CODING_CATEGORY])]
     initial_unique_questions = len(unique_questions_df)
     
     # Calculate how many questions to convert
@@ -2330,135 +2411,6 @@ def filter_questions_by_evaluation(
     
     return filtered_df, evaluation_stats
 
-def convert_questions_to_code_format_based_on_metadata(
-    section_content_definitions,
-    conversion_percentage: float = 0.30,
-    customized_prompt_instructions: str = ""
-) -> dict:
-    """
-    Convert questions to include code markdown based on hasCodingContent metadata.
-    
-    Parameters:
-        section_content_definitions: The processed content definitions with questions
-        conversion_percentage: Percentage of coding questions to convert (default 30%)
-        customized_prompt_instructions: Additional instructions for the conversion
-    
-    Returns:
-        dict: Conversion statistics
-    """
-    # Collect all questions with coding content metadata
-    all_questions = []
-    coding_questions = []
-    
-    for section in section_content_definitions:
-        for qc in section.get('questions_choices', []):
-            all_questions.append(qc)
-            if qc['question'].get('hasCodingContent', False):
-                coding_questions.append(qc)
-    
-    total_questions = len(all_questions)
-    total_coding_questions = len(coding_questions)
-    
-    # If no questions are coding marked, skip this step
-    if total_coding_questions == 0:
-        return {
-            "converted_questions": 0,
-            "total_questions": total_questions,
-            "total_coding_questions": 0,
-            "conversion_percentage": 0,
-            "reason": "No questions with coding content found"
-        }
-    
-    # Calculate how many questions to convert
-    target_conversion_count = int(total_questions * conversion_percentage)
-    
-    # If less than 30% of questions are coding marked, get all of them
-    if total_coding_questions <= target_conversion_count:
-        questions_to_convert = coding_questions
-        actual_conversion_count = total_coding_questions
-    else:
-        # Sample 30% from coding questions
-        questions_to_convert = random.sample(coding_questions, target_conversion_count)
-        actual_conversion_count = target_conversion_count
-    
-    converted_count = 0
-    failed_conversions = 0
-    
-    # Convert selected questions to include code markdown
-    for qc in questions_to_convert:
-        try:
-            # Prepare the question data for conversion
-            question_data = {
-                "question": qc['question'],
-                "choices": qc['choices']
-            }
-            
-            # Convert to JSON string
-            questions_json = json.dumps({"questions_choices": [question_data]}, ensure_ascii=False)
-            
-            # Get the conversion prompt
-            prompt_messages = prompts.get_code_conversion_prompt(
-                qc['question']['skillId'],
-                questions_json,
-                qc['question'].get('difficultyLevelId', ''),
-                [qc['question']['skillId']],  # skills
-                "",  # learning_objectives (not needed for conversion)
-                "",  # question_types (not needed for conversion)
-                "",  # content (not needed for conversion)
-                "No Change",  # customized_difficulty
-                customized_prompt_instructions
-            )
-            
-            # Make API call using the existing client from settings
-            response = settings.openai_client.chat.completions.create(
-                model=settings.CHAT_COMPLETIONS_MODEL,
-                messages=prompt_messages,
-                #temperature=0.3, # not supported in gpt 5.
-                max_tokens=4000
-            )
-            
-            # Parse the response
-            response_content = response.choices[0].message.content.strip()
-            
-            # Try to extract JSON from the response
-            try:
-                # Look for JSON in the response
-                json_match = re.search(r'\{.*\}', response_content, re.DOTALL)
-                if json_match:
-                    converted_data = json.loads(json_match.group())
-                    
-                    if "questions_choices" in converted_data and len(converted_data["questions_choices"]) > 0:
-                        converted_qc = converted_data["questions_choices"][0]
-                        
-                        # Update the question content and choices
-                        qc['question']['content'] = converted_qc["question"]["content"]
-                        qc['choices'] = converted_qc["choices"]
-                        
-                        converted_count += 1
-                    else:
-                        failed_conversions += 1
-                else:
-                    failed_conversions += 1
-                    
-            except json.JSONDecodeError:
-                # If conversion fails, keep the original question
-                failed_conversions += 1
-                continue
-                
-        except Exception:
-            # If conversion fails, keep the original question
-            failed_conversions += 1
-            continue
-    
-    return {
-        "converted_questions": converted_count,
-        "failed_conversions": failed_conversions,
-        "total_questions": total_questions,
-        "total_coding_questions": total_coding_questions,
-        "conversion_percentage": (converted_count / total_questions * 100) if total_questions > 0 else 0,
-        "reason": f"Converted {converted_count} out of {actual_conversion_count} selected questions"
-    }
-
 def tune_distractors(section_content_definitions, tuning_percentage=0.20):
     """
     Tune distractors for a percentage of questions to make them more challenging.
@@ -2497,8 +2449,10 @@ def tune_distractors(section_content_definitions, tuning_percentage=0.20):
     
     # Tune selected questions
     for qc in questions_to_tune:
-        # ponytail: distractor tuning only applies to choice-based questions.
-        if qc.get('question', {}).get('category') == 'SHORT_ANSWER':
+        # ponytail: distractor tuning only applies to choice-based questions;
+        # skip SHORT_ANSWER (rubric) and CODING (code/test cases), which have
+        # no choices.
+        if qc.get('question', {}).get('category') in ('SHORT_ANSWER', CODING_CATEGORY):
             continue
         try:
             # Prepare the question data for tuning
@@ -2636,7 +2590,7 @@ def run_post_pipeline(
         "Deduplicating questions...",
         "Filtering content-specific questions...",
         "Converting 15 percent of questions to case studies..." if include_case_study else "Skipping case study conversion (disabled)...",
-        "Converting 30 percent of coding questions to include code markdown..." if include_coding else "Skipping coding question conversion (disabled)...",
+        "Skipping code-markdown conversion (removed; use CODING question type)...",
         "Tuning distractors for 20 percent of questions...",
         "Selecting best questions (if limit specified)...",
         "Finalizing results...",
@@ -2712,6 +2666,8 @@ def run_post_pipeline(
             'sectionId', 'difficultyLevelId', 'difficultyLevelUri', 'skillId', 'skillUri',
             'category', 'question_status', 'question_content', 'sourceCategory', 'source',
             'rubric',
+            'coding_language', 'starter_code', 'solution_code', 'test_harness_template',
+            'coding_constraints', 'time_limit_ms', 'memory_limit_mb', 'test_cases',
             'choice_status', 'choice_content', 'choice_isCorrect', 'choice_orderIndex',
             'questionEvaluation', 'relevanceAndClarity', 'questionTypeDiversity',
             'choiceQuality', 'generalAdherence'
@@ -2831,29 +2787,22 @@ def run_post_pipeline(
 
     i += 1
     update_progress(i)
-    if include_coding:
-        questions_choices_df, code_conversion_stats = convert_questions_to_code_format_dataframe(
-            questions_choices_df,
-            conversion_percentage=0.30,
-            customized_prompt_instructions=CUSTOMIZED_PROMPT_INSTRUCTIONS
-        )
-        debug_outputs['convert_questions_to_code_format'] = {
-            'output': f"Converted {code_conversion_stats.get('converted_questions', 0)} questions to code format",
-            'type': 'DataFrame',
-            'code_conversion_stats': code_conversion_stats
-        }
-    else:
-        code_conversion_stats = {
-            'converted_questions': 0,
-            'total_coding_questions': 0,
-            'skipped': True,
-            'reason': 'Coding question conversion disabled via Advanced Settings toggle'
-        }
-        debug_outputs['convert_questions_to_code_format'] = {
-            'output': 'Skipped - coding question conversion disabled via Advanced Settings toggle',
-            'type': 'skipped',
-            'code_conversion_stats': code_conversion_stats
-        }
+    # Code-markdown conversion has been removed: the CODING question type now
+    # produces real coding questions (starterCode/solutionCode/testCases) via
+    # the generation prompt, so reformatting choice questions with code fences
+    # is no longer needed. Keep the step slot as a no-op so the progress-bar
+    # step count is unchanged.
+    code_conversion_stats = {
+        'converted_questions': 0,
+        'total_coding_questions': 0,
+        'skipped': True,
+        'reason': 'Code-markdown conversion removed; use the CODING question type instead'
+    }
+    debug_outputs['convert_questions_to_code_format'] = {
+        'output': 'Skipped - code-markdown conversion removed; use the CODING question type',
+        'type': 'skipped',
+        'code_conversion_stats': code_conversion_stats
+    }
     question_counts.append(("After Code Format Conversion", questions_choices_df['question_content'].nunique(), len(questions_choices_df)))
     category_counts.append(("After Code Format Conversion", _category_counts_from_df(questions_choices_df)))
 
@@ -2941,6 +2890,7 @@ def generate_assessments(
     progress_text=None,
     include_case_study=True,
     include_coding=True,
+    coding_languages=None,
 ):
     # Used to be defaulted to 1, now set to up to 5 to allow work around for Solutions Architects.
     NUMBER_QUESTIONS_PER_CONCEPT = NUMBER_QUESTIONS_PER_CONCEPT
@@ -2964,11 +2914,7 @@ def generate_assessments(
             if include_case_study
             else "Skipping case study conversion (disabled)..."
         ),
-        (
-            "Converting 30 percent of coding questions to include code markdown..."
-            if include_coding
-            else "Skipping coding question conversion (disabled)..."
-        ),
+        "Skipping code-markdown conversion (removed; use CODING question type)...",
         "Tuning distractors for 20 percent of questions...",
         "Selecting best questions (if limit specified)...",
         "Finalizing results..."
@@ -3047,7 +2993,7 @@ def generate_assessments(
 
     step += 1
     update_progress(step)
-    section_content_definitions = process_concepts(section_content_definitions, NUMBER_QUESTIONS_PER_CONCEPT, QUESTION_TYPES, CUSTOMIZED_DIFFICULTY, CUSTOMIZED_PROMPT_INSTRUCTIONS, ASSESSMENT_TYPE)
+    section_content_definitions = process_concepts(section_content_definitions, NUMBER_QUESTIONS_PER_CONCEPT, QUESTION_TYPES, CUSTOMIZED_DIFFICULTY, CUSTOMIZED_PROMPT_INSTRUCTIONS, ASSESSMENT_TYPE, coding_languages=coding_languages)
     debug_outputs['process_concepts'] = {
         'output': f"Generated questions for {len(section_content_definitions)} sections",
         'type': 'list',
@@ -3220,175 +3166,6 @@ def select_best_question_with_ai(skill, candidate_questions, candidate_categorie
     except json.JSONDecodeError:
         return candidate_questions[0]  # Fallback to first candidate
 
-def convert_questions_to_code_format_dataframe(
-    df: pd.DataFrame,
-    conversion_percentage: float = 0.30,
-    customized_prompt_instructions: str = ""
-) -> tuple[pd.DataFrame, dict]:
-    """
-    Convert questions to include code markdown based on coding content detection in the dataframe.
-    Works directly on the filtered dataframe to preserve filtering results.
-    
-    Parameters:
-        df: The filtered dataframe containing questions and choices
-        conversion_percentage: Percentage of coding questions to convert (default 30%)
-        customized_prompt_instructions: Additional instructions for the conversion
-    
-    Returns:
-        tuple: (converted_dataframe, conversion_stats)
-    """
-    # Get unique questions for analysis
-    unique_questions_df = df.groupby('question_content').first().reset_index()
-
-    # ponytail: code-markdown conversion produces choice-based questions and
-    # its prompt only supports SINGLE_CHOICE/MULTIPLE_CHOICE. Skip
-    # SHORT_ANSWER (rubric-graded, no choices) so they're preserved as-is
-    # instead of being rewritten into multiple-choice stems while still
-    # tagged SHORT_ANSWER.
-    unique_questions_df = unique_questions_df[unique_questions_df['category'] != 'SHORT_ANSWER']
-
-    # Detect coding content in questions (simple heuristic)
-    coding_questions = []
-    for _, row in unique_questions_df.iterrows():
-        question_content = row['question_content']
-        if detect_coding_content(question_content):
-            coding_questions.append(question_content)
-    
-    total_questions = len(unique_questions_df)
-    total_coding_questions = len(coding_questions)
-    
-    # If no questions are coding marked, skip this step
-    if total_coding_questions == 0:
-        return df, {
-            "converted_questions": 0,
-            "total_questions": total_questions,
-            "total_coding_questions": 0,
-            "conversion_percentage": 0,
-            "reason": "No questions with coding content found"
-        }
-    
-    # Calculate how many questions to convert
-    target_conversion_count = int(total_questions * conversion_percentage)
-    
-    # If less than target percentage of questions are coding, get all of them
-    if total_coding_questions <= target_conversion_count:
-        questions_to_convert = coding_questions
-        actual_conversion_count = total_coding_questions
-    else:
-        # Sample target percentage from coding questions
-        questions_to_convert = random.sample(coding_questions, target_conversion_count)
-        actual_conversion_count = target_conversion_count
-    
-    converted_count = 0
-    failed_conversions = 0
-    
-    # Convert selected questions to include code markdown
-    for question_content in questions_to_convert:
-        try:
-            # Get all rows for this question
-            question_rows = df[df['question_content'] == question_content]
-            if question_rows.empty:
-                continue
-                
-            # Get the first row to extract question data
-            first_row = question_rows.iloc[0]
-            
-            # Prepare the question data for conversion
-            question_data = {
-                "question": {
-                    "content": question_content,
-                    "skillId": first_row.get('skillId', ''),
-                    "difficultyLevelId": first_row.get('difficultyLevelId', ''),
-                    "category": first_row.get('category', ''),
-                    "status": first_row.get('question_status', 'ACTIVE')
-                },
-                "choices": []
-            }
-            
-            # Add choices from all rows for this question
-            for _, row in question_rows.iterrows():
-                question_data["choices"].append({
-                    "content": row.get('choice_content', ''),
-                    "isCorrect": row.get('choice_isCorrect', False),
-                    "orderIndex": row.get('choice_orderIndex', 0),
-                    "status": row.get('choice_status', 'ACTIVE')
-                })
-            
-            # Convert to JSON string
-            questions_json = json.dumps({"questions_choices": [question_data]}, ensure_ascii=False)
-            
-            # Get the conversion prompt
-            prompt_messages = prompts.get_code_conversion_prompt(
-                first_row.get('skillId', ''),
-                questions_json,
-                first_row.get('difficultyLevelId', ''),
-                [first_row.get('skillId', '')],  # skills
-                "",  # learning_objectives (not needed for conversion)
-                "",  # question_types (not needed for conversion)
-                "",  # content (not needed for conversion)
-                "No Change",  # customized_difficulty
-                customized_prompt_instructions
-            )
-            
-            # Make API call using the existing client from settings
-            response = settings.openai_client.chat.completions.create(
-                model=settings.CHAT_COMPLETIONS_MODEL,
-                messages=prompt_messages,
-                #temperature=0.3,
-                max_tokens=4000
-            )
-            
-            # Parse the response
-            response_content = response.choices[0].message.content.strip()
-            
-            # Try to extract JSON from the response
-            try:
-                # Look for JSON in the response
-                json_match = re.search(r'\{.*\}', response_content, re.DOTALL)
-                if json_match:
-                    converted_data = json.loads(json_match.group())
-                    
-                    if "questions_choices" in converted_data and len(converted_data["questions_choices"]) > 0:
-                        converted_qc = converted_data["questions_choices"][0]
-                        
-                        # Update the question content in the dataframe
-                        df.loc[df['question_content'] == question_content, 'question_content'] = converted_qc["question"]["content"]
-                        
-                        # Update choices if available
-                        converted_choices = converted_qc.get("choices", [])
-                        for _, row_idx in enumerate(df[df['question_content'] == converted_qc["question"]["content"]].index):
-                            choice_order = df.loc[row_idx, 'choice_orderIndex']
-                            for choice in converted_choices:
-                                if choice.get('orderIndex') == choice_order:
-                                    df.loc[row_idx, 'choice_content'] = choice.get('content', df.loc[row_idx, 'choice_content'])
-                                    df.loc[row_idx, 'choice_isCorrect'] = choice.get('isCorrect', df.loc[row_idx, 'choice_isCorrect'])
-                                    break
-                        
-                        converted_count += 1
-                    else:
-                        failed_conversions += 1
-                else:
-                    failed_conversions += 1
-                    
-            except json.JSONDecodeError:
-                # If conversion fails, keep the original question
-                failed_conversions += 1
-                continue
-                
-        except Exception:
-            # If conversion fails, keep the original question
-            failed_conversions += 1
-            continue
-    
-    return df, {
-        "converted_questions": converted_count,
-        "failed_conversions": failed_conversions,
-        "total_questions": total_questions,
-        "total_coding_questions": total_coding_questions,
-        "conversion_percentage": (converted_count / total_questions * 100) if total_questions > 0 else 0,
-        "reason": f"Converted {converted_count} out of {actual_conversion_count} selected questions"
-    }
-
 def tune_distractors_dataframe(df: pd.DataFrame, tuning_percentage=0.20) -> tuple[pd.DataFrame, dict]:
     """
     Tune distractors for a percentage of questions to make them more challenging.
@@ -3433,8 +3210,10 @@ def tune_distractors_dataframe(df: pd.DataFrame, tuning_percentage=0.20) -> tupl
             # Get the first row to extract question data
             first_row = question_rows.iloc[0]
 
-            # ponytail: distractor tuning only applies to choice-based questions.
-            if first_row.get('category', '') == 'SHORT_ANSWER':
+            # ponytail: distractor tuning only applies to choice-based questions;
+            # skip SHORT_ANSWER (rubric) and CODING (code/test cases), which have
+            # no choices.
+            if first_row.get('category', '') in ('SHORT_ANSWER', CODING_CATEGORY):
                 continue
             
             # Prepare the question data for tuning
@@ -4016,6 +3795,7 @@ def generate_assessments_from_content(
     include_coding=True,
     progress_bar=None,
     progress_text=None,
+    coding_languages=None,
 ):
     """Orchestrator for the arbitrary-content assessment flow.
 
@@ -4126,6 +3906,7 @@ def generate_assessments_from_content(
                     customized_prompt_instructions,
                     "placement",
                     prompts.get_uploaded_assessment_questions_prompt,
+                    coding_languages,
                 )
             )
 

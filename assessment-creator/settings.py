@@ -54,6 +54,38 @@ CHAT_COMPLETIONS_RESPONSE_FORMAT = {
 }
 
 #========================================
+#CODING QUESTION TYPE
+#========================================
+
+# Assessments API QuestionCategory enum value for coding questions. CODING
+# questions are created via a dedicated `createCodingQuestion` mutation (no
+# `category` field — it is implicitly CODING), and carry `codingDetails` +
+# `testCases` instead of choices.
+CODING_CATEGORY = "CODING"
+
+# UI label -> Assessments API `CodingLanguage` enum. Only these 5 are wired up
+# for execution in assessments-api (internal/services/code_execution); the
+# other enum values (TYPESCRIPT, HTML, CSS, SHELL) are authoring-only.
+CODING_LANGUAGE_OPTIONS = {
+    "Python": "PYTHON",
+    "Sql": "SQL",
+    "Java": "JAVA",
+    "Javascript": "JAVASCRIPT",
+    "C++": "CPP",
+}
+
+# Reverse lookup: API enum -> UI label (for normalizing imported/LLM values).
+CODING_LANGUAGE_ENUM_TO_LABEL = {v: k for k, v in CODING_LANGUAGE_OPTIONS.items()}
+
+# Default execution limits. The API accepts timeLimitMs in [100, 30000] and
+# memoryLimitMb in [16, 512]; these match the API's own defaults.
+CODING_DEFAULT_TIME_LIMIT_MS = 5000
+CODING_DEFAULT_MEMORY_LIMIT_MB = 256
+
+# Minimum number of test cases the API requires per CODING question.
+CODING_MIN_TEST_CASES = 1
+
+#========================================
 #CONTEXT MANAGEMENT UTILITIES
 #========================================
 

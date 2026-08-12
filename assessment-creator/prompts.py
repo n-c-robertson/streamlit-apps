@@ -87,7 +87,9 @@ JSON Schema:
         "status": string,
         "content": string,
         "source": object,
-        "rubric": object
+        "rubric": object,
+        "codingDetails": object,
+        "testCases": array
       }},
       "choices": [
         {{
@@ -110,6 +112,25 @@ The `rubric` field is REQUIRED when category is "SHORT_ANSWER" and MUST be omitt
 }}
 `passingThreshold` is a fraction in [0, 1]. Each criterion `points` is a positive integer. Criterion names must be unique and non-empty. `choices` MUST be an empty array for SHORT_ANSWER.
 
+The `codingDetails` and `testCases` fields are REQUIRED when category is "CODING" and MUST be omitted (or null) otherwise. `choices` MUST be an empty array for CODING. `codingDetails` shape:
+{{
+  "language": string,            // one of: PYTHON, SQL, JAVA, JAVASCRIPT, CPP
+  "starterCode": string,         // runnable skeleton with a solution function/signature and a pass/placeholder
+  "solutionCode": string,         // correct reference implementation that passes every test case (staff-only)
+  "testHarnessTemplate": string,  // optional; REQUIRED for SQL as DDL beginning with CREATE or WITH
+  "constraints": string,
+  "timeLimitMs": number,          // 100-30000, default 5000
+  "memoryLimitMb": number         // 16-512, default 256
+}}
+`testCases` is an array (>=1) of:
+{{
+  "input": string,               // JSON for PYTHON/JAVASCRIPT; JSON scalar for JAVA/CPP; blank = no-arg call
+  "expectedOutput": string,
+  "comparisonStrategy": string,   // EXACT | CONTAINS | REGEX | SORTED_LINES (default EXACT; SORTED_LINES for SQL)
+  "isExample": boolean,           // at least one test case MUST be isExample: true
+  "orderIndex": number
+}}
+
 Follow the instructions in the user prompt precisely. We want to generate the best technical assessments on the planet.
 """
     },
@@ -124,7 +145,7 @@ The "skillId" you output MUST BE one of the following: {skills}.
 **Requirements:**  
 - **Question Types**: Each question must be categorized as one of the following types: {question_types}.
 
-- **Question Type Distribution**: When "SHORT_ANSWER" is among the allowed types, aim for roughly **30%** of the generated questions to be SHORT_ANSWER (LLM-graded, with a rubric), and the remaining ~70% split among the other allowed types. Round to the nearest whole question — e.g. for 5 questions produce ~1-2 SHORT_ANSWER; for 10 questions produce ~3 SHORT_ANSWER. If SHORT_ANSWER is not in the allowed types, ignore this and use only the other types. Do not produce more than ~40% or fewer than ~20% SHORT_ANSWER.
+- **Question Type Distribution**: When "SHORT_ANSWER" is among the allowed types, aim for roughly **30%** of the generated questions to be SHORT_ANSWER (LLM-graded, with a rubric), and the remaining ~70% split among the other allowed types. Round to the nearest whole question — e.g. for 5 questions produce ~1-2 SHORT_ANSWER; for 10 questions produce ~3 SHORT_ANSWER. If SHORT_ANSWER is not in the allowed types, ignore this and use only the other types. Do not produce more than ~40% or fewer than ~20% SHORT_ANSWER. When "CODING" is among the allowed types, aim for roughly **20-25%** of the generated questions to be CODING, biased toward concepts that involve programming or code; only generate CODING questions for concepts where a code task is meaningful, and use the other allowed types for non-programmatic concepts.
 
 - **Content Alignment**: Ensure each question is strictly based on conceptual knowledge, skills, or principles from the provided content.
 
@@ -144,6 +165,7 @@ The "skillId" you output MUST BE one of the following: {skills}.
   - **Single Choice Questions**: One correct answer and three plausible distractors.
   - **Multiple Choice Questions**: Multiple correct answers (as appropriate) with distractors; total number of choices between 4 and 5.
   - **Short Answer Questions** (category "SHORT_ANSWER"): No choices — emit `"choices": []`. Instead emit a `rubric` object with `passingThreshold` (a fraction in [0, 1]) and a `criteria` array. Each criterion has a short `name` (unique, non-empty), a detailed `description` the LLM grader uses verbatim, and a positive integer `points`. Use 2-4 criteria that together cover the key dimensions of a correct answer.
+  - **Coding Questions** (category "CODING"): No choices — emit `"choices": []`. Instead emit a `codingDetails` object and a `testCases` array. Use one of these allowed coding languages: {coding_languages}. `starterCode` is a runnable skeleton (e.g. `def solution(x):\n    pass` for Python, or a `solution` function/signature with a `pass`/placeholder); `solutionCode` is a correct implementation that passes every test case; produce at least 3 test cases with at least one `isExample: true`. For SQL, `testHarnessTemplate` MUST be a DDL harness beginning with `CREATE` or `WITH`, and use `comparisonStrategy: "SORTED_LINES"`. Only generate a CODING question when the concept is genuinely programmatic; otherwise use the other allowed types.
 
 - **Answer Choice Length and Detail**:  
   - All answer choices must be similar in length, detail, and complexity. The correct answer should never be obviously longer or more detailed than distractors.
@@ -295,6 +317,35 @@ Example 5: Short answer question (LLM-graded, no choices).
     }}
   ]
 }}
+
+Example 6: Coding question (Python, no choices).
+{{
+  "questions_choices": [
+    {{
+      "question": {{
+        "difficultyLevelId": "Intermediate",
+        "skillId": "Python Programming",
+        "category": "CODING",
+        "status": "ACTIVE",
+        "content": "Write a function `solution(x)` that returns twice its input.",
+        "codingDetails": {{
+          "language": "PYTHON",
+          "starterCode": "def solution(x):\n    pass",
+          "solutionCode": "def solution(x):\n    return x * 2",
+          "constraints": "1 <= x <= 10^9",
+          "timeLimitMs": 5000,
+          "memoryLimitMb": 256
+        }},
+        "testCases": [
+          {{ "input": "4", "expectedOutput": "8", "comparisonStrategy": "EXACT", "isExample": true, "orderIndex": 0 }},
+          {{ "input": "7", "expectedOutput": "14", "comparisonStrategy": "EXACT", "isExample": false, "orderIndex": 1 }},
+          {{ "input": "0", "expectedOutput": "0", "comparisonStrategy": "EXACT", "isExample": false, "orderIndex": 2 }}
+        ]
+      }},
+      "choices": []
+    }}
+  ]
+}}
 """
     }
 ]
@@ -308,7 +359,8 @@ def get_assessment_questions_prompt(
     content,
     customized_difficulty,
     customized_prompt_instructions,
-    difficulty_enum=""
+    difficulty_enum="",
+    coding_languages="",
 ):
     user_prompt = question_generation_prompt[1]['content'].format(
         number_questions_per_concept=number_questions_per_concept,
@@ -319,7 +371,8 @@ def get_assessment_questions_prompt(
         content=content,
         customized_difficulty=customized_difficulty,
         customized_prompt_instructions=customized_prompt_instructions,
-        difficulty_enum=difficulty_enum
+        difficulty_enum=difficulty_enum,
+        coding_languages=coding_languages or "PYTHON, SQL, JAVA, JAVASCRIPT, CPP",
     )
     return [
         question_generation_prompt[0],
@@ -345,7 +398,9 @@ JSON Schema:
         "status": string,
         "content": string,
         "source": object,
-        "rubric": object
+        "rubric": object,
+        "codingDetails": object,
+        "testCases": array
       }},
       "choices": [
         {{
@@ -367,6 +422,25 @@ The `rubric` field is REQUIRED when category is "SHORT_ANSWER" and MUST be omitt
   ]
 }}
 `passingThreshold` is a fraction in [0, 1]. Each criterion `points` is a positive integer. Criterion names must be unique and non-empty. `choices` MUST be an empty array for SHORT_ANSWER.
+
+The `codingDetails` and `testCases` fields are REQUIRED when category is "CODING" and MUST be omitted (or null) otherwise. `choices` MUST be an empty array for CODING. `codingDetails` shape:
+{{
+  "language": string,            // one of: PYTHON, SQL, JAVA, JAVASCRIPT, CPP
+  "starterCode": string,         // runnable skeleton with a solution function/signature and a pass/placeholder
+  "solutionCode": string,         // correct reference implementation that passes every test case (staff-only)
+  "testHarnessTemplate": string,  // optional; REQUIRED for SQL as DDL beginning with CREATE or WITH
+  "constraints": string,
+  "timeLimitMs": number,          // 100-30000, default 5000
+  "memoryLimitMb": number         // 16-512, default 256
+}}
+`testCases` is an array (>=1) of:
+{{
+  "input": string,               // JSON for PYTHON/JAVASCRIPT; JSON scalar for JAVA/CPP; blank = no-arg call
+  "expectedOutput": string,
+  "comparisonStrategy": string,   // EXACT | CONTAINS | REGEX | SORTED_LINES (default EXACT; SORTED_LINES for SQL)
+  "isExample": boolean,           // at least one test case MUST be isExample: true
+  "orderIndex": number
+}}
 
 Follow the instructions in the user prompt precisely. We want to generate the best readiness assessments on the planet.
 """
@@ -395,7 +469,7 @@ The "skillId" you output MUST BE one of the following: {skills}.
 **Requirements:**  
 - **Question Types**: Each question must be categorized as one of the following types: {question_types}.
 
-- **Question Type Distribution**: When "SHORT_ANSWER" is among the allowed types, aim for roughly **30%** of the generated questions to be SHORT_ANSWER (LLM-graded, with a rubric), and the remaining ~70% split among the other allowed types. Round to the nearest whole question — e.g. for 5 questions produce ~1-2 SHORT_ANSWER; for 10 questions produce ~3 SHORT_ANSWER. If SHORT_ANSWER is not in the allowed types, ignore this and use only the other types. Do not produce more than ~40% or fewer than ~20% SHORT_ANSWER.
+- **Question Type Distribution**: When "SHORT_ANSWER" is among the allowed types, aim for roughly **30%** of the generated questions to be SHORT_ANSWER (LLM-graded, with a rubric), and the remaining ~70% split among the other allowed types. Round to the nearest whole question — e.g. for 5 questions produce ~1-2 SHORT_ANSWER; for 10 questions produce ~3 SHORT_ANSWER. If SHORT_ANSWER is not in the allowed types, ignore this and use only the other types. Do not produce more than ~40% or fewer than ~20% SHORT_ANSWER. When "CODING" is among the allowed types, aim for roughly **20-25%** of the generated questions to be CODING, biased toward concepts that involve programming or code; only generate CODING questions for concepts where a code task is meaningful, and use the other allowed types for non-programmatic concepts.
 
 - **Prerequisite Skill Focus**: Ensure each question tests foundational knowledge and skills that are prerequisites for understanding the provided content.
 
@@ -415,6 +489,7 @@ The "skillId" you output MUST BE one of the following: {skills}.
   - **Single Choice Questions**: One correct answer and three plausible distractors.
   - **Multiple Choice Questions**: Multiple correct answers (as appropriate) with distractors; total number of choices between 4 and 5.
   - **Short Answer Questions** (category "SHORT_ANSWER"): No choices — emit `"choices": []`. Instead emit a `rubric` object with `passingThreshold` (a fraction in [0, 1]) and a `criteria` array. Each criterion has a short `name` (unique, non-empty), a detailed `description` the LLM grader uses verbatim, and a positive integer `points`. Use 2-4 criteria that together cover the key dimensions of a correct answer.
+  - **Coding Questions** (category "CODING"): No choices — emit `"choices": []`. Instead emit a `codingDetails` object and a `testCases` array. Use one of these allowed coding languages: {coding_languages}. `starterCode` is a runnable skeleton (e.g. `def solution(x):\n    pass` for Python, or a `solution` function/signature with a `pass`/placeholder); `solutionCode` is a correct implementation that passes every test case; produce at least 3 test cases with at least one `isExample: true`. For SQL, `testHarnessTemplate` MUST be a DDL harness beginning with `CREATE` or `WITH`, and use `comparisonStrategy: "SORTED_LINES"`. Only generate a CODING question when the concept is genuinely programmatic; otherwise use the other allowed types.
 
 - **Answer Choice Length and Detail**:  
   - All answer choices must be similar in length, detail, and complexity. The correct answer should never be obviously longer or more detailed than distractors.
@@ -578,7 +653,8 @@ def get_readiness_assessment_questions_prompt(
     content,
     customized_difficulty,
     customized_prompt_instructions,
-    difficulty_enum=""
+    difficulty_enum="",
+    coding_languages="",
 ):
     user_prompt = readiness_question_generation_prompt[1]['content'].format(
         number_questions_per_concept=number_questions_per_concept,
@@ -589,7 +665,8 @@ def get_readiness_assessment_questions_prompt(
         content=content,
         customized_difficulty=customized_difficulty,
         customized_prompt_instructions=customized_prompt_instructions,
-        difficulty_enum=difficulty_enum
+        difficulty_enum=difficulty_enum,
+        coding_languages=coding_languages or "PYTHON, SQL, JAVA, JAVASCRIPT, CPP",
     )
     return [
         readiness_question_generation_prompt[0],
@@ -618,6 +695,7 @@ Evaluation Criteria:
 - For SINGLE_CHOICE: one correct, three plausible distractors.
 - For MULTIPLE_CHOICE: multiple correct answers (where applicable) with 4-5 total options.
 - For SHORT_ANSWER: no choices — instead evaluate the rubric: criteria are non-empty, uniquely named, cover the key dimensions of a correct answer, have positive integer points, and a passingThreshold in [0, 1].
+- For CODING: no choices — instead evaluate `codingDetails` and `testCases`: `language` is one of PYTHON/SQL/JAVA/JAVASCRIPT/CPP; `starterCode` is a runnable skeleton with a solution signature and a pass/placeholder; `solutionCode` is a correct implementation that passes every test case; there are at least 3 test cases with at least one `isExample: true`; `input` is valid JSON for PYTHON/JAVASCRIPT or a JSON scalar for JAVA/CPP; for SQL, `testHarnessTemplate` is a DDL harness beginning with CREATE or WITH and `comparisonStrategy` is SORTED_LINES.
 - Distractors must be plausible, distinct, concise, and grammatically consistent.
 - Distractors must represent common misconceptions or errors, avoiding negative or ambiguous wording.
 - Correct answers must not be overly lengthy or mimic language from the question stem.
@@ -971,180 +1049,6 @@ def get_case_study_conversion_prompt(skill_id, questions_list, customized_prompt
         {'role': 'user', 'content': user_prompt}
     ]
 
-# Code conversion prompt for adding code markdown to questions
-code_conversion_prompt = [
-    {
-        'role': 'system',
-        'content': """You are an AI assistant for Udacity tasked with converting assessment questions to include code markdown formatting.
-Your output must be a single, valid JSON object matching the schema provided below.
-Return only valid JSON with no additional commentary or markdown formatting.
-
-JSON Schema:
-{{
-  "questions_choices": [
-    {{
-      "question": {{
-        "difficultyLevelId": string,
-        "skillId": string,
-        "category": string,
-        "status": string,
-        "content": string,
-        "source": object
-      }},
-      "choices": [
-        {{
-          "status": string,
-          "content": string,
-          "isCorrect": boolean,
-          "orderIndex": number
-        }}
-      ]
-    }}
-  ]
-}}
-
-Instructions:
-1. Convert the question content to include relevant code examples using markdown code blocks (```python, ```javascript, etc.)
-2. Convert choice options to include code examples where appropriate
-3. Ensure the code examples are relevant to the question and help illustrate the concept
-4. Use appropriate language tags for code blocks (python, javascript, java, html, css, etc.)
-5. Keep the original question structure and meaning intact
-6. Only add code where it enhances understanding of the concept
-7. Ensure all code examples are syntactically correct and follow best practices
-8. **Content Alignment**: Ensure the code examples are strictly based on conceptual knowledge, skills, or principles from the provided content
-9. **Learning Objectives**: Each converted question must align with at least one of the provided learning objectives
-10. **Difficulty Alignment**: Maintain the specified difficulty level in your code examples
-11. **Avoid Content-Specific References**: DO NOT reference specific projects, code snippets, or examples from the course content that aren't in the provided content
-12. **Question Types**: Only SINGLE_CHOICE and MULTIPLE_CHOICE question types are supported
-    - **SINGLE_CHOICE**: One correct answer and three plausible distractors (4 total choices)
-    - **MULTIPLE_CHOICE**: Multiple correct answers with distractors (4-5 total choices)
-13. **Markdown Formatting for Code Snippets**:
-    - **Inline Code**: Enclose short code snippets within single backticks. For example: `print("Hello, World!")`
-    - **Code Blocks**: For longer code examples or multiple lines of code, use triple backticks to create a fenced code block
-    - Optionally, specify the language for syntax highlighting. For example:
-      ```python
-      def greet():
-        print("Hello, World!")
-      ```
-14. **Custom Instructions**: Factor in any custom instructions provided. Where custom instructions conflict with the rest of the prompt, defer to the custom instructions
-
-**Examples of code conversion:**
-
-**SINGLE_CHOICE Example:**
-{{
-  "questions_choices": [
-    {{
-      "question": {{
-        "difficultyLevelId": "Intermediate",
-        "skillId": "Python Programming",
-        "category": "SINGLE_CHOICE",
-        "status": "ACTIVE",
-        "content": "What is the output of the following Python code?\n\n```python\nprint(len(set([1, 2, 2, 3, 4])))\n```"
-      }},
-      "choices": [
-        {{"status": "ACTIVE", "content": "```2```", "isCorrect": false, "orderIndex": 0}},
-        {{"status": "ACTIVE", "content": "```4```", "isCorrect": true, "orderIndex": 1}},
-        {{"status": "ACTIVE", "content": "```5```", "isCorrect": false, "orderIndex": 2}},
-        {{"status": "ACTIVE", "content": "```None```", "isCorrect": false, "orderIndex": 3}}
-      ]
-    }}
-  ]
-}}
-
-**MULTIPLE_CHOICE Example:**
-{{
-  "questions_choices": [
-    {{
-      "question": {{
-        "difficultyLevelId": "Intermediate",
-        "skillId": "Python Data Structures",
-        "category": "MULTIPLE_CHOICE",
-        "status": "ACTIVE",
-        "content": "Which of the following Python code snippets will create a list containing the numbers 1, 2, and 3? Select all that apply.\n\n```python\n# Option analysis required\n```"
-      }},
-      "choices": [
-        {{"status": "ACTIVE", "content": "```[1, 2, 3]```", "isCorrect": true, "orderIndex": 0}},
-        {{"status": "ACTIVE", "content": "```list(range(1, 4))```", "isCorrect": true, "orderIndex": 1}},
-        {{"status": "ACTIVE", "content": "```list(range(1, 3))```", "isCorrect": false, "orderIndex": 2}},
-        {{"status": "ACTIVE", "content": "```[x for x in range(1, 4)]```", "isCorrect": true, "orderIndex": 3}}
-      ]
-    }}
-  ]
-}}
-"""
-    },
-    {
-        'role': 'user',
-        'content': """Convert the following assessment questions to include code markdown formatting. 
-The questions should include relevant code examples that help illustrate the concepts being tested.
-
-**Context Information:**
-- **Difficulty Level**: {difficulty_level}
-- **Skills**: {skills}
-- **Learning Objectives**: {learning_objectives}
-- **Question Types**: {question_types}
-- **Custom Difficulty**: {customized_difficulty}
-- **Custom Instructions**: {customized_prompt_instructions}
-
-**Original Content Context:**
-{content}
-
-**Questions to Convert:**
-Skill ID: {skill_id}
-Questions to convert:
-{questions_list}
-
-**Conversion Guidelines:**
-- Convert the question content to include relevant code examples using markdown code blocks
-- Convert choice options to include code examples where appropriate
-- Ensure the code examples are relevant to the question and help illustrate the concept
-- Use appropriate language tags for code blocks (python, javascript, java, html, css, etc.)
-- Keep the original question structure and meaning intact
-- Only add code where it enhances understanding of the concept
-- Ensure all code examples are syntactically correct and follow best practices
-- **Content Alignment**: Ensure the code examples are strictly based on conceptual knowledge, skills, or principles from the provided content
-- **Learning Objectives**: Each converted question must align with at least one of the provided learning objectives
-- **Difficulty Alignment**: Maintain the specified difficulty level in your code examples
-- **Avoid Content-Specific References**: DO NOT reference specific projects, code snippets, or examples from the course content that aren't in the provided content
-
-Convert these questions to include appropriate code markdown while maintaining their educational value and clarity.
-"""
-    }
-]
-
-def get_code_conversion_prompt(skill_id, questions_list, difficulty_level="", skills="", learning_objectives="", question_types="", content="", customized_difficulty="No Change", customized_prompt_instructions=""):
-    """
-    Format the code conversion prompt with the required parameters.
-    
-    Parameters:
-        skill_id (str): The skill ID for the questions
-        questions_list (str): JSON string of questions to convert
-        difficulty_level (str): The difficulty level for the questions
-        skills (str): The skills being tested
-        learning_objectives (str): The learning objectives to align with
-        question_types (str): The types of questions being generated
-        content (str): The original content context
-        customized_difficulty (str): Custom difficulty instructions
-        customized_prompt_instructions (str): Custom instructions for the conversion
-    
-    Returns:
-        list: Formatted prompt messages
-    """
-    user_prompt = code_conversion_prompt[1]['content'].format(
-        skill_id=skill_id,
-        questions_list=questions_list,
-        difficulty_level=difficulty_level,
-        skills=skills,
-        learning_objectives=learning_objectives,
-        question_types=question_types,
-        content=content,
-        customized_difficulty=customized_difficulty,
-        customized_prompt_instructions=customized_prompt_instructions
-    )
-    return [
-        code_conversion_prompt[0],
-        {'role': 'user', 'content': user_prompt}
-    ]
 
 # Distractor tuning prompt for improving incorrect answer choices
 distractor_tuning_prompt = [
@@ -1275,8 +1179,9 @@ Your goal is to identify the question that best tests the given skill with optim
 **Category-aware judging** — score each candidate on the criteria that apply to its own category; do NOT penalize a question for lacking something its category doesn't use:
 - **SINGLE_CHOICE / MULTIPLE_CHOICE**: judge the quality of the answer choices — distractors must be plausible, distinct, grammatically consistent, and free of clues to the correct answer; correct answer must not be the longest or reuse stem keywords.
 - **SHORT_ANSWER**: there are NO choices by design — do NOT penalize the absence of choices or distractors. Instead judge the **rubric**: criteria are non-empty and uniquely named, together cover the key dimensions of a correct answer, have positive integer points, and a passingThreshold in [0, 1]; the question stem invites a substantive, gradable written answer.
+- **CODING**: there are NO choices by design — do NOT penalize the absence of choices or distractors. Instead judge the **code and test cases**: `starterCode` is a runnable skeleton with a clear solution signature; `solutionCode` is a correct implementation that passes every test case; there are at least 3 test cases with at least one `isExample: true`; inputs are well-formed for the language (JSON for PYTHON/JAVASCRIPT, JSON scalar for JAVA/CPP); for SQL the `testHarnessTemplate` is valid DDL and `comparisonStrategy` is SORTED_LINES.
 
-Pick the single best question regardless of category — a strong SHORT_ANSWER question with a well-constructed rubric is strictly better than a mediocre multiple-choice question, and vice versa.
+Pick the single best question regardless of category — a strong SHORT_ANSWER question with a well-constructed rubric, or a strong CODING question with a correct solution and solid test cases, is strictly better than a mediocre multiple-choice question, and vice versa.
 
 Return only valid JSON with no extra commentary.
 
@@ -1295,7 +1200,7 @@ Evaluate each candidate question based on:
 2. **Skill Alignment**: Does the question directly test the specified skill?
 3. **Difficulty Appropriateness**: Is the difficulty level appropriate for the skill?
 4. **Educational Value**: Does answering this question help demonstrate mastery of the skill?
-5. **Question Quality**: Is this a well-constructed assessment item for its category? (For choice-based questions, judge distractor quality. For SHORT_ANSWER, judge rubric quality — do not penalize the absence of choices.)
+5. **Question Quality**: Is this a well-constructed assessment item for its category? (For choice-based questions, judge distractor quality. For SHORT_ANSWER, judge rubric quality — do not penalize the absence of choices. For CODING, judge the starter/solution code and test cases — do not penalize the absence of choices.)
 6. **Practical Relevance**: Is the question relevant to real-world application of the skill?
 
 Candidate Questions (each prefixed with its [CATEGORY]):
@@ -1541,7 +1446,9 @@ JSON Schema:
         "status": string,
         "content": string,
         "source": object,
-        "rubric": object
+        "rubric": object,
+        "codingDetails": object,
+        "testCases": array
       }},
       "choices": [
         {{
@@ -1564,6 +1471,25 @@ The `rubric` field is REQUIRED when category is "SHORT_ANSWER" and MUST be omitt
 }}
 `passingThreshold` is a fraction in [0, 1]. Each criterion `points` is a positive integer. Criterion names must be unique and non-empty. `choices` MUST be an empty array for SHORT_ANSWER.
 
+The `codingDetails` and `testCases` fields are REQUIRED when category is "CODING" and MUST be omitted (or null) otherwise. `choices` MUST be an empty array for CODING. `codingDetails` shape:
+{{
+  "language": string,            // one of: PYTHON, SQL, JAVA, JAVASCRIPT, CPP
+  "starterCode": string,         // runnable skeleton with a solution function/signature and a pass/placeholder
+  "solutionCode": string,         // correct reference implementation that passes every test case (staff-only)
+  "testHarnessTemplate": string,  // optional; REQUIRED for SQL as DDL beginning with CREATE or WITH
+  "constraints": string,
+  "timeLimitMs": number,          // 100-30000, default 5000
+  "memoryLimitMb": number         // 16-512, default 256
+}}
+`testCases` is an array (>=1) of:
+{{
+  "input": string,               // JSON for PYTHON/JAVASCRIPT; JSON scalar for JAVA/CPP; blank = no-arg call
+  "expectedOutput": string,
+  "comparisonStrategy": string,   // EXACT | CONTAINS | REGEX | SORTED_LINES (default EXACT; SORTED_LINES for SQL)
+  "isExample": boolean,           // at least one test case MUST be isExample: true
+  "orderIndex": number
+}}
+
 The document is the source material only. Questions must be answerable by someone who learned the concept from ANY source, not by someone who memorised this document.
 """
     },
@@ -1581,12 +1507,13 @@ Requirements:
 - Content independence: DO NOT reference specific examples, names, projects, code listings, anecdotes, or wording from the document. Generalise. A learner who never saw this document must be able to answer.
 - Conceptual focus: test understanding of concepts, principles, and methodologies - not recall of document specifics.
 - Question Types: each question categorised as one of: {question_types}.
-- Question Type Distribution: when "SHORT_ANSWER" is among the allowed types, aim for roughly **30%** of the generated questions to be SHORT_ANSWER (LLM-graded, with a rubric), and the remaining ~70% split among the other allowed types. Round to the nearest whole question — e.g. for 5 questions produce ~1-2 SHORT_ANSWER; for 10 questions produce ~3 SHORT_ANSWER. If SHORT_ANSWER is not in the allowed types, ignore this and use only the other types. Do not produce more than ~40% or fewer than ~20% SHORT_ANSWER.
+- Question Type Distribution: when "SHORT_ANSWER" is among the allowed types, aim for roughly **30%** of the generated questions to be SHORT_ANSWER (LLM-graded, with a rubric), and the remaining ~70% split among the other allowed types. Round to the nearest whole question — e.g. for 5 questions produce ~1-2 SHORT_ANSWER; for 10 questions produce ~3 SHORT_ANSWER. If SHORT_ANSWER is not in the allowed types, ignore this and use only the other types. Do not produce more than ~40% or fewer than ~20% SHORT_ANSWER. When "CODING" is among the allowed types, aim for roughly **20-25%** of the generated questions to be CODING, biased toward concepts that involve programming or code; only generate CODING questions for concepts where a code task is meaningful, and use the other allowed types for non-programmatic concepts.
 - Learning Objectives: each question must align with at least one of: {learning_objectives}.
 - Answer Choices:
   - SINGLE_CHOICE: one correct answer + three plausible distractors.
   - MULTIPLE_CHOICE: multiple correct (as appropriate), 4-5 total choices.
   - SHORT_ANSWER: no choices — emit `"choices": []` and a `rubric` object with `passingThreshold` (fraction in [0,1]) and a `criteria` array (each: unique non-empty `name`, detailed `description`, positive integer `points`; 2-4 criteria).
+  - CODING: no choices — emit `"choices": []`, a `codingDetails` object, and a `testCases` array. Use one of these allowed coding languages: {coding_languages}. `starterCode` is a runnable skeleton (e.g. `def solution(x):\n    pass` for Python); `solutionCode` is a correct implementation that passes every test case; produce at least 3 test cases with at least one `isExample: true`. For SQL, `testHarnessTemplate` MUST be a DDL harness beginning with `CREATE` or `WITH`, and use `comparisonStrategy: "SORTED_LINES"`. Code must be generic/illustrative, not copied from the document.
   - All choices similar in length, detail, complexity. Correct answer never obviously longer.
   - Correct answer must not reuse distinctive terms/phrases from the question stem.
   - Distractors must be plausible common misconceptions, distinct, concise, grammatically consistent. No negative phrasing, no "Both A & C" combined answers.
@@ -1613,6 +1540,7 @@ def get_uploaded_assessment_questions_prompt(
     content,
     customized_difficulty,
     customized_prompt_instructions,
+    coding_languages="",
 ):
     user_prompt = uploaded_assessment_questions_prompt[1]['content'].format(
         number_questions_per_concept=number_questions_per_concept,
@@ -1624,6 +1552,7 @@ def get_uploaded_assessment_questions_prompt(
         content=content,
         customized_difficulty=customized_difficulty,
         customized_prompt_instructions=customized_prompt_instructions or '(none)',
+        coding_languages=coding_languages or "PYTHON, SQL, JAVA, JAVASCRIPT, CPP",
     )
     return [
         uploaded_assessment_questions_prompt[0],
@@ -1652,6 +1581,7 @@ Evaluation Criteria:
 - SINGLE_CHOICE: one correct, three plausible distractors.
 - MULTIPLE_CHOICE: multiple correct (where appropriate), 4-5 total options.
 - SHORT_ANSWER: no choices — instead evaluate the rubric: criteria non-empty, uniquely named, cover key dimensions of a correct answer, positive integer points, passingThreshold in [0, 1].
+- CODING: no choices — instead evaluate `codingDetails` and `testCases`: `language` is one of PYTHON/SQL/JAVA/JAVASCRIPT/CPP; `starterCode` is a runnable skeleton with a solution signature and a pass/placeholder; `solutionCode` is a correct implementation that passes every test case; at least 3 test cases with at least one `isExample: true`; `input` is valid JSON for PYTHON/JAVASCRIPT or a JSON scalar for JAVA/CPP; for SQL, `testHarnessTemplate` is a DDL harness beginning with CREATE or WITH and `comparisonStrategy` is SORTED_LINES.
 - Distractors plausible, distinct, concise, grammatically consistent, represent common misconceptions. No negative/ambiguous wording.
 - Correct answers not overly lengthy, must not mimic question-stem language.
 

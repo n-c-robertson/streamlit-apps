@@ -252,10 +252,21 @@ def main():
 
             QUESTION_TYPES = st.multiselect(
             'Question Types',
-            ['MULTIPLE_CHOICE', 'SINGLE_CHOICE', 'SHORT_ANSWER'],
+            ['MULTIPLE_CHOICE', 'SINGLE_CHOICE', 'SHORT_ANSWER', 'CODING'],
             default=['MULTIPLE_CHOICE', 'SINGLE_CHOICE', 'SHORT_ANSWER'],
-            help="Select the types of questions you want to generate. SINGLE/MULTIPLE CHOICE produce answer choices; SHORT_ANSWER produces an LLM-graded rubric (no choices)."
+            help="Select the types of questions you want to generate. SINGLE/MULTIPLE CHOICE produce answer choices; SHORT_ANSWER produces an LLM-graded rubric (no choices); CODING produces a code question (starter code + solution + test cases, no choices)."
         )
+
+        # Coding languages only apply when CODING is among the selected types.
+        if 'CODING' in QUESTION_TYPES:
+            CODING_LANGUAGES = st.multiselect(
+                'Coding Languages',
+                list(settings.CODING_LANGUAGE_OPTIONS.keys()),
+                default=['Python'],
+                help="Languages to generate CODING questions in. Only these 5 are wired up for execution in the Assessments API."
+            )
+        else:
+            CODING_LANGUAGES = []
 
             # Add question limit slider
             QUESTION_LIMIT = st.select_slider(
@@ -273,11 +284,10 @@ def main():
                 help="When enabled, ~15% of questions are converted into case study format. Disable to skip this step entirely."
             )
 
-            INCLUDE_CODING = st.toggle(
-                'Include Coding questions',
-                value=True,
-                help="When enabled, ~30% of questions with coding content are reformatted to include code markdown. Disable to skip this step entirely."
-            )
+            # The legacy "Include Coding questions" toggle (code-markdown
+            # reformatting of choice questions) has been removed. Coding is
+            # now a first-class question type — select CODING in Question
+            # Types above to generate real coding questions.
 
             # Disabled in gpt-5, remove later if not neeeded.
             #TEMPERATURE = st.slider(
@@ -306,6 +316,8 @@ def main():
                 st.error("❌ Please upload a PDF and/or provide a free-text description.")
             elif not QUESTION_TYPES:
                 st.error("❌ Please select at least one question type.")
+            elif 'CODING' in QUESTION_TYPES and not CODING_LANGUAGES:
+                st.error("❌ Please select at least one coding language, or remove CODING from Question Types.")
             else:
                 # Create progress bar and text elements
                 progress_bar = st.progress(0)
@@ -328,9 +340,10 @@ def main():
                                 CUSTOMIZED_DIFFICULTY,
                                 CUSTOMIZED_PROMPT_INSTRUCTIONS,
                                 include_case_study=INCLUDE_CASE_STUDY,
-                                include_coding=INCLUDE_CODING,
+                                include_coding=True,
                                 progress_bar=progress_bar,
                                 progress_text=progress_text,
+                                coding_languages=", ".join(settings.CODING_LANGUAGE_OPTIONS[l] for l in CODING_LANGUAGES),
                             )
                         else:
                             questions_choices_df, progress_data = utils_assessment_generation.generate_assessments(
@@ -346,7 +359,8 @@ def main():
                                 progress_bar,
                                 progress_text,
                                 include_case_study=INCLUDE_CASE_STUDY,
-                                include_coding=INCLUDE_CODING,
+                                include_coding=True,
+                                coding_languages=", ".join(settings.CODING_LANGUAGE_OPTIONS[l] for l in CODING_LANGUAGES),
                             )
 
                     # Check for missing prerequisite skills warning (CD/ND readiness only)
