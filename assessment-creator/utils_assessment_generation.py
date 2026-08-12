@@ -35,6 +35,7 @@ from settings import (
     CODING_MIN_TEST_CASES,
     VALID_QUESTION_CATEGORIES,
     infer_category,
+    normalize_question_category,
 )
 
 #========================================
@@ -1358,32 +1359,22 @@ def process_concept(sectionId, node, lesson, concept, difficulty_level, difficul
         else:
             print(f"  Question {i+1}: ACCEPTED - skillId '{question_skill}' matches expected skills")
 
-        # Enforce the supported QuestionCategory enum. The LLM occasionally
-        # emits sloppy values (e.g. "HARD", "Code", "Deployment", "MULTIPLE");
-        # recover them by inferring the correct category from the question's
-        # data structure (codingDetails/testCases -> CODING, rubric ->
-        # SHORT_ANSWER, choices count -> SINGLE/MULTIPLE_CHOICE) so we don't
-        # drop otherwise-good questions. Only reject if inference is impossible.
-        if question_category not in VALID_QUESTION_CATEGORIES:
-            has_coding = isinstance(qc['question'].get('codingDetails'), dict) and isinstance(qc['question'].get('testCases'), list)
-            has_rubric = isinstance(qc['question'].get('rubric'), dict)
-            choices = qc.get('choices', [])
-            try:
-                correct_count = int(sum(1 for c in choices if c and c.get('isCorrect')))
-            except Exception:
-                correct_count = 0
-            inferred = infer_category(
-                has_coding=has_coding,
-                has_rubric=has_rubric,
-                choices_correct_count=correct_count,
-                has_choices=isinstance(choices, list) and len(choices) > 0,
-            )
-            if inferred is None:
-                print(f"  Question {i+1}: REJECTED - category '{question_category}' is not a supported enum {sorted(VALID_QUESTION_CATEGORIES)} and could not be inferred from structure")
-                continue
-            print(f"  Question {i+1}: WARN - category '{question_category}' unrecognized -> inferred '{inferred}' from structure; fixing")
-            question_category = inferred
-            qc['question']['category'] = inferred
+        # Force the category to a valid UPPERCASE QuestionCategory enum. The LLM
+        # sometimes emits sloppy values (e.g. "HARD", "Code", "Deployment",
+        # "single_choice", "MULTIPLE"); normalize via the canonical normalizer,
+        # which uppercases valid values and infers invalid ones from the
+        # question's structure (codingDetails/testCases -> CODING, rubric ->
+        # SHORT_ANSWER, choices count -> SINGLE/MULTIPLE_CHOICE). ALWAYS overwrite
+        # the stored category with the normalized enum so downstream CSV/review
+        # sees clean uppercase enums, not the original sloppy/lowercase value.
+        normalized_category = normalize_question_category(qc['question'], qc.get('choices', []))
+        if normalized_category is None:
+            print(f"  Question {i+1}: REJECTED - category '{question_category}' is not a supported enum {sorted(VALID_QUESTION_CATEGORIES)} and could not be inferred from structure")
+            continue
+        if normalized_category != question_category:
+            print(f"  Question {i+1}: WARN - category '{question_category}' -> normalized '{normalized_category}'")
+        question_category = normalized_category
+        qc['question']['category'] = normalized_category
 
         # CODING-specific shape validation. CODING questions carry
         # codingDetails + testCases instead of choices; reject malformed ones
@@ -1940,7 +1931,7 @@ def json_to_dataframe(section_content_definitions):
                     'difficultyLevelUri': question.get('difficultyLevelUri'),
                     'skillId': question_skill_name,
                     'skillUri': question_skill_uri,
-                    'category': question.get('category'),
+                    'category': normalize_question_category(question, choices) or question.get('category'),
                     'question_status': question.get('status'),
                     'question_content': question.get('content'),
                     'sourceCategory': question.get('sourceCategory'),
@@ -1974,7 +1965,7 @@ def json_to_dataframe(section_content_definitions):
                     'difficultyLevelUri': question.get('difficultyLevelUri'),
                     'skillId': question_skill_name,  # This holds the skill name initially
                     'skillUri': question_skill_uri,  # This holds the taxonomy URI
-                    'category': question.get('category'),
+                    'category': normalize_question_category(question, choices) or question.get('category'),
                     'question_status': question.get('status'),
                     'question_content': question.get('content'),
                     'sourceCategory': question.get('sourceCategory'),
@@ -2355,7 +2346,9 @@ def convert_questions_to_case_studies(
                                         new_row['difficultyLevelId'] = normalized or cs_diff
                                     else:
                                         new_row['difficultyLevelId'] = original_row.get('difficultyLevelId', '')
-                                    new_row['category'] = case_study_question.get('category', original_row['category'])
+                                    cs_cat = case_study_question.get('category', original_row['category'])
+                                    cs_cat_up = str(cs_cat).strip().upper() if isinstance(cs_cat, str) else cs_cat
+                                    new_row['category'] = cs_cat_up if cs_cat_up in VALID_QUESTION_CATEGORIES else original_row['category']
                                     new_row['question_status'] = case_study_question.get('status', original_row['question_status'])
                                     
                                     # Update choice content if available
@@ -3280,7 +3273,9 @@ def tune_distractors_dataframe(df: pd.DataFrame, tuning_percentage=0.20) -> tupl
                     "content": question_content,
                     "skillId": first_row.get('skillId', ''),
                     "difficultyLevelId": first_row.get('difficultyLevelId', ''),
-                    "category": first_row.get('category', ''),
+                    "category": (str(first_row.get('category', '')).strip().upper()
+                                 if str(first_row.get('category', '')).strip().upper() in VALID_QUESTION_CATEGORIES
+                                 else first_row.get('category', '')),
                     "status": first_row.get('question_status', 'ACTIVE')
                 },
                 "choices": []

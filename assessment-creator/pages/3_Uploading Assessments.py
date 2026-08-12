@@ -174,20 +174,18 @@ CREATE_CODING_QUESTION_MUTATION = """
 """
 
 def _normalize_category(category, group):
-    """Coerce a question category to a valid QuestionCategory enum.
+    """Coerce a question category to a valid UPPERCASE QuestionCategory enum.
 
-    If the value is already a valid enum (case-insensitive), return it. For
-    unrecognized values, RECOVER by inferring the correct category from the
-    group's data structure (coding_language -> CODING, rubric -> SHORT_ANSWER,
-    >1 correct choice -> MULTIPLE_CHOICE, else SINGLE_CHOICE) so a sloppy
-    category label doesn't abort the whole upload. Only raise if inference is
-    impossible (no distinguishing columns at all).
+    Uses the canonical settings.normalize_category: if the value is already a
+    valid enum (case-insensitive) it is returned UPPERCASED; otherwise the
+    correct enum is inferred from the group's row structure (coding_language ->
+    CODING, rubric -> SHORT_ANSWER, >1 correct choice -> MULTIPLE_CHOICE, else
+    SINGLE_CHOICE) so a sloppy category label doesn't abort the upload. Only
+    raise if inference is impossible (no distinguishing columns at all).
     """
     if isinstance(category, str) and category.strip().upper() in VALID_QUESTION_CATEGORIES:
         return category.strip().upper()
 
-    # Infer from the group's columns. CODING questions carry coding_language;
-    # SHORT_ANSWER carries a rubric; choice questions carry choice_isCorrect.
     has_coding = False
     if 'coding_language' in group.columns:
         val = group['coding_language'].dropna()
@@ -204,7 +202,8 @@ def _normalize_category(category, group):
             correct_count = 0
     has_choices = correct_count is not None
 
-    inferred = settings.infer_category(
+    inferred = settings.normalize_category(
+        category,
         has_coding=has_coding,
         has_rubric=has_rubric,
         choices_correct_count=correct_count,
@@ -742,9 +741,10 @@ def create_question(section_id, question_data):
         formatted_source = {k: v for k, v in formatted_source.items() if v is not None and v != ''}
         print(f"Formatted source: {formatted_source}")
 
-        if question_data['category'] == "MULTIPLE_CHOICE":
+        qd_cat = str(question_data['category']).strip().upper()
+        if qd_cat == "MULTIPLE_CHOICE":
             category_enum = 0
-        elif question_data['category'] == "SINGLE_CHOICE":
+        elif qd_cat == "SINGLE_CHOICE":
             category_enum = 3
         
         question_variables = {
@@ -1031,8 +1031,8 @@ def process_question_group(question_tuple, group):
         # ponytail: rubric is question-level (constant across the group), so
         # read it from the first row rather than extending the groupby tuple.
         rubric_str = group['rubric'].iloc[0] if 'rubric' in group.columns else None
-        is_short_answer = (category == "SHORT_ANSWER")
-        is_coding = (category == "CODING")
+        is_short_answer = (str(category).strip().upper() == "SHORT_ANSWER")
+        is_coding = (str(category).strip().upper() == "CODING")
 
         if is_coding:
             # CODING uses a dedicated createCodingQuestion mutation (no
@@ -1111,7 +1111,7 @@ def process_question_group(question_tuple, group):
                 'sectionId': section_id,
                 'difficultyLevelId': difficulty_level_id,
                 'skillId': skill_id,
-                'category': category,
+                'category': str(category).strip().upper() if isinstance(category, str) else category,
                 'status': status,
                 'content': content,
                 'source': source_data,
@@ -1552,9 +1552,11 @@ def fetch_assessment_for_download(assessment_id):
 
 
 def _normalize_category_to_string(category):
-    """Convert a category value (string or int enum) to the uploader's expected string."""
+    """Convert a category value (string or int enum) to the uploader's expected
+    UPPERCASE enum string. Always returns a valid uppercase enum when given a
+    recognized value."""
     if isinstance(category, str):
-        return category
+        return category.strip().upper() if category.strip().upper() in VALID_QUESTION_CATEGORIES else category
     # Integer enum mapping mirrors create_question's mapping: 0 -> MULTIPLE_CHOICE, 3 -> SINGLE_CHOICE
     if category == 0:
         return "MULTIPLE_CHOICE"

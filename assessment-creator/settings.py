@@ -99,6 +99,49 @@ def infer_category(has_coding=False, has_rubric=False, choices_correct_count=Non
         return "SINGLE_CHOICE"
     return None
 
+
+def normalize_category(category, has_coding=False, has_rubric=False, choices_correct_count=None, has_choices=False):
+    """Canonical normalizer: return a valid UPPERCASE QuestionCategory enum, or None.
+
+    This is the single source of truth for forcing categories back to enums:
+      1. If `category` is already a valid enum (case-insensitive), return it
+         UPPERCASED — so "single_choice", "Single_Choice" -> "SINGLE_CHOICE".
+      2. Otherwise infer the correct enum from the question's data structure.
+      3. Otherwise return None (caller must treat as a hard error).
+
+    Always returns an uppercase enum string when it returns a string.
+    """
+    if isinstance(category, str) and category.strip().upper() in VALID_QUESTION_CATEGORIES:
+        return category.strip().upper()
+    return infer_category(has_coding, has_rubric, choices_correct_count, has_choices)
+
+
+def normalize_question_category(question, choices=None):
+    """Convenience wrapper: normalize the category of a question dict.
+
+    Extracts the structure signals (codingDetails/testCases, rubric, choices
+    correct-count) from the question/choices and delegates to normalize_category.
+    Returns a valid uppercase enum or None.
+    """
+    if not isinstance(question, dict):
+        return None
+    has_coding = isinstance(question.get('codingDetails'), dict) and isinstance(question.get('testCases'), list)
+    has_rubric = isinstance(question.get('rubric'), dict)
+    correct_count = None
+    if isinstance(choices, list):
+        try:
+            correct_count = int(sum(1 for c in choices if c and c.get('isCorrect')))
+        except Exception:
+            correct_count = 0
+    has_choices = isinstance(choices, list) and len(choices) > 0
+    return normalize_category(
+        question.get('category'),
+        has_coding=has_coding,
+        has_rubric=has_rubric,
+        choices_correct_count=correct_count,
+        has_choices=has_choices,
+    )
+
 # UI label -> Assessments API `CodingLanguage` enum. Only these 5 are wired up
 # for execution in assessments-api (internal/services/code_execution); the
 # other enum values (TYPESCRIPT, HTML, CSS, SHELL) are authoring-only.
