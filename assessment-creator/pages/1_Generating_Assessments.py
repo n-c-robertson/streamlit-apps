@@ -262,8 +262,8 @@ def main():
                 CODING_LANGUAGES = st.multiselect(
                     'Coding Languages',
                     list(settings.CODING_LANGUAGE_OPTIONS.keys()),
-                    default=['Python'],
-                    help="Languages to generate CODING questions in. Only these 5 are wired up for execution in the Assessments API."
+                    default=list(settings.CODING_LANGUAGE_OPTIONS.keys()),
+                    help="Languages the AI may choose from when generating CODING questions. The AI picks the most appropriate language per question based on the concept; deselect to restrict the set."
                 )
             else:
                 CODING_LANGUAGES = []
