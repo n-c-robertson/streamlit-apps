@@ -257,16 +257,16 @@ def main():
             help="Select the types of questions you want to generate. SINGLE/MULTIPLE CHOICE produce answer choices; SHORT_ANSWER produces an LLM-graded rubric (no choices); CODING produces a code question (starter code + solution + test cases, no choices)."
         )
 
-        # Coding languages only apply when CODING is among the selected types.
-        if 'CODING' in QUESTION_TYPES:
-            CODING_LANGUAGES = st.multiselect(
-                'Coding Languages',
-                list(settings.CODING_LANGUAGE_OPTIONS.keys()),
-                default=['Python'],
-                help="Languages to generate CODING questions in. Only these 5 are wired up for execution in the Assessments API."
-            )
-        else:
-            CODING_LANGUAGES = []
+            # Coding languages only apply when CODING is among the selected types.
+            if 'CODING' in QUESTION_TYPES:
+                CODING_LANGUAGES = st.multiselect(
+                    'Coding Languages',
+                    list(settings.CODING_LANGUAGE_OPTIONS.keys()),
+                    default=['Python'],
+                    help="Languages to generate CODING questions in. Only these 5 are wired up for execution in the Assessments API."
+                )
+            else:
+                CODING_LANGUAGES = []
 
             # Add question limit slider
             QUESTION_LIMIT = st.select_slider(
@@ -291,13 +291,13 @@ def main():
 
             # Disabled in gpt-5, remove later if not neeeded.
             #TEMPERATURE = st.slider(
-            #'Temperature', 
-            #value=0.2, 
-            #min_value=0.0, 
-            #max_value=1.0, 
+            #'Temperature',
+            #value=0.2,
+            #min_value=0.0,
+            #max_value=1.0,
             #step=0.1,
             #help="Controls creativity vs consistency. Lower values (0.1-0.3) produce more consistent questions. Higher values (0.7-0.9) produce more creative questions, with some risk of hallucinations."
-        #)
+            #)
 
             CUSTOMIZED_PROMPT_INSTRUCTIONS = st.text_area('Custom Instructions', value='', help="Enter additional instructions for the prompt. This will be appended to the base prompt.")
 
