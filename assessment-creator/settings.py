@@ -65,10 +65,39 @@ CODING_CATEGORY = "CODING"
 
 # The only question categories this app supports end-to-end (generate -> review
 # -> upload). The assessments API's QuestionCategory enum also has TRUE_FALSE,
-# but this app does not author it, so it is excluded to remove sloppiness:
-# any other value is rejected at generation and upload rather than silently
-# coerced. This is the single source of truth — import from here, do not redefine.
+# but this app does not author it, so it is excluded. This is the single source
+# of truth — import from here, do not redefine.
 VALID_QUESTION_CATEGORIES = {"SINGLE_CHOICE", "MULTIPLE_CHOICE", "SHORT_ANSWER", "CODING"}
+
+
+def infer_category(has_coding=False, has_rubric=False, choices_correct_count=None, has_choices=False):
+    """Infer the correct QuestionCategory enum from a question's data structure.
+
+    Used to RECOVER questions whose `category` field is invalid/sloppy (e.g.
+    "HARD", "Code", "Deployment") instead of dropping or aborting. The
+    structure is authoritative — a question with codingDetails/testCases is
+    CODING regardless of what the LLM labelled it; a rubric means SHORT_ANSWER;
+    choices with >1 correct answer means MULTIPLE_CHOICE; otherwise SINGLE_CHOICE.
+
+    Args:
+        has_coding: question carries codingDetails + testCases.
+        has_rubric: question carries a rubric.
+        choices_correct_count: number of correct choices (None if no choices).
+        has_choices: question has a (possibly empty) choices array.
+
+    Returns one of VALID_QUESTION_CATEGORIES, or None if it cannot be inferred
+    (no distinguishing structure at all) — callers should treat None as a hard
+    error since there is genuinely nothing to recover from.
+    """
+    if has_coding:
+        return CODING_CATEGORY
+    if has_rubric:
+        return "SHORT_ANSWER"
+    if has_choices or choices_correct_count is not None:
+        if choices_correct_count is not None and choices_correct_count > 1:
+            return "MULTIPLE_CHOICE"
+        return "SINGLE_CHOICE"
+    return None
 
 # UI label -> Assessments API `CodingLanguage` enum. Only these 5 are wired up
 # for execution in assessments-api (internal/services/code_execution); the

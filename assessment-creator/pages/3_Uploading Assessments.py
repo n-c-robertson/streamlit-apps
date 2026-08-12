@@ -176,20 +176,48 @@ CREATE_CODING_QUESTION_MUTATION = """
 def _normalize_category(category, group):
     """Coerce a question category to a valid QuestionCategory enum.
 
-    If the value is already a valid enum (case-insensitive), return it. Any
-    other value is REJECTED with a clear error — we no longer infer
-    SINGLE_CHOICE/MULTIPLE_CHOICE from choice count, since that papered over
-    bad data and was a source of sloppiness. The generator already enforces
-    the enum, so an invalid value here means a hand-edited or imported CSV
-    that the user must fix before upload.
+    If the value is already a valid enum (case-insensitive), return it. For
+    unrecognized values, RECOVER by inferring the correct category from the
+    group's data structure (coding_language -> CODING, rubric -> SHORT_ANSWER,
+    >1 correct choice -> MULTIPLE_CHOICE, else SINGLE_CHOICE) so a sloppy
+    category label doesn't abort the whole upload. Only raise if inference is
+    impossible (no distinguishing columns at all).
     """
     if isinstance(category, str) and category.strip().upper() in VALID_QUESTION_CATEGORIES:
         return category.strip().upper()
-    raise ValueError(
-        f"Unrecognized question category {category!r}. "
-        f"Must be one of {sorted(VALID_QUESTION_CATEGORIES)}. "
-        "Fix the CSV 'category' column and re-upload."
+
+    # Infer from the group's columns. CODING questions carry coding_language;
+    # SHORT_ANSWER carries a rubric; choice questions carry choice_isCorrect.
+    has_coding = False
+    if 'coding_language' in group.columns:
+        val = group['coding_language'].dropna()
+        has_coding = bool(len(val)) and not (val.iloc[0] is None or (isinstance(val.iloc[0], float) and pd.isna(val.iloc[0])) or str(val.iloc[0]).strip() == '')
+    has_rubric = False
+    if 'rubric' in group.columns:
+        rub = group['rubric'].dropna()
+        has_rubric = bool(len(rub)) and not (str(rub.iloc[0]).strip() == '' or (isinstance(rub.iloc[0], float) and pd.isna(rub.iloc[0])))
+    correct_count = None
+    if 'choice_isCorrect' in group.columns:
+        try:
+            correct_count = int(group['choice_isCorrect'].fillna(False).astype(bool).sum())
+        except Exception:
+            correct_count = 0
+    has_choices = correct_count is not None
+
+    inferred = settings.infer_category(
+        has_coding=has_coding,
+        has_rubric=has_rubric,
+        choices_correct_count=correct_count,
+        has_choices=has_choices,
     )
+    if inferred is None:
+        raise ValueError(
+            f"Unrecognized question category {category!r} and could not infer it from the row structure "
+            f"(no coding_language/rubric/choices columns). Must be one of {sorted(VALID_QUESTION_CATEGORIES)}. "
+            "Fix the CSV 'category' column and re-upload."
+        )
+    print(f"WARNING: Unrecognized category '{category}' -> inferred '{inferred}' from structure")
+    return inferred
 
 def fetch_difficulty_levels():
     query = """
@@ -1300,10 +1328,10 @@ def upload_assessment_to_api(df, assessment_title):
         df['choice_status'] = df['choice_status'].map(_normalize_status)
 
         # Normalize category per question group. Unrecognized categories are
-        # REJECTED (raised) here — we no longer infer from correct-choice count.
-        # Group by the question identity columns (everything that defines a
-        # unique question except the fields we are normalizing) so each
-        # question's rows are normalized together.
+        # RECOVERED by inferring from the row structure (coding_language/rubric/
+        # choice_isCorrect) rather than aborting. Group by the question identity
+        # columns (everything that defines a unique question except the fields
+        # we are normalizing) so each question's rows are normalized together.
         category_identity_cols = [
             c for c in question_columns if c not in ('category', 'question_status')
         ]

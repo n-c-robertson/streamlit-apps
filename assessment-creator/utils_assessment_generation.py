@@ -34,6 +34,7 @@ from settings import (
     CODING_DEFAULT_MEMORY_LIMIT_MB,
     CODING_MIN_TEST_CASES,
     VALID_QUESTION_CATEGORIES,
+    infer_category,
 )
 
 #========================================
@@ -1357,13 +1358,32 @@ def process_concept(sectionId, node, lesson, concept, difficulty_level, difficul
         else:
             print(f"  Question {i+1}: ACCEPTED - skillId '{question_skill}' matches expected skills")
 
-        # Enforce the supported QuestionCategory enum strictly. The LLM
-        # occasionally emits sloppy values (e.g. "HARD", "Code", "single",
-        # "MULTIPLE"); reject anything that isn't an exact enum match instead
-        # of letting it flow through and get silently coerced at upload.
+        # Enforce the supported QuestionCategory enum. The LLM occasionally
+        # emits sloppy values (e.g. "HARD", "Code", "Deployment", "MULTIPLE");
+        # recover them by inferring the correct category from the question's
+        # data structure (codingDetails/testCases -> CODING, rubric ->
+        # SHORT_ANSWER, choices count -> SINGLE/MULTIPLE_CHOICE) so we don't
+        # drop otherwise-good questions. Only reject if inference is impossible.
         if question_category not in VALID_QUESTION_CATEGORIES:
-            print(f"  Question {i+1}: REJECTED - category '{question_category}' is not one of the supported enums {sorted(VALID_QUESTION_CATEGORIES)}")
-            continue
+            has_coding = isinstance(qc['question'].get('codingDetails'), dict) and isinstance(qc['question'].get('testCases'), list)
+            has_rubric = isinstance(qc['question'].get('rubric'), dict)
+            choices = qc.get('choices', [])
+            try:
+                correct_count = int(sum(1 for c in choices if c and c.get('isCorrect')))
+            except Exception:
+                correct_count = 0
+            inferred = infer_category(
+                has_coding=has_coding,
+                has_rubric=has_rubric,
+                choices_correct_count=correct_count,
+                has_choices=isinstance(choices, list) and len(choices) > 0,
+            )
+            if inferred is None:
+                print(f"  Question {i+1}: REJECTED - category '{question_category}' is not a supported enum {sorted(VALID_QUESTION_CATEGORIES)} and could not be inferred from structure")
+                continue
+            print(f"  Question {i+1}: WARN - category '{question_category}' unrecognized -> inferred '{inferred}' from structure; fixing")
+            question_category = inferred
+            qc['question']['category'] = inferred
 
         # CODING-specific shape validation. CODING questions carry
         # codingDetails + testCases instead of choices; reject malformed ones
