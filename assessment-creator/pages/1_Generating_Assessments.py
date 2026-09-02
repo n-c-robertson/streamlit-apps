@@ -130,25 +130,6 @@ def main():
     st.title("Generating Assessments")
     # Staff JWT entry (replaces the deprecated jwt_token Streamlit secret).
     settings.render_jwt_sidebar()
-    if not settings.is_jwt_set():
-        st.warning(
-            "Enter your Udacity staff JWT in the sidebar before generating "
-            "assessments. It is used as the Bearer token for all GraphQL calls."
-        )
-    env_caption = (
-        f"git `{BUILD_SHA}` | classroom-content `{API_URL}` | "
-        f"jwt sha256[:10] `{JWT_FINGERPRINT}`"
-    )
-    if ND_FIX_PRESENT:
-        st.success(
-            f"Build `{BUILD_TAG}` - {ND_FIX_DETAIL}. {env_caption}"
-        )
-    else:
-        st.error(
-            f"Build `{BUILD_TAG}` - ND fix NOT loaded: {ND_FIX_DETAIL}. "
-            "Reboot the app from Streamlit Cloud (Manage app -> Reboot). "
-            f"{env_caption}"
-        )
     st.markdown("Create AI-generated assessment questions for one or more Udacity programs.")
     
     # Initialize session state for storing results

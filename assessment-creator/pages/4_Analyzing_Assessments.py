@@ -31,11 +31,6 @@ for _key in ["results_df", "user_skills_df", "assessment_id_loaded", "reco_filte
 
 # Staff JWT entry (replaces the deprecated jwt_token Streamlit secret).
 utils_assessment_analysis.settings.render_jwt_sidebar()
-if not utils_assessment_analysis.settings.is_jwt_set():
-    st.warning(
-        "Enter your Udacity staff JWT in the sidebar before analyzing an "
-        "assessment. It is used as the Bearer token for all GraphQL calls."
-    )
 
 with st.form("Analyze Assessments"):
     assessment_id = st.text_input("Assessment ID", value='c84dd4d7-0fa0-47e7-9757-ac5b2ceb85d6')

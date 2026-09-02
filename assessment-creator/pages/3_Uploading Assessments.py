@@ -1673,12 +1673,6 @@ def main():
     st.markdown("Upload your reviewed assessment CSV file to create your assessment.")
     # Staff JWT entry (replaces the deprecated jwt_token Streamlit secret).
     settings.render_jwt_sidebar()
-    if not settings.is_jwt_set():
-        st.warning(
-            "Enter your Udacity staff JWT in the sidebar before uploading or "
-            "downloading assessments. It is used as the Bearer token for all "
-            "GraphQL calls."
-        )
     
     # Initialize session state
     if 'upload_result' not in st.session_state:
