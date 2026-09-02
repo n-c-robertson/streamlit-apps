@@ -393,7 +393,7 @@ def fetch_readiness_lessons_from_skills_api(prerequisite_skills):
     # Headers for API call
     headers = {
         'content-type': 'application/json',
-        'Authorization': f'Bearer {settings.UDACITY_JWT}',
+        'Authorization': f'Bearer {settings.get_udacity_jwt()}',
         'Accept': 'application/json'
     }
     

@@ -82,6 +82,14 @@ st.set_page_config(
 st.title("[admin]")
 st.caption("Aggregated assessment performance analytics for the configured assessment IDs.")
 
+# Staff JWT entry (replaces the deprecated jwt_token Streamlit secret).
+utils_assessment_analysis.settings.render_jwt_sidebar()
+if not utils_assessment_analysis.settings.is_jwt_set():
+    st.warning(
+        "Enter your Udacity staff JWT in the sidebar before loading analytics. "
+        "It is used as the Bearer token for all GraphQL calls."
+    )
+
 with st.form("admin_load"):
     st.markdown("#### Staff password")
     password = st.text_input(
@@ -95,6 +103,8 @@ with st.form("admin_load"):
 if submitted:
     if password != utils_assessment_analysis.settings.PASSWORD:
         st.error("Incorrect password.")
+    elif not utils_assessment_analysis.settings.is_jwt_set():
+        st.error("No Udacity staff JWT found. Paste your JWT in the sidebar and try again.")
     else:
         prog = st.progress(0.0, text="Loading assessments…")
         try:

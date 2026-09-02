@@ -24,11 +24,11 @@ BUILD_TAG = '2026-06-19-construction-fallback-restored'
 
 
 def _safe_jwt_fingerprint():
-    """Short non-reversible hash of the deployed JWT so we can compare what
+    """Short non-reversible hash of the session JWT so we can compare what
     the hosted environment is using vs what gets pasted into the gql-debug
     tool. Never logs the actual token."""
     try:
-        token = settings.UDACITY_JWT or ''
+        token = settings.get_udacity_jwt() or ''
     except Exception:
         return 'unavailable'
     if not token:
@@ -128,6 +128,13 @@ def _load_difficulty_levels():
 
 def main():
     st.title("Generating Assessments")
+    # Staff JWT entry (replaces the deprecated jwt_token Streamlit secret).
+    settings.render_jwt_sidebar()
+    if not settings.is_jwt_set():
+        st.warning(
+            "Enter your Udacity staff JWT in the sidebar before generating "
+            "assessments. It is used as the Bearer token for all GraphQL calls."
+        )
     env_caption = (
         f"git `{BUILD_SHA}` | classroom-content `{API_URL}` | "
         f"jwt sha256[:10] `{JWT_FINGERPRINT}`"
@@ -310,6 +317,8 @@ def main():
         if submitted:
             if password != utils_assessment_generation.settings.PASSWORD:
                 st.error("❌ Incorrect password. Please try again.")
+            elif not utils_assessment_generation.settings.is_jwt_set():
+                st.error("❌ No Udacity staff JWT found. Paste your JWT in the sidebar and try again.")
             elif MODE == 'CD/ND Program Keys' and not PROGRAM_KEYS.strip():
                 st.error("❌ Please enter at least one program key.")
             elif MODE == 'Uploaded Content' and not UPLOADED_FILE and not (FREE_TEXT or '').strip():

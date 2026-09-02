@@ -16,6 +16,8 @@ st.markdown(
     - Tab 3: Uploading your reviewed question set to Udacity and creating your assessments.
 
     A staff password is required to run Tab 1 and 3 since execute read and create tasks against Udacity's services. If you do not have the staff password, reach out to Nathan Robertson.
+
+    **Udacity staff JWT**: Tabs 1, 3, 4, and 5 also require your own Udacity staff JWT, which you paste into the sidebar on first use. The JWT is stored only in your browser session (Streamlit session state) — it is never written to the app's secrets or disk — so you'll need to re-enter it when it expires or after starting a new session.
     """
    )
 

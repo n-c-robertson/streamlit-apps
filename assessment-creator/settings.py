@@ -28,14 +28,191 @@ from sklearn.metrics.pairwise import cosine_similarity
 ENVIRONMENT = 'production'
 
 # API key for service account.
-UDACITY_JWT = st.secrets['jwt_token']
+# The JWT is no longer stored in Streamlit secrets (it expired every ~3 weeks
+# and required redeploying the app). Instead, each staff user pastes their own
+# Udacity staff JWT into the sidebar on first use; it is kept in
+# ``st.session_state`` for the lifetime of the browser session. See
+# ``render_jwt_sidebar`` / ``get_udacity_jwt`` below.
+SESSION_STATE_JWT_KEY = 'udacity_staff_jwt'
+
+
+def get_udacity_jwt():
+    """Return the staff JWT for the current session, or ``None`` if unset.
+
+    Reads from ``st.session_state`` so every page in the multipage app shares
+    the same token after the user enters it once.
+    """
+    try:
+        return st.session_state.get(SESSION_STATE_JWT_KEY) or None
+    except Exception:
+        # ``st.session_state`` is only available inside a Streamlit run; module
+        # imports outside Streamlit (e.g. unit tests) should not crash here.
+        return None
+
+
+def is_jwt_set():
+    """True if a staff JWT has been entered for this session."""
+    return bool(get_udacity_jwt())
+
 
 def production_headers():
-    STAFF_HEADERS = {
-        'Authorization': f'Bearer {UDACITY_JWT}',
-        'Content-Type': 'application/json'
+    """Build authenticated request headers using the session's staff JWT.
+
+    Raises a ``RuntimeError`` with a helpful message if no JWT has been
+    entered yet, so callers fail loudly instead of sending unauthenticated
+    requests that silently 401 against Udacity's GraphQL APIs.
+    """
+    jwt = get_udacity_jwt()
+    if not jwt:
+        raise RuntimeError(
+            "No Udacity staff JWT found for this session. Enter your JWT in "
+            "the sidebar (\"Udacity staff JWT\") before running this action."
+        )
+    return {
+        'Authorization': f'Bearer {jwt}',
+        'Content-Type': 'application/json',
     }
-    return STAFF_HEADERS
+
+
+def _jwt_fingerprint(jwt_value):
+    """Short non-reversible hash of a JWT so we can show which token is in
+    use without ever displaying the token itself."""
+    if not jwt_value:
+        return 'empty'
+    return hashlib.sha256(jwt_value.encode('utf-8')).hexdigest()[:10]
+
+
+# Minimal read-only GraphQL query used purely to validate that a candidate
+# JWT is accepted by Udacity's assessments API. `difficultyLevels` is
+# argument-less and cheap, so it's a good liveness/auth probe. Mirrors the
+# query already used by `fetch_difficulty_levels` in the upload page.
+_JWT_PROBE_QUERY = """
+query {
+  difficultyLevels {
+    id
+  }
+}
+"""
+
+
+def verify_jwt(token, timeout=15):
+    """Validate a candidate staff JWT by making one authenticated read.
+
+    Sends the tiny ``difficultyLevels`` query to the assessments API with the
+    candidate token as the Bearer header (NOT the session token, so we can
+    validate before persisting). Returns ``(ok, message)`` where ``ok`` is
+    True only when the API accepts the token and returns data.
+
+    Used by ``render_jwt_sidebar`` to reject expired/invalid tokens at save
+    time instead of letting the user discover the failure on the next action.
+    """
+    token = (token or '').strip()
+    if not token:
+        return False, "JWT is empty."
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json',
+    }
+    try:
+        resp = requests.post(
+            ASSESSMENTS_API_URL,
+            headers=headers,
+            json={"query": _JWT_PROBE_QUERY},
+            timeout=timeout,
+        )
+    except requests.exceptions.RequestException as e:
+        # Network failure — don't block the save, but warn. The token may be
+        # fine and the API may simply be unreachable right now.
+        return False, f"Could not reach the assessments API to verify the JWT: {e}"
+    if resp.status_code in (401, 403):
+        return False, (
+            f"The assessments API rejected this JWT (HTTP {resp.status_code}). "
+            "It is likely expired or not a staff token — grab a fresh one and "
+            "try again."
+        )
+    if resp.status_code != 200:
+        preview = (resp.text or "")[:200]
+        return False, (
+            f"Unexpected HTTP {resp.status_code} from the assessments API while "
+            f"verifying the JWT. Preview: {preview!r}"
+        )
+    try:
+        body = resp.json()
+    except Exception:
+        return False, "The assessments API returned a non-JSON response while verifying the JWT."
+    if body.get("errors"):
+        return False, (
+            "The assessments API accepted the request but returned GraphQL "
+            f"errors: {body['errors']}"
+        )
+    return True, "JWT verified against the assessments API."
+
+
+def render_jwt_sidebar():
+    """Sidebar widget that lets a staff user paste their own Udacity JWT.
+
+    Call this once per page that needs authenticated API access. The token is
+    stored in ``st.session_state`` so it persists across pages for the rest
+    of the browser session without re-entry. Shows a fingerprint + email
+    hint once set, and a Clear button to wipe it.
+    """
+    with st.sidebar:
+        st.markdown("### Udacity staff JWT")
+        current = get_udacity_jwt()
+        if current:
+            st.success(f"JWT set (sha256[:10] `{_jwt_fingerprint(current)}`)")
+            # Try to surface the user's email from the JWT payload (no
+            # signature verification — purely informational).
+            try:
+                payload_b64 = current.split('.')[1]
+                # Pad base64url to a multiple of 4 for decode.
+                payload_b64 += '=' * (-len(payload_b64) % 4)
+                payload = json.loads(
+                    __import__('base64').urlsafe_b64decode(payload_b64).decode('utf-8')
+                )
+                email = payload.get('email') or payload.get('sub')
+                if email:
+                    st.caption(f"Token subject: `{email}`")
+            except Exception:
+                pass
+            if st.button("Clear JWT", use_container_width=True, help="Forget the JWT for this session."):
+                st.session_state.pop(SESSION_STATE_JWT_KEY, None)
+                st.rerun()
+        else:
+            st.info(
+                "Paste your **Udacity staff JWT** below. It is stored only in "
+                "this browser session (Streamlit session state) and is never "
+                "written to disk or secrets."
+            )
+            new_jwt = st.text_area(
+                "Udacity staff JWT",
+                value='',
+                height=120,
+                key="udacity_staff_jwt_input",
+                type="password",
+                help=(
+                    "Your personal Udacity staff JWT. Used as the Bearer token "
+                    "for all GraphQL calls against the assessments / "
+                    "classroom-content / skills APIs. Expires with your staff "
+                    "session, so re-paste when it expires."
+                ),
+            )
+            if st.button("Save JWT", use_container_width=True):
+                token = (new_jwt or '').strip()
+                if not token:
+                    st.error("Please paste a non-empty JWT.")
+                else:
+                    # Validate the candidate token against the assessments API
+                    # before persisting it, so we never store an expired/invalid
+                    # JWT and the user gets immediate feedback.
+                    with st.spinner("Verifying JWT against the assessments API…"):
+                        ok, message = verify_jwt(token)
+                    if ok:
+                        st.session_state[SESSION_STATE_JWT_KEY] = token
+                        st.success("JWT verified and saved for this session.")
+                        st.rerun()
+                    else:
+                        st.error(f"JWT not saved: {message}")
 
 ASSESSMENTS_API_URL = st.secrets['assessments_api_url']
 CLASSROOM_CONTENT_API_URL = st.secrets['classroom_content_api_url']

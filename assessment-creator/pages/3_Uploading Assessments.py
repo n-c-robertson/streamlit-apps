@@ -1671,6 +1671,14 @@ def convert_assessment_to_csv_dataframe(assessment):
 def main():
     st.title("Uploading Assessments")
     st.markdown("Upload your reviewed assessment CSV file to create your assessment.")
+    # Staff JWT entry (replaces the deprecated jwt_token Streamlit secret).
+    settings.render_jwt_sidebar()
+    if not settings.is_jwt_set():
+        st.warning(
+            "Enter your Udacity staff JWT in the sidebar before uploading or "
+            "downloading assessments. It is used as the Bearer token for all "
+            "GraphQL calls."
+        )
     
     # Initialize session state
     if 'upload_result' not in st.session_state:
@@ -1703,6 +1711,8 @@ def main():
         if submitted:
             if password != settings.PASSWORD:
                 st.error("❌ Incorrect password. Please try again.") 
+            elif not settings.is_jwt_set():
+                st.error("❌ No Udacity staff JWT found. Paste your JWT in the sidebar and try again.")
             elif csv is None:
                 st.error("Please upload a CSV file.")
             elif not assessment_title.strip():
@@ -1778,6 +1788,8 @@ def main():
         if download_submitted:
             if download_password != settings.PASSWORD:
                 st.error("❌ Incorrect password. Please try again.")
+            elif not settings.is_jwt_set():
+                st.error("❌ No Udacity staff JWT found. Paste your JWT in the sidebar and try again.")
             elif not download_assessment_id.strip():
                 st.error("Please enter an assessment ID.")
             else:

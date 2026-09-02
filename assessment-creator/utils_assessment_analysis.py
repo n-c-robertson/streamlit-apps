@@ -149,7 +149,7 @@ def get_skills_recommendations(user_skills_df, results_df, difficulty_filter=Non
     
     headers = {
         'content-type': 'application/json',
-        'Authorization': f'Bearer {settings.UDACITY_JWT}',
+        'Authorization': f'Bearer {settings.get_udacity_jwt()}',
         'Accept': 'application/json'
     }
     
