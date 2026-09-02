@@ -142,8 +142,8 @@ def verify_jwt(token, timeout=15):
         return False, "The assessments API returned a non-JSON response while verifying the JWT."
     if body.get("errors"):
         return False, (
-            "The assessments API accepted the request but returned GraphQL "
-            f"errors: {body['errors']}"
+            "Error: JWT token not accepted. Check to see if you are using an "
+            "expired JWT token."
         )
     return True, "JWT verified against the assessments API."
 
@@ -211,7 +211,7 @@ def render_jwt_sidebar():
                         st.success("JWT verified and saved for this session.")
                         st.rerun()
                     else:
-                        st.error(f"JWT not saved: {message}")
+                        st.error(message)
 
 ASSESSMENTS_API_URL = st.secrets['assessments_api_url']
 CLASSROOM_CONTENT_API_URL = st.secrets['classroom_content_api_url']
