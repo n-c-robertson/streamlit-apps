@@ -184,10 +184,9 @@ def render_jwt_sidebar():
                 "this browser session (Streamlit session state) and is never "
                 "written to disk or secrets."
             )
-            new_jwt = st.text_area(
+            new_jwt = st.text_input(
                 "Udacity staff JWT",
                 value='',
-                height=120,
                 key="udacity_staff_jwt_input",
                 type="password",
                 help=(
