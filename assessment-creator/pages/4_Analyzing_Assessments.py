@@ -149,8 +149,11 @@ if st.session_state.results_df is not None and not st.session_state.results_df.e
 
         if selected_domains:
             _sel = set(selected_domains)
-            cohort_scores = results_df.loc[
-                results_df['userId'].map(lambda u: utils_assessment_analysis.domain_of(email_map.get(u, u)) in _sel),
+            # Dedupe to one row per attempt so cohort counts aren't inflated by
+            # the per-question row count (see plot_total_score_histogram).
+            _attempt_df = results_df.drop_duplicates(subset='id') if 'id' in results_df.columns else results_df
+            cohort_scores = _attempt_df.loc[
+                _attempt_df['userId'].map(lambda u: utils_assessment_analysis.domain_of(email_map.get(u, u)) in _sel),
                 'totalScore',
             ].dropna()
             utils_assessment_analysis.plot_total_score_histogram(

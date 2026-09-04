@@ -1568,6 +1568,13 @@ def plot_total_score_histogram(results_df, cohort_scores=None, cohort_label=""):
     mean, red dotted = cohort 75th percentile.
     """
     # Get all total scores (including multiple attempts per learner)
+    # results_df carries one row per QUESTION, but this chart is "all attempts" —
+    # histogram one data point per attempt so each attempt's totalScore is
+    # counted exactly once (matches the per-attempt table below). Without this
+    # dedupe, an attempt with N questions contributes its totalScore N times,
+    # inflating the count axis to ~N x the real attempt count.
+    if 'id' in results_df.columns:
+        results_df = results_df.drop_duplicates(subset='id')
     all_scores = results_df['totalScore'].dropna()
 
     if len(all_scores) == 0:
