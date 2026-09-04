@@ -1,0 +1,9 @@
+# Streamlit local secrets — never commit (contains API keys, passwords)
+.streamlit/secrets.toml
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store

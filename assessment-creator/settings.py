@@ -55,20 +55,28 @@ def get_udacity_jwt():
     main Streamlit thread) and mirrors the value into ``_JWT_CACHE`` so worker
     threads — which have no script-run context and cannot access
     ``st.session_state`` — can still retrieve the token via the cache.
+
+    Worker-thread note: in current Streamlit, accessing ``st.session_state``
+    from a thread without a script-run context does NOT always raise — it can
+    silently return ``None``. So the cache fallback must run whenever the
+    session lookup yields no token, not only when it throws.
     """
     global _JWT_CACHE
+    jwt = None
     try:
         jwt = st.session_state.get(SESSION_STATE_JWT_KEY) or None
-        if jwt:
-            # Keep the thread-readable cache in sync for worker threads.
-            _JWT_CACHE = jwt
-        return jwt
     except Exception:
         # ``st.session_state`` is only available inside a Streamlit run; module
         # imports outside Streamlit (e.g. unit tests) should not crash here.
-        # Also reached inside worker threads that have no script-run context —
-        # fall back to the cache populated by the main thread.
-        return _JWT_CACHE
+        # Also reached inside worker threads that have no script-run context.
+        pass
+    if jwt:
+        # Keep the thread-readable cache in sync for worker threads.
+        _JWT_CACHE = jwt
+        return jwt
+    # No session JWT available (worker thread, or simply not set yet) — fall
+    # back to the thread-readable cache populated by the main thread.
+    return _JWT_CACHE
 
 
 def clear_udacity_jwt():
