@@ -1654,9 +1654,13 @@ def plot_total_score_histogram(results_df, cohort_scores=None, cohort_label=""):
     cbar.set_ticklabels(['Poor', 'Fair', 'Good', 'Very Good', 'Excellent'])
     
     # Update layout
-    ax.set_xlabel('Total Score', color='black')
+    ax.set_xlabel('Total Score (%)', color='black')
     ax.set_ylabel('Number of Attempts', color='black')
     ax.set_title('Distribution of Total Scores (All Attempts)', color='black')
+    # totalScore is a 0-1 fraction; show the x-axis as 0-100% so it matches the
+    # metric cards above (which multiply by 100) instead of raw 0.0-1.0 ticks.
+    ax.set_xlim(0, 1)
+    ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x * 100:.0f}%'))
     ax.legend()
     ax.grid(True, alpha=0.3)
     
