@@ -35,19 +35,54 @@ ENVIRONMENT = 'production'
 # ``render_jwt_sidebar`` / ``get_udacity_jwt`` below.
 SESSION_STATE_JWT_KEY = 'udacity_staff_jwt'
 
+# Module-level mirror of the session JWT. ``st.session_state`` is thread-local
+# in Streamlit (bound to the script-run context), so worker threads spawned via
+# ``concurrent.futures.ThreadPoolExecutor`` cannot read it — they get no
+# context and ``st.session_state.get(...)`` raises. To keep every authenticated
+# call site working regardless of which thread it runs on, the main thread
+# writes the JWT here whenever it (re)reads session state, and worker threads
+# fall back to this cache. A single Python string reference is read/written
+# atomically under the GIL, so no lock is needed for this one-writer/many-reader
+# pattern. Cleared in lock-step with the session value (see ``render_jwt_sidebar``
+# and ``clear_udacity_jwt``).
+_JWT_CACHE = None
+
 
 def get_udacity_jwt():
     """Return the staff JWT for the current session, or ``None`` if unset.
 
-    Reads from ``st.session_state`` so every page in the multipage app shares
-    the same token after the user enters it once.
+    Prefers ``st.session_state`` (the authoritative store, only readable on the
+    main Streamlit thread) and mirrors the value into ``_JWT_CACHE`` so worker
+    threads — which have no script-run context and cannot access
+    ``st.session_state`` — can still retrieve the token via the cache.
     """
+    global _JWT_CACHE
     try:
-        return st.session_state.get(SESSION_STATE_JWT_KEY) or None
+        jwt = st.session_state.get(SESSION_STATE_JWT_KEY) or None
+        if jwt:
+            # Keep the thread-readable cache in sync for worker threads.
+            _JWT_CACHE = jwt
+        return jwt
     except Exception:
         # ``st.session_state`` is only available inside a Streamlit run; module
         # imports outside Streamlit (e.g. unit tests) should not crash here.
-        return None
+        # Also reached inside worker threads that have no script-run context —
+        # fall back to the cache populated by the main thread.
+        return _JWT_CACHE
+
+
+def clear_udacity_jwt():
+    """Forget the JWT from both session state and the thread-readable cache.
+
+    Called by ``render_jwt_sidebar`` when the user clears the token, so a
+    cleared token is immediately invisible to in-flight worker threads too.
+    """
+    global _JWT_CACHE
+    _JWT_CACHE = None
+    try:
+        st.session_state.pop(SESSION_STATE_JWT_KEY, None)
+    except Exception:
+        pass
 
 
 def is_jwt_set():
@@ -176,7 +211,7 @@ def render_jwt_sidebar():
             except Exception:
                 pass
             if st.button("Clear JWT", use_container_width=True, help="Forget the JWT for this session."):
-                st.session_state.pop(SESSION_STATE_JWT_KEY, None)
+                clear_udacity_jwt()
                 st.rerun()
         else:
             st.info(

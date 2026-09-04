@@ -346,11 +346,20 @@ def get_programs_by_duration(duration_filter):
     except Exception:
         return []
 
-def fetch_page(assessment_id, limit, page):
-    """Fetch a single page of attempts from the Assessments API."""
+def fetch_page(assessment_id, limit, page, headers=None):
+    """Fetch a single page of attempts from the Assessments API.
+
+    ``headers`` is optional and rarely needed now that ``settings.get_udacity_jwt``
+    mirrors the session JWT into a thread-readable cache (so worker threads can
+    build headers themselves). Kept as an escape hatch for tests / explicit
+    header injection; when ``None`` the headers are built from the current
+    session JWT via ``settings.production_headers()``.
+    """
+    if headers is None:
+        headers = settings.production_headers()
     response = requests.post(
         settings.ASSESSMENTS_API_URL,
-        headers=settings.production_headers(),
+        headers=headers,
         json={"query": ATTEMPTS_QUERY, "variables": {"assessmentId": assessment_id, "limit": limit, "page": page}},
     )
     if response.status_code != 200:
@@ -365,6 +374,10 @@ def fetch_attempts(assessment_id, limit=50, progress_bar=None, status_text=None)
     dispatched in parallel and results are collected via as_completed so
     the optional Streamlit progress_bar and status_text placeholders can
     be updated in the main thread without any thread-safety issues.
+
+    Auth: each worker thread builds its own headers via
+    ``settings.production_headers()``, which reads the thread-readable JWT
+    cache populated by the main thread (see ``settings.get_udacity_jwt``).
     """
     # Page 1 reveals pagination metadata
     page1_data = fetch_page(assessment_id, limit, 1)
