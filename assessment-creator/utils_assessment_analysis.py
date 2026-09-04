@@ -44,6 +44,28 @@ import prompts
 # UI preview and offer a download button for the full dataset.
 _TABLE_PREVIEW_ROWS = 100
 
+# Plotly colorscale for the skills heatmap. The first band (light gray) maps
+# to the sentinel value -1, which marks skills a learner was never asked
+# about; the rest is the RdYlGn gradient over [0, 100]%. Built explicitly
+# (rather than using the built-in 'RdYlGn') because zmin=-1 shifts the
+# normalization, so the gradient stops must be re-mapped to
+# (value + 1) / 101 to keep 0%->red, 50%->yellow, 100%->green.
+_HEATMAP_COLORSCALE = [
+    [0.0, 'lightgray'],          # -1 (not asked)
+    [0.00990, 'lightgray'],       # end of the gray band; 0% starts here
+    [0.00990, '#a50026'],         # 0%   -> red
+    [0.10891, '#d73027'],
+    [0.20792, '#f46d43'],
+    [0.30693, '#fdae61'],
+    [0.40594, '#fee08b'],
+    [0.50495, '#ffffbf'],         # 50%  -> yellow
+    [0.60396, '#d9ef8b'],
+    [0.70297, '#a6d96a'],
+    [0.80198, '#66bd63'],
+    [0.90099, '#1a9850'],
+    [1.0, '#006837'],             # 100% -> green
+]
+
 #========================================
 # FUNCTIONS
 #========================================
@@ -901,7 +923,10 @@ def plot_net_skills_heatmap(user_skills_df: pd.DataFrame, results_df):
             percent = (strong / total * 100) if total > 0 else 0
             skill_matrix.setdefault(skill, {})[user] = percent
 
-    heatmap_df = pd.DataFrame.from_dict(skill_matrix, orient='index').fillna(0)
+    # Sentinel -1 marks skills a learner was never asked about (no questions
+    # tagged to that skill). Rendered as light gray on the heatmap so "not
+    # asked" is visually distinct from "asked but scored 0%".
+    heatmap_df = pd.DataFrame.from_dict(skill_matrix, orient='index').fillna(-1)
 
     # --- Aggregate strong and weak VALUES across all users ---
     strong_values = {}
@@ -935,8 +960,9 @@ def plot_net_skills_heatmap(user_skills_df: pd.DataFrame, results_df):
     heatmap_df = heatmap_df.reindex(sorted_skills)
     heatmap_df.index = [percent_labels[skill] for skill in sorted_skills]
 
-    # Sort user IDs by total skill strength
-    user_totals = heatmap_df.sum(axis=0)
+    # Sort user IDs by total skill strength (treat "not asked" cells as 0 so
+    # they don't penalize a user's ranking).
+    user_totals = heatmap_df.replace(-1, 0).sum(axis=0)
     sorted_users = user_totals.sort_values(ascending=False).index
     heatmap_df = heatmap_df[sorted_users]
 
@@ -1011,16 +1037,27 @@ def plot_net_skills_heatmap(user_skills_df: pd.DataFrame, results_df):
         row=1, col=1
     )
     
-    # Add heatmap (right)
+    # Add heatmap (right). z=-1 (sentinel) marks skills a learner was never
+    # asked about; those cells render light gray via the gray band at the
+    # bottom of the colorscale, distinct from a real 0% score (red).
+    _z = heatmap_df.values
+    _hover = np.array([
+        "Not asked" if v == -1 else f"{v:.0f}% correct"
+        for v in _z.ravel()
+    ]).reshape(_z.shape)
     fig.add_trace(
         go.Heatmap(
-            z=heatmap_df.values,
+            z=_z,
             x=heatmap_df.columns,
             y=heatmap_df.index,
-            colorscale='RdYlGn',
-            zmin=0,
+            colorscale=_HEATMAP_COLORSCALE,
+            zmin=-1,
             zmax=100,
             showscale=True,
+            hovertemplate=(
+                "User: %{x}<br>Skill: %{y}<br>%{customdata}<extra></extra>"
+            ),
+            customdata=_hover,
             colorbar=dict(
                 title=dict(text="% Correct Responses"),
                 tickmode="array",
