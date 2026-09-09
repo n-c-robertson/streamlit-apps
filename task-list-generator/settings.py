@@ -1,13 +1,11 @@
 """Session-state staff JWT handling for the task-list-generator app.
 
-Mirrors the assessment-creator's approach: the JWT is no longer required to
-live in Streamlit secrets (it expired every ~3 weeks and forced a redeploy).
-Instead, each staff user pastes their own Udacity staff JWT into the sidebar on
-first use; it is kept in ``st.session_state`` for the lifetime of the browser
-session. A module-level cache mirrors it so worker threads (which cannot read
-``st.session_state``) still retrieve the token. If a ``UDACITY_JWT`` is present
-in Streamlit secrets it is used as a fallback so existing deployments keep
-working without pasting a token.
+The JWT is never read from Streamlit secrets. Each staff user must paste their
+own Udacity staff JWT into the sidebar on first use; it is kept in
+``st.session_state`` for the lifetime of the browser session and verified with
+a read-only classroom-content query before it is saved. A module-level cache
+mirrors it so worker threads (which cannot read ``st.session_state``) still
+retrieve the token.
 """
 from __future__ import annotations
 
@@ -32,23 +30,15 @@ SESSION_STATE_JWT_KEY = "udacity_staff_jwt"
 _JWT_CACHE: str | None = None
 
 
-def _secrets_jwt() -> str | None:
-    """Return a JWT from Streamlit secrets if one is configured, else None."""
-    try:
-        return st.secrets.get("UDACITY_JWT") or None
-    except Exception:
-        return None
-
-
 def get_udacity_jwt() -> str | None:
     """Return the staff JWT for the current session, or ``None`` if unset.
 
-    Prefers ``st.session_state`` (the authoritative store, only readable on the
-    main Streamlit thread) and mirrors the value into ``_JWT_CACHE`` so worker
-    threads — which have no script-run context and cannot access
+    Reads from ``st.session_state`` (the authoritative store, only readable on
+    the main Streamlit thread) and mirrors the value into ``_JWT_CACHE`` so
+    worker threads — which have no script-run context and cannot access
     ``st.session_state`` — can still retrieve the token via the cache. Falls
-    back to the thread-readable cache, then to Streamlit secrets (so existing
-    deployments that still set ``UDACITY_JWT`` in secrets keep working).
+    back to the thread-readable cache. There is no secrets fallback: a user
+    must paste their own JWT.
     """
     global _JWT_CACHE
     jwt = None
@@ -62,17 +52,13 @@ def get_udacity_jwt() -> str | None:
     if jwt:
         _JWT_CACHE = jwt
         return jwt
-    if _JWT_CACHE:
-        return _JWT_CACHE
-    return _secrets_jwt()
+    return _JWT_CACHE
 
 
 def clear_udacity_jwt() -> None:
     """Forget the session JWT from both session state and the thread cache.
 
-    Does NOT touch the secrets fallback (a cleared session token should not
-    wipe a deployment-wide secrets token). Called by ``render_jwt_sidebar`` when
-    the user clears the token.
+    Called by ``render_jwt_sidebar`` when the user clears the token.
     """
     global _JWT_CACHE
     _JWT_CACHE = None
@@ -83,7 +69,7 @@ def clear_udacity_jwt() -> None:
 
 
 def is_jwt_set() -> bool:
-    """True if a staff JWT is available (session, cache, or secrets)."""
+    """True if a staff JWT has been entered for this session."""
     return bool(get_udacity_jwt())
 
 
@@ -177,20 +163,19 @@ def render_jwt_sidebar() -> None:
     Call once per page that needs authenticated API access. The token is stored
     in ``st.session_state`` so it persists for the rest of the browser session
     without re-entry. Shows a fingerprint + subject hint once set, and a Clear
-    button to wipe it. If a JWT is present in secrets, that is surfaced too.
+    button to wipe it. The token is verified with a read-only classroom-content
+    query before it is saved, so expired/invalid tokens are rejected upfront.
+    There is no secrets fallback — a user must paste their own JWT.
     """
     with st.sidebar:
         st.markdown("### Udacity staff JWT")
         current = get_udacity_jwt()
-        from_secrets = bool(_secrets_jwt()) and not st.session_state.get(SESSION_STATE_JWT_KEY)
         if current:
             st.success(f"JWT set (sha256[:10] `{_jwt_fingerprint(current)}`)")
             subject = _jwt_subject(current)
             if subject:
                 st.caption(f"Token subject: `{subject}`")
-            if from_secrets:
-                st.caption("(loaded from `.streamlit/secrets.toml` — paste a token above to override for this session)")
-            if st.button("Clear session JWT", use_container_width=True, help="Forget the session JWT; falls back to secrets if set."):
+            if st.button("Clear JWT", use_container_width=True, help="Forget the JWT for this session."):
                 clear_udacity_jwt()
                 st.rerun()
         else:

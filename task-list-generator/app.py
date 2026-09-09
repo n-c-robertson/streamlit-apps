@@ -23,10 +23,10 @@ st.set_page_config(page_title="Udacity Rubric -> Task List", page_icon=":memo:",
 # Secrets / config
 # --------------------------------------------------------------------------- #
 # OPENAI_API_KEY still comes from Streamlit secrets (it is app-wide, not
-# per-user). The Udacity JWT, however, is now entered per-session in the
-# sidebar (see settings.render_jwt_sidebar) and read via settings.get_udacity_jwt()
-# — it no longer needs to live in secrets, though a UDACITY_JWT in secrets is
-# still honored as a fallback so existing deployments keep working.
+# per-user). The Udacity JWT, however, must be entered per-session in the
+# sidebar (see settings.render_jwt_sidebar) and read via
+# settings.get_udacity_jwt() — it is never read from secrets, so each user
+# must paste their own token.
 
 
 def _openai_api_key() -> str:

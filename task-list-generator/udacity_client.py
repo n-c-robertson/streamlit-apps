@@ -61,7 +61,7 @@ def _gql(jwt: str, operation: str, variables: dict[str, Any]) -> dict[str, Any]:
     if resp.status_code in (401, 403):
         raise UdacityAPIError(
             f"classroom-content HTTP {resp.status_code}: staff JWT invalid/expired/revoked. "
-            f"Refresh UDACITY_JWT. Preview: {resp.text[:200]!r}"
+            f"Re-paste your JWT in the app sidebar. Preview: {resp.text[:200]!r}"
         )
     if not resp.ok:
         raise UdacityAPIError(f"classroom-content HTTP {resp.status_code}: {resp.text[:500]}")

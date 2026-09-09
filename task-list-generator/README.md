@@ -19,7 +19,7 @@ cd task-list-generator
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .streamlit/secrets.toml.example .streamlit/secrets.toml
-# edit secrets.toml: OPENAI_API_KEY  (UDACITY_JWT is optional — see below)
+# edit secrets.toml: OPENAI_API_KEY  (the Udacity JWT is entered in the app sidebar)
 streamlit run app.py
 ```
 
@@ -27,19 +27,15 @@ streamlit run app.py
 
 ```toml
 OPENAI_API_KEY = "sk-..."
-# UDACITY_JWT is optional. If present it is used as a fallback; otherwise each
-# staff user pastes their own Udacity staff JWT into the sidebar on first use
-# (stored only in the browser session, never written to disk).
 ```
 
 ## Udacity staff JWT
 
-The JWT is **no longer required** in `secrets.toml` (it expired every ~3 weeks
-and forced a redeploy). Instead, each staff user pastes their own Udacity staff
-JWT into the sidebar on first use; it is kept in Streamlit session state for the
-lifetime of the browser session and verified against classroom-content before it
-is saved. A `UDACITY_JWT` in `secrets.toml` is still honored as a fallback so
-existing deployments keep working without pasting a token.
+The JWT is **not** read from `secrets.toml`. Each staff user must paste their
+own Udacity staff JWT into the sidebar on first use; it is kept in Streamlit
+session state for the lifetime of the browser session and verified with a
+read-only classroom-content query before it is saved, so expired/invalid tokens
+are rejected upfront. Re-paste it when it expires.
 
 ## Endpoints (production)
 
