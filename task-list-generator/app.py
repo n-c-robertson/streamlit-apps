@@ -14,6 +14,7 @@ import concept_mapping
 import llm
 import rubric
 import semantic_search
+import settings
 import udacity_client
 
 st.set_page_config(page_title="Udacity Rubric -> Task List", page_icon=":memo:", layout="wide")
@@ -21,26 +22,27 @@ st.set_page_config(page_title="Udacity Rubric -> Task List", page_icon=":memo:",
 # --------------------------------------------------------------------------- #
 # Secrets / config
 # --------------------------------------------------------------------------- #
+# OPENAI_API_KEY still comes from Streamlit secrets (it is app-wide, not
+# per-user). The Udacity JWT, however, is now entered per-session in the
+# sidebar (see settings.render_jwt_sidebar) and read via settings.get_udacity_jwt()
+# — it no longer needs to live in secrets, though a UDACITY_JWT in secrets is
+# still honored as a fallback so existing deployments keep working.
 
 
-def _secrets() -> tuple[str, str]:
+def _openai_api_key() -> str:
     try:
-        s = st.secrets
-        api_key = s["OPENAI_API_KEY"]
-        jwt = s["UDACITY_JWT"]
+        return st.secrets["OPENAI_API_KEY"] or ""
     except (KeyError, FileNotFoundError):
-        api_key = ""
-        jwt = ""
-    if not api_key or not jwt:
-        st.error(
-            "Missing secrets. Copy `.streamlit/secrets.toml.example` to "
-            "`.streamlit/secrets.toml` and fill in OPENAI_API_KEY and UDACITY_JWT."
-        )
-        st.stop()
-    return api_key, jwt
+        return ""
 
 
-OPENAI_API_KEY, UDACITY_JWT = _secrets()
+OPENAI_API_KEY = _openai_api_key()
+if not OPENAI_API_KEY:
+    st.error(
+        "Missing OPENAI_API_KEY. Copy `.streamlit/secrets.toml.example` to "
+        "`.streamlit/secrets.toml` and fill in OPENAI_API_KEY."
+    )
+    st.stop()
 _oa = OpenAI(api_key=OPENAI_API_KEY)
 
 # --------------------------------------------------------------------------- #
@@ -71,8 +73,15 @@ if "concept_catalog" not in st.session_state:
 
 
 def _load_program(key: str) -> None:
+    jwt = settings.get_udacity_jwt()
+    if not jwt:
+        st.error(
+            "No Udacity staff JWT found. Paste your JWT in the sidebar "
+            "(\"Udacity staff JWT\") before loading a program."
+        )
+        st.stop()
     with st.status("Loading program from classroom-content (production)..."):
-        program = udacity_client.fetch_program(key, UDACITY_JWT)
+        program = udacity_client.fetch_program(key, jwt)
         chunks, projects = content_corpus.build_corpus(program)
         catalog = content_corpus.build_concept_catalog(chunks)
         with st.spinner("Embedding content for semantic search..."):
@@ -214,6 +223,8 @@ with st.sidebar:
     if st.button("Load program", type="primary", width="stretch"):
         if not key.strip():
             st.warning("Enter a cd/nd key.")
+        elif not settings.is_jwt_set():
+            st.warning("Enter your Udacity staff JWT below first.")
         else:
             try:
                 _load_program(key.strip())
@@ -232,6 +243,10 @@ with st.sidebar:
             st.caption("Content loaded:")
             for label, n in breakdown:
                 st.caption(f"· {n} {label}")
+
+# Per-session staff JWT entry (mirrors assessment-creator). Rendered after the
+# program loader so it sits below it in the sidebar.
+settings.render_jwt_sidebar()
 
 
 # --------------------------------------------------------------------------- #
