@@ -59,6 +59,11 @@ def embed_query(client: OpenAI, query: str) -> np.ndarray:
     return _embed(client, [query])[0]
 
 
+def embed_queries(client: OpenAI, queries: list[str]) -> np.ndarray:
+    """Batch-embed multiple queries. Returns shape (n, d), L2-normalized."""
+    return _embed(client, queries)
+
+
 def build_index(client: OpenAI, chunks: list[dict[str, Any]]) -> CorpusIndex:
     texts = [c["text"] for c in chunks]
     vectors = _embed(client, texts)

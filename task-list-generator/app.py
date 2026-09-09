@@ -10,6 +10,7 @@ import streamlit as st
 from openai import OpenAI
 
 import content_corpus
+import concept_mapping
 import llm
 import rubric
 import semantic_search
@@ -103,44 +104,25 @@ def _concept_url(program_key: str, concept_key: str) -> str:
 
 
 def _normalize_concepts(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Validate each task's LLM-chosen concept_key against the catalog. For any
-    missing or invalid key, fall back to the nearest concept by semantic search
-    over concept_rollup chunks. Always populate concept_title + concept_url."""
-    catalog = st.session_state.concept_catalog or []
-    catalog_by_key = {c["key"]: c for c in catalog}
-    index: semantic_search.CorpusIndex | None = st.session_state.index
-    program_key = (st.session_state.program or {}).get("key") or ""
+    """Assign each task a best-fit teaching concept via per-task semantic search
+    over the program's concept_rollup chunks (whole corpus, not project-scoped).
 
-    rollups = [c for c in (st.session_state.chunks or []) if c.get("type") == "concept_rollup"]
-
-    for i, t in enumerate(tasks, 1):
-        ck = t.get("concept_key")
-        if ck and ck in catalog_by_key:
-            t["concept_title"] = catalog_by_key[ck].get("title", "")
-        else:
-            # LLM picked a bad/missing key -> find nearest concept by embedding.
-            best = None
-            if index is not None and rollups:
-                qtext = f"{t.get('title','')} {t.get('description','')}"
-                try:
-                    qvec = semantic_search.embed_query(_oa, qtext)
-                    hits = index.search(qvec, k=1)
-                    # search returns all chunk types; prefer concept_rollup hits.
-                    rollup_hits = [h for h in hits if h.get("type") == "concept_rollup"]
-                    best = (rollup_hits or hits)[0] if (rollup_hits or hits) else None
-                except Exception:
-                    best = None
-            if best:
-                t["concept_key"] = best.get("concept_key")
-                t["concept_title"] = best.get("concept_title", "")
-            else:
-                t["concept_key"] = t.get("concept_key") or ""
-                t["concept_title"] = t.get("concept_title") or ""
-        if t.get("concept_key"):
-            t["concept_url"] = _concept_url(program_key, t["concept_key"])
-        else:
-            t["concept_url"] = ""
-    return tasks
+    This decouples concept assignment from the single holistic retrieval query
+    used for task synthesis. That holistic query biases the LLM toward a
+    project's own (often coarse, e.g. "Phase 2 - Implementing your Agentic
+    Workflow") concepts and collapses many tasks onto one concept. Per-task
+    search surfaces the most relevant granular concept for each task instead.
+    The LLM's concept_key pick is kept only as a fallback when semantic search
+    finds nothing.
+    """
+    return concept_mapping.assign_concepts(
+        tasks,
+        client=_oa,
+        index=st.session_state.index,
+        catalog=st.session_state.concept_catalog,
+        program_key=(st.session_state.program or {}).get("key") or "",
+        concept_url_fn=_concept_url,
+    )
 
 
 def _synthesize(project: dict[str, Any]) -> None:
