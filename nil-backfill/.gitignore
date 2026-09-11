@@ -1,0 +1,15 @@
+# Local secrets — never commit.
+.streamlit/secrets.toml
+
+# Python.
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Streamlit.
+.streamlit/*.log
+
+# OS.
+.DS_Store
