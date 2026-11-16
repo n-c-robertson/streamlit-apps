@@ -1186,9 +1186,10 @@ def process_question_group(question_tuple, group):
         print(f"Full traceback:")
         traceback.print_exc()
     
-    # Now, process choices for this question. SHORT_ANSWER and CODING have no
-    # choices — skip.
-    if question_id is not None and not is_short_answer and not is_coding:
+    # Now, process choices for this question. SHORT_ANSWER, CONVERSATIONAL,
+    # and CODING have no choices — skip.
+    is_conversational = (str(category).strip().upper() == "CONVERSATIONAL")
+    if question_id is not None and not is_short_answer and not is_conversational and not is_coding:
         with concurrent.futures.ThreadPoolExecutor() as choice_executor:
             futures = {
                 choice_executor.submit(process_choice, question_id, row): idx 
@@ -1201,7 +1202,7 @@ def process_question_group(question_tuple, group):
                 except Exception as e:
                     print(f"ERROR: Choice processing failed: {e}")
                     choice_results.append((None, None, e))
-    elif question_id is not None and (is_short_answer or is_coding):
+    elif question_id is not None and (is_short_answer or is_conversational or is_coding):
         print(f"{category} question {question_id}: skipping choice creation (no choices)")
     else:
         print(f"Skipping choice processing due to question creation failure")

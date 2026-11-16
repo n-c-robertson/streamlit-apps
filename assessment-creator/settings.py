@@ -286,7 +286,13 @@ CODING_CATEGORY = "CODING"
 # -> upload). The assessments API's QuestionCategory enum also has TRUE_FALSE,
 # but this app does not author it, so it is excluded. This is the single source
 # of truth — import from here, do not redefine.
-VALID_QUESTION_CATEGORIES = {"SINGLE_CHOICE", "MULTIPLE_CHOICE", "SHORT_ANSWER", "CODING"}
+VALID_QUESTION_CATEGORIES = {
+    "SINGLE_CHOICE",
+    "MULTIPLE_CHOICE",
+    "SHORT_ANSWER",
+    "CONVERSATIONAL",
+    "CODING",
+}
 
 
 def infer_category(has_coding=False, has_rubric=False, choices_correct_count=None, has_choices=False):
