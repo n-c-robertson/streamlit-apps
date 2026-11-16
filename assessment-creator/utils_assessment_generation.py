@@ -42,6 +42,34 @@ from settings import (
 # FUNCTIONS
 #========================================
 
+def _validate_rubric(rubric):
+    """Validate a rubric before it reaches the assessment API."""
+    if not isinstance(rubric, dict):
+        return None, "rubric must be an object"
+    criteria = rubric.get("criteria")
+    if not isinstance(criteria, list) or len(criteria) == 0:
+        return None, "rubric must have at least one criterion"
+    seen = set()
+    for criterion in criteria:
+        name = (
+            (criterion.get("name") or "").strip()
+            if isinstance(criterion, dict)
+            else ""
+        )
+        if not name:
+            return None, "criterion name is empty"
+        if name in seen:
+            return None, f"duplicate criterion name {name!r}"
+        seen.add(name)
+        points = criterion.get("points") if isinstance(criterion, dict) else None
+        if not isinstance(points, int) or points <= 0:
+            return None, f"criterion {name!r} has non-positive points ({points!r})"
+    threshold = rubric.get("passingThreshold")
+    if not isinstance(threshold, (int, float)) or not 0 <= threshold <= 1:
+        return None, f"passingThreshold must be in [0, 1] (got {threshold!r})"
+    return rubric, None
+
+
 def _coerce_int_in_bounds(value, default, lo, hi):
     """Coerce a CODING execution limit to an int within [lo, hi], defaulting if absent/invalid."""
     if value is None:
