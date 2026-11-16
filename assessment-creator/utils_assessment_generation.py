@@ -1456,6 +1456,23 @@ def process_concept(sectionId, node, lesson, concept, difficulty_level, difficul
         question_category = normalized_category
         qc['question']['category'] = normalized_category
 
+        # The model receives the selected categories as prompt guidance, but
+        # prompt compliance is not guaranteed. Enforce the UI selection here
+        # so a "CONVERSATIONAL only" run cannot silently upload SHORT_ANSWER
+        # or choice questions.
+        allowed_categories = {
+            str(category).strip().upper()
+            for category in (question_types or [])
+            if str(category).strip()
+        }
+        if allowed_categories and question_category not in allowed_categories:
+            print(
+                f"  Question {i+1}: REJECTED - category "
+                f"'{question_category}' is not among selected question types "
+                f"{sorted(allowed_categories)}"
+            )
+            continue
+
         # CONVERSATIONAL-specific shape validation. The API requires both a
         # rubric and conversationalConfig for this category.
         if question_category == 'CONVERSATIONAL':
