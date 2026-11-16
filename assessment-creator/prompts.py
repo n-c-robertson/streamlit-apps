@@ -413,6 +413,54 @@ def get_assessment_questions_prompt(
         {'role': 'user', 'content': user_prompt}
     ]
 
+
+short_answer_refinement_prompt = [
+    {
+        'role': 'system',
+        'content': """You are a careful assessment editor. Refine one SHORT_ANSWER question and its rubric.
+Return only valid JSON with this schema:
+{
+  "question": {
+    "content": string,
+    "rubric": {
+      "passingThreshold": number,
+      "criteria": [{"name": string, "description": string, "points": number}]
+    }
+  }
+}
+
+The question and rubric must assess the same skill and learning objective. Make the
+question succinct, clear, and plain-language. The question should naturally signal
+the important dimensions of a strong answer, but must not paste rubric criteria or
+descriptions verbatim. Keep 2-4 criteria, make them unique, concrete, and directly
+gradable. `passingThreshold` MUST be a fraction between 0 and 1 (for example,
+0.75), never a raw points total. Do not add requirements that the question does
+not ask for."""
+    },
+    {
+        'role': 'user',
+        'content': """Skill: {skill}
+Learning objectives: {learning_objectives}
+
+Question and rubric to refine:
+{question_data}
+
+Return the refined question and rubric only."""
+    },
+]
+
+
+def get_short_answer_refinement_prompt(skill, learning_objectives, question_data):
+    import json
+    return [
+        short_answer_refinement_prompt[0],
+        {'role': 'user', 'content': short_answer_refinement_prompt[1]['content'].format(
+            skill=skill,
+            learning_objectives=learning_objectives,
+            question_data=json.dumps(question_data, indent=2),
+        )},
+    ]
+
 # Readiness question generation prompt for testing prerequisite skills
 readiness_question_generation_prompt = [
     {
@@ -734,7 +782,7 @@ Evaluation Criteria:
 - **Answer Choices**:
 - For SINGLE_CHOICE: one correct, three plausible distractors.
 - For MULTIPLE_CHOICE: multiple correct answers (where applicable) with 4-5 total options.
-- For SHORT_ANSWER: no choices — instead evaluate the rubric: criteria are non-empty, uniquely named, cover the key dimensions of a correct answer, have positive integer points, and a passingThreshold in [0, 1].
+- For SHORT_ANSWER: no choices — instead evaluate the rubric: criteria are non-empty, uniquely named, cover the key dimensions of a correct answer, have positive integer points, and a passingThreshold in [0, 1]. Also verify that the question clearly signals in plain language what a strong answer should address without copying the rubric verbatim, and that every criterion is requested by the question.
 - For CODING: no choices — instead evaluate `codingDetails` and `testCases`: `language` is one of PYTHON/SQL/JAVA/JAVASCRIPT/CPP; the candidate's function is named exactly `solution` in both `starterCode` and `solutionCode` with identical signature (for Java, `class Solution` with a `solution` method); `solutionCode` is a correct implementation that passes every test case; there are at least 3 test cases with at least one `isExample: true`; `input` is valid JSON for PYTHON/JAVASCRIPT or a JSON scalar for JAVA/CPP; for non-SQL languages there is NO `testHarnessTemplate` (the API auto-generates it); for SQL, `testHarnessTemplate` is a DDL harness beginning with CREATE or WITH and `comparisonStrategy` is SORTED_LINES.
 - Distractors must be plausible, distinct, concise, and grammatically consistent.
 - Distractors must represent common misconceptions or errors, avoiding negative or ambiguous wording.
@@ -1626,7 +1674,7 @@ Evaluation Criteria:
 - **Answer Choices**:
 - SINGLE_CHOICE: one correct, three plausible distractors.
 - MULTIPLE_CHOICE: multiple correct (where appropriate), 4-5 total options.
-- SHORT_ANSWER: no choices — instead evaluate the rubric: criteria non-empty, uniquely named, cover key dimensions of a correct answer, positive integer points, passingThreshold in [0, 1].
+- SHORT_ANSWER: no choices — instead evaluate the rubric: criteria non-empty, uniquely named, cover key dimensions of a correct answer, positive integer points, passingThreshold in [0, 1]. Also verify that the question concisely signals what will be graded without pasting rubric text, and that the rubric does not grade unstated requirements.
 - CODING: no choices — instead evaluate `codingDetails` and `testCases`: `language` is one of PYTHON/SQL/JAVA/JAVASCRIPT/CPP; the candidate's function is named exactly `solution` in both `starterCode` and `solutionCode` with identical signature (for Java, `class Solution` with a `solution` method); `solutionCode` is a correct implementation that passes every test case; at least 3 test cases with at least one `isExample: true`; `input` is valid JSON for PYTHON/JAVASCRIPT or a JSON scalar for JAVA/CPP; non-SQL languages have NO `testHarnessTemplate`; for SQL, `testHarnessTemplate` is a DDL harness beginning with CREATE or WITH and `comparisonStrategy` is SORTED_LINES.
 - Distractors plausible, distinct, concise, grammatically consistent, represent common misconceptions. No negative/ambiguous wording.
 - Correct answers not overly lengthy, must not mimic question-stem language.

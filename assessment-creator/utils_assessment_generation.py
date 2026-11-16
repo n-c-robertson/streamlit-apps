@@ -1183,6 +1183,53 @@ def get_qc_id(qc):
     unique_str += qc['question'].get('difficultyLevelId', '')
     return hashlib.md5(unique_str.encode('utf-8')).hexdigest()
 
+def refine_short_answer_question(qc, learning_objectives):
+    """Align a SHORT_ANSWER stem with its rubric without changing metadata."""
+    question = qc.get('question', {})
+    if (question.get('category') or '').upper() != 'SHORT_ANSWER':
+        return qc
+    try:
+        messages = prompts.get_short_answer_refinement_prompt(
+            question.get('skillId', ''),
+            learning_objectives,
+            {
+                'content': question.get('content', ''),
+                'rubric': question.get('rubric'),
+            },
+        )
+        response = settings.call_openai_with_fallback(
+            model=settings.CHAT_COMPLETIONS_MODEL,
+            response_format=settings.CHAT_COMPLETIONS_RESPONSE_FORMAT,
+            messages=messages,
+        )
+        result = json.loads(
+            response.choices[0].message.content.replace('```json', '').replace('```', '')
+        )
+        refined = result.get('question') or {}
+        content = refined.get('content')
+        rubric = refined.get('rubric')
+        criteria = (rubric or {}).get('criteria')
+        threshold = (rubric or {}).get('passingThreshold')
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError('missing refined question content')
+        if not isinstance(criteria, list) or not 2 <= len(criteria) <= 4:
+            raise ValueError('rubric must contain 2-4 criteria')
+        names = [c.get('name') for c in criteria]
+        if any(not isinstance(c, dict) or not c.get('name') or not c.get('description')
+               or not isinstance(c.get('points'), int) or c['points'] <= 0 for c in criteria):
+            raise ValueError('invalid rubric criterion')
+        if len(set(names)) != len(names) or not isinstance(threshold, (int, float)) or not 0 <= threshold <= 1:
+            raise ValueError('invalid rubric threshold or criterion names')
+        updated = dict(qc)
+        updated['question'] = dict(question)
+        updated['question']['content'] = content.strip()
+        updated['question']['rubric'] = rubric
+        return updated
+    except Exception as e:
+        print(f"[short-answer refinement] keeping original: {type(e).__name__}: {e}")
+        return qc
+
+
 def process_concept(sectionId, node, lesson, concept, difficulty_level, difficulty_level_uri, skills, learning_objectives, number_questions_per_concept, question_types, customized_difficulty, customized_prompt_instructions, assessment_type="placement", prompt_fn=None, coding_languages=None):
     # Build atom content from concept atoms.
     atom_content = ""
@@ -1350,6 +1397,11 @@ def process_concept(sectionId, node, lesson, concept, difficulty_level, difficul
 
         question_skill = qc['question'].get('skillId', '')
         question_category = (qc['question'].get('category') or '').upper()
+
+        # Give free-form questions a dedicated alignment pass before the normal
+        # validation/evaluation pipeline. Other categories are untouched.
+        if question_category == 'SHORT_ANSWER':
+            qc = refine_short_answer_question(qc, learning_objectives)
 
         print(f"  Question {i+1}: skillId='{question_skill}' (Expected one of: {skills})")
 
