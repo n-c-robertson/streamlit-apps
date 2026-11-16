@@ -332,16 +332,21 @@ def normalize_category(category, has_coding=False, has_rubric=False, choices_cor
       1. If the question carries coding fields (codingDetails + testCases) the
          category is CODING — period, even if the label is a valid-but-wrong
          enum like SINGLE_CHOICE.
-      2. Else if it carries a rubric, the category is SHORT_ANSWER.
-      3. Else if the label is a valid enum (case-insensitive), return it UPPERCASED.
-      4. Else infer from the choices structure (>1 correct -> MULTIPLE_CHOICE,
+      2. Else if the explicit category is CONVERSATIONAL, preserve it. A
+         conversational question also requires a rubric, so the rubric alone
+         cannot distinguish it from SHORT_ANSWER.
+      3. Else if it carries a rubric, the category is SHORT_ANSWER.
+      4. Else if the label is a valid enum (case-insensitive), return it UPPERCASED.
+      5. Else infer from the choices structure (>1 correct -> MULTIPLE_CHOICE,
          else SINGLE_CHOICE).
-      5. Else None (hard error — nothing to recover from).
+      6. Else None (hard error — nothing to recover from).
 
     Always returns an uppercase enum string when it returns a string.
     """
     if has_coding:
         return CODING_CATEGORY
+    if isinstance(category, str) and category.strip().upper() == "CONVERSATIONAL":
+        return "CONVERSATIONAL"
     if has_rubric:
         return "SHORT_ANSWER"
     if isinstance(category, str) and category.strip().upper() in VALID_QUESTION_CATEGORIES:
