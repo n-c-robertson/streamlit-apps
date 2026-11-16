@@ -1030,6 +1030,7 @@ def process_question_group(question_tuple, group):
         # read it from the first row rather than extending the groupby tuple.
         rubric_str = group['rubric'].iloc[0] if 'rubric' in group.columns else None
         is_short_answer = (str(category).strip().upper() == "SHORT_ANSWER")
+        is_conversational = (str(category).strip().upper() == "CONVERSATIONAL")
         is_coding = (str(category).strip().upper() == "CODING")
 
         if is_coding:
@@ -1116,16 +1117,25 @@ def process_question_group(question_tuple, group):
                 'sourceCategory': 'UDACITY'
             }
 
-            if is_short_answer:
+            if is_short_answer or is_conversational:
                 rubric = _parse_rubric(rubric_str)
                 if rubric is None:
-                    raise Exception("SHORT_ANSWER questions require a rubric (CSV 'rubric' column is empty)")
+                    raise Exception(f"{category} questions require a rubric (CSV 'rubric' column is empty)")
                 rubric, rerr = _validate_rubric(rubric)
                 if rerr:
                     raise Exception(f"Invalid rubric: {rerr}")
                 question_input['rubric'] = rubric
-                print(f"SHORT_ANSWER: rubric with {len(rubric.get('criteria', []))} criteria, threshold={rubric.get('passingThreshold')}")
-            # Non-SHORT_ANSWER: never send rubric (resolver forbids it).
+                print(f"{category}: rubric with {len(rubric.get('criteria', []))} criteria, threshold={rubric.get('passingThreshold')}")
+            if is_conversational:
+                config_str = group['conversationalConfig'].iloc[0] if 'conversationalConfig' in group.columns else None
+                config = _parse_rubric(config_str)
+                agent_behavior = str((config or {}).get('agentBehavior') or '').strip()
+                if not agent_behavior:
+                    raise Exception("CONVERSATIONAL questions require conversationalConfig.agentBehavior")
+                if len(agent_behavior) > 5000:
+                    raise Exception("CONVERSATIONAL conversationalConfig.agentBehavior exceeds 5,000 characters")
+                question_input['conversationalConfig'] = {'agentBehavior': agent_behavior}
+            # Other categories must never send rubric or conversationalConfig.
             create_question_mutation = CREATE_QUESTION_MUTATION
 
         question_variables = {"input": question_input}
@@ -1188,7 +1198,6 @@ def process_question_group(question_tuple, group):
     
     # Now, process choices for this question. SHORT_ANSWER, CONVERSATIONAL,
     # and CODING have no choices — skip.
-    is_conversational = (str(category).strip().upper() == "CONVERSATIONAL")
     if question_id is not None and not is_short_answer and not is_conversational and not is_coding:
         with concurrent.futures.ThreadPoolExecutor() as choice_executor:
             futures = {

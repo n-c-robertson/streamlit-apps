@@ -1428,6 +1428,26 @@ def process_concept(sectionId, node, lesson, concept, difficulty_level, difficul
         question_category = normalized_category
         qc['question']['category'] = normalized_category
 
+        # CONVERSATIONAL-specific shape validation. The API requires both a
+        # rubric and conversationalConfig for this category.
+        if question_category == 'CONVERSATIONAL':
+            rubric = qc['question'].get('rubric')
+            config = qc['question'].get('conversationalConfig')
+            validated_rubric, rubric_error = _validate_rubric(rubric)
+            if rubric_error:
+                print(f"  Question {i+1}: REJECTED - CONVERSATIONAL question has invalid rubric: {rubric_error}")
+                continue
+            if not isinstance(config, dict) or not str(config.get('agentBehavior') or '').strip():
+                print(f"  Question {i+1}: REJECTED - CONVERSATIONAL question requires a non-empty conversationalConfig.agentBehavior")
+                continue
+            if len(str(config['agentBehavior'])) > 5000:
+                print(f"  Question {i+1}: REJECTED - conversationalConfig.agentBehavior exceeds 5,000 characters")
+                continue
+            qc['question']['rubric'] = validated_rubric
+            qc['question']['conversationalConfig'] = {
+                'agentBehavior': str(config['agentBehavior']).strip(),
+            }
+
         # CODING-specific shape validation. CODING questions carry
         # codingDetails + testCases instead of choices; reject malformed ones
         # so they never reach the upload (which would 400 the whole mutation).
@@ -1969,11 +1989,12 @@ def json_to_dataframe(section_content_definitions):
             if not question_skill_uri and question_skill_name:
                 print(f"  WARNING: No URI mapping found for skill '{question_skill_name}'")
 
-            # ponytail: SHORT_ANSWER has no choices — emit one row with empty
-            # choice fields and the rubric. CODING also has no choices — emit one
-            # row with empty choice fields plus the coding_* columns and test_cases
-            # JSON. Other categories emit one row per choice as before.
+            # SHORT_ANSWER and CONVERSATIONAL have no choices — emit one row
+            # with empty choice fields and the rubric. CONVERSATIONAL also
+            # carries conversationalConfig. CODING likewise emits one row with
+            # its coding_* columns and test_cases JSON.
             rubric = question.get('rubric')
+            conversational_config = question.get('conversationalConfig')
             if not choices:
                 coding_details = question.get('codingDetails') if (question.get('category') or '').upper() == CODING_CATEGORY else None
                 test_cases = question.get('testCases') if (question.get('category') or '').upper() == CODING_CATEGORY else None
@@ -1989,6 +2010,7 @@ def json_to_dataframe(section_content_definitions):
                     'sourceCategory': question.get('sourceCategory'),
                     'source': question.get('source'),
                     'rubric': rubric,
+                    'conversationalConfig': conversational_config,
                     'coding_language': (coding_details or {}).get('language'),
                     'starter_code': (coding_details or {}).get('starterCode'),
                     'solution_code': (coding_details or {}).get('solutionCode'),
@@ -2023,6 +2045,7 @@ def json_to_dataframe(section_content_definitions):
                     'sourceCategory': question.get('sourceCategory'),
                     'source': question.get('source'),
                     'rubric': rubric,
+                    'conversationalConfig': None,
                     'coding_language': None,
                     'starter_code': None,
                     'solution_code': None,
