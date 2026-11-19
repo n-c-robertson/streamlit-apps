@@ -241,7 +241,7 @@ def main():
             QUESTION_TYPES = st.multiselect(
             'Question Types',
             ['MULTIPLE_CHOICE', 'SINGLE_CHOICE', 'SHORT_ANSWER', 'CONVERSATIONAL', 'CODING'],
-            default=['MULTIPLE_CHOICE', 'SINGLE_CHOICE', 'SHORT_ANSWER', 'CODING'],
+            default=['MULTIPLE_CHOICE', 'SINGLE_CHOICE', 'SHORT_ANSWER', 'CONVERSATIONAL', 'CODING'],
             help="Select the types of questions you want to generate. SINGLE/MULTIPLE CHOICE produce answer choices; SHORT_ANSWER produces an LLM-graded rubric (no choices); CONVERSATIONAL produces an open-ended question for spoken dialogue (no choices); CODING produces a code question (starter code + solution + test cases, no choices)."
         )
 
